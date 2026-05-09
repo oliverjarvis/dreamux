@@ -107,8 +107,10 @@ final class WorkspaceSession {
         guard tabSessions[tab.id] == nil else { return }
         let session = TabSession(
             cwd: workspace.workingDirectory,
-            onBell: { [weak self, tabId = tab.id] in
-                Task { @MainActor in self?.handleBell(tabId: tabId) }
+            onActivity: { [weak self, tabId = tab.id] message in
+                Task { @MainActor in
+                    self?.handleActivity(tabId: tabId, message: message)
+                }
             }
         )
         tabSessions[tab.id] = session
@@ -168,7 +170,7 @@ final class WorkspaceSession {
         tabSessions[tab.id]?.hasUnread = false
     }
 
-    fileprivate func handleBell(tabId: TabID) {
+    fileprivate func handleActivity(tabId: TabID, message: String?) {
         guard let tab = tabSessions[tabId] else { return }
 
         let activePaneTab = controller.focusedPaneId.flatMap { controller.selectedTab(inPane: $0) }
@@ -180,7 +182,8 @@ final class WorkspaceSession {
         NotificationManager.shared.notifyActivity(
             workspaceName: workspace.name,
             tabId: tab.id,
-            tabTitle: tab.title
+            tabTitle: tab.title,
+            message: message
         )
     }
 }

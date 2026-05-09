@@ -50,7 +50,12 @@ final class NotificationManager: NSObject {
         }
     }
 
-    func notifyActivity(workspaceName: String, tabId: UUID, tabTitle: String) {
+    func notifyActivity(
+        workspaceName: String,
+        tabId: UUID,
+        tabTitle: String,
+        message: String? = nil
+    ) {
         let now = Date()
         if let last = lastNotification[tabId], now.timeIntervalSince(last) < debounceInterval {
             return
@@ -59,10 +64,17 @@ final class NotificationManager: NSObject {
 
         let content = UNMutableNotificationContent()
         content.title = workspaceName
+
         let trimmedTitle = tabTitle.trimmingCharacters(in: .whitespaces)
-        content.body = trimmedTitle.isEmpty
-            ? "Agent activity in shell"
-            : "Agent activity in \(trimmedTitle)"
+        let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedMessage, !trimmedMessage.isEmpty {
+            content.subtitle = trimmedTitle.isEmpty ? "shell" : trimmedTitle
+            content.body = trimmedMessage
+        } else {
+            content.body = trimmedTitle.isEmpty
+                ? "Agent activity in shell"
+                : "Agent activity in \(trimmedTitle)"
+        }
         content.sound = .default
         content.interruptionLevel = .timeSensitive
 

@@ -23,16 +23,16 @@ final class PTYShellSession: @unchecked Sendable {
     private let ioQueue = DispatchQueue(label: "com.clayspace.pty.io", qos: .userInitiated)
     private let cwd: String?
     private let extraEnv: [String: String]
-    private let onBell: (@Sendable () -> Void)?
+    private let onActivity: (@Sendable (String?) -> Void)?
 
     init(
         cwd: String? = nil,
         extraEnv: [String: String] = [:],
-        onBell: (@Sendable () -> Void)? = nil
+        onActivity: (@Sendable (String?) -> Void)? = nil
     ) {
         self.cwd = cwd
         self.extraEnv = extraEnv
-        self.onBell = onBell
+        self.onActivity = onActivity
 
         // Capture into a holder so the closures can refer to the eventual
         // `self` without a chicken-and-egg with `terminalSession`.
@@ -152,7 +152,7 @@ final class PTYShellSession: @unchecked Sendable {
     private func startReader(fd: Int32) {
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: ioQueue)
         let session = terminalSession
-        let bellHandler = onBell
+        let activityHandler = onActivity
         source.setEventHandler { [weak self] in
             var buffer = [UInt8](repeating: 0, count: 8192)
             let n = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
@@ -160,11 +160,14 @@ final class PTYShellSession: @unchecked Sendable {
             }
             if n > 0 {
                 session.receive(Data(bytes: buffer, count: n))
-                // BEL (0x07) is the universal "I want your attention" signal
-                // from CLI agents — ring once per chunk so a flurry of bells
-                // collapses into a single host-side notification.
-                if buffer.prefix(n).contains(0x07) {
-                    bellHandler?()
+                // Extract attention signals from this chunk: a plain BEL
+                // (`\a`, 0x07) maps to a generic ping; an iTerm2-style
+                // notification (`ESC ] 9 ; <body> BEL`) or an rxvt-style
+                // (`ESC ] 777 ; notify ; <title> ; <body> BEL`) carries an
+                // actual message that we surface in the notification.
+                let signals = Self.extractActivitySignals(buffer.prefix(n))
+                for message in signals {
+                    activityHandler?(message)
                 }
             } else if n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR) {
                 self?.handleEOF()
@@ -232,6 +235,83 @@ final class PTYShellSession: @unchecked Sendable {
 
         source?.cancel()
         if fd >= 0 { close(fd) }
+    }
+
+    /// Pulls attention signals out of a chunk of bytes. Returns one entry
+    /// per BEL/OSC terminator; the value is the text body if the BEL was
+    /// the tail of an iTerm2 (`OSC 9`) or rxvt (`OSC 777 ; notify`)
+    /// notification, otherwise `nil`.
+    static func extractActivitySignals(_ data: ArraySlice<UInt8>) -> [String?] {
+        var signals: [String?] = []
+        var i = data.startIndex
+        while i < data.endIndex {
+            let byte = data[i]
+
+            // OSC start: ESC ]
+            if byte == 0x1B,
+               i + 1 < data.endIndex,
+               data[i + 1] == 0x5D {
+                let bodyStart = i + 2
+                var j = bodyStart
+                var terminatorLength = 0
+                while j < data.endIndex {
+                    if data[j] == 0x07 {
+                        terminatorLength = 1
+                        break
+                    }
+                    // ESC \ (ST) terminator
+                    if data[j] == 0x1B,
+                       j + 1 < data.endIndex,
+                       data[j + 1] == 0x5C {
+                        terminatorLength = 2
+                        break
+                    }
+                    j += 1
+                }
+                guard terminatorLength > 0 else { break } // partial OSC; bail
+
+                let payload = Array(data[bodyStart..<j])
+                let parts = Self.splitSemicolons(payload)
+                if parts.first == "9", parts.count >= 2 {
+                    signals.append(parts[1])
+                } else if parts.first == "777",
+                          parts.count >= 4,
+                          parts[1] == "notify" {
+                    signals.append("\(parts[2]): \(parts[3])")
+                } else if terminatorLength == 1 {
+                    // Some other OSC code that ended on BEL — still counts
+                    // as a generic ping so the badge lights up.
+                    signals.append(nil)
+                }
+                i = j + terminatorLength
+                continue
+            }
+
+            // Bare BEL — generic ping with no payload
+            if byte == 0x07 {
+                signals.append(nil)
+                i += 1
+                continue
+            }
+
+            i += 1
+        }
+        return signals
+    }
+
+    private static func splitSemicolons(_ bytes: [UInt8]) -> [String] {
+        var parts: [String] = []
+        var current: [UInt8] = []
+        for b in bytes {
+            if b == 0x3B { // ';'
+                parts.append(String(bytes: current, encoding: .utf8) ?? "")
+                current.removeAll(keepingCapacity: true)
+            } else {
+                current.append(b)
+            }
+        }
+        parts.append(String(bytes: current, encoding: .utf8) ?? "")
+        return parts
     }
 }
 
