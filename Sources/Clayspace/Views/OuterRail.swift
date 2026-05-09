@@ -12,14 +12,22 @@ struct OuterRail: View {
     static let maxWidth: CGFloat = 220
     static let minWidth: CGFloat = 56
 
+    /// Layout decisions (column count + label visibility) read from this
+    /// instead of the live `width`. It updates on drag-end so the rail
+    /// resizes smoothly with the cursor without the inner grid reflowing
+    /// every time a column-count or label-visibility threshold is crossed
+    /// mid-drag.
+    @State private var layoutWidth: CGFloat = OuterRail.collapsedWidth
+
     var body: some View {
         ZStack(alignment: .trailing) {
             content
                 .frame(maxHeight: .infinity, alignment: .top)
                 .background(.regularMaterial)
 
-            ResizeHandle(width: $width)
+            ResizeHandle(width: $width, onCommit: commitLayout)
         }
+        .onAppear { layoutWidth = width }
     }
 
     private var content: some View {
@@ -29,7 +37,7 @@ struct OuterRail: View {
                     SectionTile(
                         section: section,
                         isActive: section == selection,
-                        showsLabel: width >= Self.collapsedWidth + 28
+                        showsLabel: layoutWidth >= 100
                     )
                     .onTapGesture { selection = section }
                 }
@@ -40,15 +48,25 @@ struct OuterRail: View {
     }
 
     private var gridColumns: [GridItem] {
-        // 1 column up to ~96, 2 columns up to ~160, 3 columns above.
+        // Thresholds chosen so each column zone actually fits a 44pt tile
+        // plus spacing/padding without clipping:
+        //   1 col: needs ≥ 64pt rail
+        //   2 col: needs ≥ 44*2 + 8 + 20 = 116pt
+        //   3 col: needs ≥ 44*3 + 8*2 + 20 = 168pt
         let count: Int
-        if width >= 160 { count = 3 }
-        else if width >= 96 { count = 2 }
+        if layoutWidth >= 168 { count = 3 }
+        else if layoutWidth >= 116 { count = 2 }
         else { count = 1 }
         return Array(
             repeating: GridItem(.flexible(minimum: 40, maximum: 80), spacing: 8, alignment: .top),
             count: count
         )
+    }
+
+    private func commitLayout() {
+        withAnimation(.smooth(duration: 0.18)) {
+            layoutWidth = width
+        }
     }
 }
 
@@ -101,6 +119,7 @@ private struct SectionTile: View {
 /// and produces jittery, oscillating drags.
 private struct ResizeHandle: View {
     @Binding var width: CGFloat
+    var onCommit: () -> Void
 
     @State private var dragStartX: CGFloat?
     @State private var dragStartWidth: CGFloat?
@@ -133,6 +152,7 @@ private struct ResizeHandle: View {
                     .onEnded { _ in
                         dragStartX = nil
                         dragStartWidth = nil
+                        onCommit()
                     }
             )
     }
