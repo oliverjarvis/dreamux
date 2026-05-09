@@ -63,7 +63,27 @@ final class PTYShellSession: @unchecked Sendable {
         let argv = [shellPath, "-l"]
 
         var env = ProcessInfo.processInfo.environment
-        env["TERM"] = "xterm-ghostty"
+        // Ghostty's `xterm-ghostty` terminfo lives inside Ghostty.app's
+        // bundled Resources, not on the system path. Without it the shell
+        // can't look up keymap capabilities (kbs / Backspace, cursor keys,
+        // etc.) and characters get inserted as literal bytes. Point the
+        // child at Ghostty.app's terminfo if we can find it; otherwise
+        // fall back to xterm-256color so the shell still has a real entry.
+        let terminfoLocations = [
+            "/Applications/Ghostty.app/Contents/Resources/terminfo",
+            "\(NSHomeDirectory())/Applications/Ghostty.app/Contents/Resources/terminfo",
+        ]
+        if let ghosttyTerminfo = terminfoLocations.first(where: {
+            FileManager.default.fileExists(atPath: $0)
+        }) {
+            env["TERM"] = "xterm-ghostty"
+            let existingDirs = env["TERMINFO_DIRS"]
+            env["TERMINFO_DIRS"] = [ghosttyTerminfo, existingDirs, "/usr/share/terminfo"]
+                .compactMap { $0 }
+                .joined(separator: ":")
+        } else {
+            env["TERM"] = "xterm-256color"
+        }
         env["COLORTERM"] = "truecolor"
         env["TERM_PROGRAM"] = "Clayspace"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
