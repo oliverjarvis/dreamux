@@ -299,14 +299,28 @@ final class PTYShellSession: @unchecked Sendable {
 
                 let payload = Array(data[bodyStart..<j])
                 let parts = Self.splitSemicolons(payload)
-                if parts.first == "9", parts.count == 2 {
-                    // Plain iTerm2 notification: `OSC 9 ; <body> BEL`.
-                    // The multi-arg form (e.g. `OSC 9 ; 4 ; <state> ;
-                    // <progress>` for ConEmu progress bars, used by
-                    // Claude Code, npm, etc.) is *not* a notification —
-                    // ignore it entirely so we don't fire a banner with
-                    // body "4" when an agent updates progress.
-                    signals.append(parts[1])
+                if parts.first == "9", parts.count >= 2 {
+                    // OSC 9 has two flavours we care about:
+                    //   1. iTerm2 notification: `OSC 9 ; <body> BEL`.
+                    //   2. ConEmu progress:     `OSC 9 ; <id> ; …`
+                    //                           where <id> is a small
+                    //                           integer (1, 2, 3, 4, …)
+                    //                           and the rest are
+                    //                           progress params.
+                    // Disambiguate by looking at the *first* parameter:
+                    // if it's purely numeric and there are extra
+                    // semicolon-separated args, it's a sub-protocol —
+                    // ignore. Otherwise rejoin all params after the OSC
+                    // code as the body, so legitimate notifications
+                    // with semicolons in the message don't get clipped.
+                    let first = parts[1]
+                    let isNumericSubcommand = parts.count > 2
+                        && !first.isEmpty
+                        && first.allSatisfy { $0.isASCII && $0.isNumber }
+                    if !isNumericSubcommand {
+                        let body = parts.dropFirst().joined(separator: ";")
+                        signals.append(body)
+                    }
                 } else if parts.first == "777",
                           parts.count >= 4,
                           parts[1] == "notify" {

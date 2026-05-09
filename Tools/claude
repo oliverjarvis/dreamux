@@ -63,15 +63,15 @@ fi
 
 # Build inline hooks JSON.
 #
-# We only wire `Notification`, not `Stop`. Stop fires at the end of every
-# assistant turn — including Ctrl+C interrupts — which makes for very
-# noisy notifications. Notification is the event Claude Code itself
-# raises when it actually wants the user's attention (permission
-# requests, idle-waiting), which is what the user actually wants pinged.
+# We wire both Stop and Notification. Stop fires at the end of every
+# assistant turn — including on Ctrl+C — but `clayspace-hook stop`
+# inspects the transcript and skips empty / interrupted turns, so only
+# real task completions ping. Notification fires when the agent asks
+# for permission or idles waiting on the user.
 #
-# The path is wrapped in escaped quotes so it tolerates spaces in the
-# bundle path. Single-quoted segments stay literal; "$HOOK" expands the
-# path between escaped JSON quotes.
-SETTINGS_JSON='{"hooks":{"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" notify"}]}]}}'
+# The hook path is wrapped in escaped quotes so it tolerates spaces in
+# the bundle path. Single-quoted segments stay literal; "$HOOK" expands
+# the path between escaped JSON quotes.
+SETTINGS_JSON='{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" stop"}]}],"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" notify"}]}]}}'
 
 exec "$REAL_CLAUDE" --settings "$SETTINGS_JSON" "$@"

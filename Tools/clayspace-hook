@@ -1,60 +1,171 @@
-#!/bin/sh
-# clayspace-hook — bridge between a coding agent's hook system and
-# Clayspace's notification pipeline. Bundled inside Clayspace.app and
-# prepended to the spawned shell's PATH, so an agent (Claude Code,
-# aider, …) can invoke us by name.
-#
-# Today we just emit an iTerm2-style OSC 9 notification on stdout —
-# Clayspace's PTY reader picks it up and routes it to the right
-# workspace/tab automatically. Future versions will also push a
-# structured payload over a Unix socket so we can include subtitles,
-# transcript snippets, deduplicate across reloads, etc.
-#
-# Usage:
-#   clayspace-hook stop                           # "Task complete"
-#   clayspace-hook notify [message]               # message or $CLAUDE_NOTIFICATION_MESSAGE
-#   clayspace-hook idle [message]                 # "Waiting on you"
-#   clayspace-hook <free text>                    # raw notification
-#
-# Wire it into Claude Code:
-#   claude config add-hook Stop          'clayspace-hook stop'
-#   claude config add-hook Notification  'clayspace-hook notify'
+#!/usr/bin/env python3
+"""clayspace-hook — bridge a coding agent's hook events into Clayspace's
+notification pipeline.
 
-set -eu
+Bundled inside Clayspace.app at Resources/bin/clayspace-hook and
+prepended to the spawned shell's PATH (via ZDOTDIR), so agents like
+Claude Code can call it directly from their hook config — no install
+step on the user's machine.
 
-emit() {
-    # OSC 9 ; <body> BEL — Clayspace's PTY parser pulls the body out
-    # and uses it as the notification's main text.
-    #
-    # Prefer /dev/tty over stdout. Coding agents (Claude Code, etc.)
-    # commonly capture hook stdout to surface output in their UI, which
-    # would swallow the OSC sequence. /dev/tty resolves to the
-    # controlling terminal of this process — i.e. our Clayspace PTY —
-    # bypassing any pipe the agent might have set up.
-    if [ -w /dev/tty ]; then
-        printf '\033]9;%s\a' "$1" > /dev/tty 2>/dev/null && return
-    fi
-    printf '\033]9;%s\a' "$1"
-}
+Subcommands:
+  stop       — fired on assistant-turn completion. Reads the transcript
+               path from stdin (Claude Code passes it as JSON) and only
+               emits a notification if the last assistant message is
+               substantive — i.e., not empty and not the
+               "[Request interrupted by user]" placeholder. This keeps
+               Ctrl+C-style cancellations silent.
+  notify     — fired when the agent wants user attention. Uses arg 2 if
+               given, else $CLAUDE_NOTIFICATION_MESSAGE, else a default.
+  idle       — explicit "agent is waiting" hook variant.
+  <free text> — emits the joined args as the notification body.
 
-case "${1:-}" in
-    stop)
-        msg="${2:-Task complete}"
-        emit "$msg"
-        ;;
-    notify)
-        msg="${2:-${CLAUDE_NOTIFICATION_MESSAGE:-Agent is waiting on you}}"
-        emit "$msg"
-        ;;
-    idle)
-        msg="${2:-Agent is waiting on you}"
-        emit "$msg"
-        ;;
-    "")
-        emit "Agent activity"
-        ;;
-    *)
-        # First-arg-as-message form: `clayspace-hook "Build done"`
-        emit "$*"
-        ;;
-esac
+The actual transport is OSC 9 (ESC ] 9 ; <body> BEL), preferring
+/dev/tty over stdout because agents commonly capture hook stdout for
+their own UI which would otherwise eat the sequence. Clayspace's PTY
+parser pulls the body out and routes it to the right tab.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from typing import Optional
+
+
+def emit(message: str) -> None:
+    """Write `OSC 9 ; message BEL` to /dev/tty (the controlling
+    terminal of this hook subprocess) so it reaches Clayspace's PTY
+    parser even when the agent has captured stdout."""
+    seq = f"\033]9;{message}\a"
+    try:
+        with open("/dev/tty", "w") as tty:
+            tty.write(seq)
+            tty.flush()
+            return
+    except OSError:
+        pass
+    sys.stdout.write(seq)
+    sys.stdout.flush()
+
+
+def read_stdin_json() -> Optional[dict]:
+    if sys.stdin.isatty():
+        return None
+    try:
+        raw = sys.stdin.read()
+    except Exception:
+        return None
+    if not raw.strip():
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def last_assistant_text(transcript_path: str) -> str:
+    """Walk the JSONL transcript and return the cleaned text content of
+    the most recent assistant turn (or '' if none)."""
+    last = None
+    try:
+        with open(transcript_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if entry.get("type") == "assistant":
+                    last = entry
+    except Exception:
+        return ""
+
+    if not last:
+        return ""
+
+    msg = last.get("message", last)
+    content = msg.get("content", "")
+    if isinstance(content, list):
+        # Claude Code transcripts use a list of {type, text} blocks.
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text") or "")
+                elif "text" in block and isinstance(block["text"], str):
+                    parts.append(block["text"])
+        text = "\n".join(p for p in parts if p)
+    elif isinstance(content, str):
+        text = content
+    else:
+        text = ""
+
+    return text.strip()
+
+
+def stop_handler() -> None:
+    payload = read_stdin_json()
+    if payload is None:
+        # No JSON input — be conservative and skip rather than spamming.
+        return
+
+    transcript_path = payload.get("transcript_path") or ""
+    if not transcript_path or not os.path.exists(transcript_path):
+        return
+
+    text = last_assistant_text(transcript_path)
+    if not text:
+        return
+    # Common interrupt markers — skip so Ctrl+C bailouts don't ping.
+    lowered = text.lower()
+    interrupt_markers = (
+        "[request interrupted by user]",
+        "[interrupted by user]",
+    )
+    if any(marker in lowered for marker in interrupt_markers):
+        return
+
+    # Trim long completions so the banner stays readable.
+    if len(text) > 200:
+        text = text[:200].rstrip() + "…"
+
+    # Collapse newlines — banner is single-line.
+    text = " ".join(text.split())
+    if not text:
+        return
+
+    emit(text)
+
+
+def notify_handler() -> None:
+    message = (
+        sys.argv[2]
+        if len(sys.argv) > 2
+        else os.environ.get("CLAUDE_NOTIFICATION_MESSAGE", "Agent is waiting on you")
+    )
+    if not message:
+        return
+    emit(message)
+
+
+def idle_handler() -> None:
+    message = sys.argv[2] if len(sys.argv) > 2 else "Agent is waiting on you"
+    emit(message)
+
+
+def main() -> None:
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    if cmd == "stop":
+        stop_handler()
+    elif cmd == "notify":
+        notify_handler()
+    elif cmd == "idle":
+        idle_handler()
+    elif cmd:
+        emit(" ".join(sys.argv[1:]))
+    else:
+        emit("Agent activity")
+
+
+if __name__ == "__main__":
+    main()
