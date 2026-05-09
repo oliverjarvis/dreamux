@@ -46,6 +46,17 @@ for tool in clayspace-hook claude; do
     chmod +x "$APP/Contents/Resources/bin/$tool"
 done
 
+# Bundle our ZDOTDIR shim. PTYShellSession sets ZDOTDIR to this folder
+# when spawning zsh so the user's normal rc files load *first* (via
+# `source $HOME/...`) and we re-prepend Clayspace/bin afterward — the
+# only reliable way to keep our shims ahead of Homebrew/nvm/asdf.
+mkdir -p "$APP/Contents/Resources/zdotdir"
+for f in .zshenv .zprofile .zshrc .zlogin; do
+    if [[ -e "$ROOT/Tools/zdotdir/$f" ]]; then
+        cp "$ROOT/Tools/zdotdir/$f" "$APP/Contents/Resources/zdotdir/$f"
+    fi
+done
+
 # Ad-hoc sign so launchd is willing to run it.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 

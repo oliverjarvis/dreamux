@@ -92,11 +92,26 @@ final class PTYShellSession: @unchecked Sendable {
         // agents wire it into their hook config (e.g. Claude Code's
         // Stop / Notification hooks) to push structured notifications
         // back to the app.
-        if let bin = Bundle.main.resourceURL?
+        let resourceURL = Bundle.main.resourceURL
+        if let bin = resourceURL?
             .appendingPathComponent("bin", isDirectory: true).path,
            FileManager.default.fileExists(atPath: bin) {
             let existing = env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin"
             env["PATH"] = "\(bin):\(existing)"
+            env["CLAYSPACE_BIN"] = bin
+        }
+
+        // Naive PATH prepend loses to Homebrew / nvm / asdf rc-file
+        // gymnastics. For zsh we point ZDOTDIR at a bundled rc set that
+        // sources the user's normal startup files and *then* re-prepends
+        // Clayspace's bin via a precmd hook, so our shims (`claude`)
+        // reliably resolve first.
+        let shellName = (shellPath as NSString).lastPathComponent
+        if shellName == "zsh",
+           let zdotdir = resourceURL?
+            .appendingPathComponent("zdotdir", isDirectory: true).path,
+           FileManager.default.fileExists(atPath: zdotdir) {
+            env["ZDOTDIR"] = zdotdir
         }
 
         for (k, v) in extraEnv { env[k] = v }
