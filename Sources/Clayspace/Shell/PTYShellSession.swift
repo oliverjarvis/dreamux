@@ -299,17 +299,22 @@ final class PTYShellSession: @unchecked Sendable {
 
                 let payload = Array(data[bodyStart..<j])
                 let parts = Self.splitSemicolons(payload)
-                if parts.first == "9", parts.count >= 2 {
+                if parts.first == "9", parts.count == 2 {
+                    // Plain iTerm2 notification: `OSC 9 ; <body> BEL`.
+                    // The multi-arg form (e.g. `OSC 9 ; 4 ; <state> ;
+                    // <progress>` for ConEmu progress bars, used by
+                    // Claude Code, npm, etc.) is *not* a notification —
+                    // ignore it entirely so we don't fire a banner with
+                    // body "4" when an agent updates progress.
                     signals.append(parts[1])
                 } else if parts.first == "777",
                           parts.count >= 4,
                           parts[1] == "notify" {
                     signals.append("\(parts[2]): \(parts[3])")
-                } else if terminatorLength == 1 {
-                    // Some other OSC code that ended on BEL — still counts
-                    // as a generic ping so the badge lights up.
-                    signals.append(nil)
                 }
+                // Any other OSC sub-protocol (titles, hyperlinks,
+                // shell-integration markers, …) is left alone — no
+                // signal at all.
                 i = j + terminatorLength
                 continue
             }
