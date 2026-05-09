@@ -44,6 +44,11 @@ struct TabBarView: View {
                             dropZoneAtEnd
                         }
                         .padding(.horizontal, TabBarMetrics.barPadding)
+                        // Stretch the row to fill the visible bar so the
+                        // flexible `dropZoneAtEnd` (`maxWidth: .infinity`)
+                        // absorbs the run-off after the last tab and
+                        // accepts append-to-end drops in that empty area.
+                        .frame(minWidth: containerGeo.size.width, alignment: .leading)
                         .background(
                             GeometryReader { contentGeo in
                                 Color.clear
@@ -150,9 +155,13 @@ struct TabBarView: View {
 
     @ViewBuilder
     private var dropZoneAtEnd: some View {
+        // Flexible width so this zone expands across all empty space after
+        // the last tab when the row is stretched (see HStack's minWidth).
+        // Drops anywhere in the trailing run-off resolve to "append to end".
         Rectangle()
             .fill(Color.clear)
-            .frame(width: 30, height: TabBarMetrics.tabHeight)
+            .frame(minWidth: 30, maxWidth: .infinity)
+            .frame(height: TabBarMetrics.tabHeight)
             .contentShape(Rectangle())
             .onDrop(of: [.text], delegate: TabDropDelegate(
                 targetIndex: pane.tabs.count,

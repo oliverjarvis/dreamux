@@ -10,7 +10,9 @@ struct WorkspaceSidebar: View {
                     workspace: workspace,
                     isActive: workspace.id == store.activeID,
                     onSelect: { store.activeID = workspace.id },
-                    onClose: { store.remove(workspace) }
+                    onClose: { store.remove(workspace) },
+                    onPickSymbol: { store.setIcon($0, for: workspace.id) },
+                    onPickTint: { store.setTint($0, for: workspace.id) }
                 )
             }
 
@@ -41,8 +43,11 @@ private struct WorkspaceButton: View {
     let isActive: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onPickSymbol: (String) -> Void
+    let onPickTint: (Color) -> Void
 
     @State private var isHovered = false
+    @State private var isPickerPresented = false
 
     var body: some View {
         Button(action: onSelect) {
@@ -71,7 +76,108 @@ private struct WorkspaceButton: View {
         .onHover { isHovered = $0 }
         .help(workspace.name)
         .contextMenu {
+            Button("Customize Icon…") { isPickerPresented = true }
+            Divider()
             Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
         }
+        .popover(isPresented: $isPickerPresented, arrowEdge: .trailing) {
+            IconPickerPopover(
+                selectedSymbol: workspace.symbol,
+                selectedTint: workspace.tint,
+                onPickSymbol: onPickSymbol,
+                onPickTint: onPickTint
+            )
+        }
+    }
+}
+
+private struct IconPickerPopover: View {
+    let selectedSymbol: String
+    let selectedTint: Color
+    let onPickSymbol: (String) -> Void
+    let onPickTint: (Color) -> Void
+
+    private static let symbols: [String] = [
+        "terminal.fill",
+        "house.fill",
+        "chevron.left.forwardslash.chevron.right",
+        "doc.text.magnifyingglass",
+        "circle.grid.3x3.fill",
+        "square.stack.3d.up.fill",
+        "globe",
+        "bolt.fill",
+        "leaf.fill",
+        "hammer.fill",
+        "wrench.and.screwdriver.fill",
+        "server.rack",
+        "cloud.fill",
+        "cpu.fill",
+        "externaldrive.fill",
+        "shippingbox.fill",
+        "graduationcap.fill",
+        "briefcase.fill",
+        "paintpalette.fill",
+        "gamecontroller.fill",
+        "music.note",
+        "flag.fill",
+        "star.fill",
+        "heart.fill"
+    ]
+
+    private static let tints: [Color] = [
+        .blue, .purple, .pink, .red, .orange, .yellow, .green, .teal, .indigo, .gray
+    ]
+
+    private let columns = Array(repeating: GridItem(.fixed(32), spacing: 8), count: 6)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Icon")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: columns, spacing: 8) {
+                ForEach(Self.symbols, id: \.self) { symbol in
+                    Button {
+                        onPickSymbol(symbol)
+                    } label: {
+                        Image(systemName: symbol)
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(symbol == selectedSymbol ? selectedTint.opacity(0.85) : Color.secondary.opacity(0.12))
+                            )
+                            .foregroundStyle(symbol == selectedSymbol ? Color.white : .primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+
+            Text("Tint")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                ForEach(Self.tints, id: \.self) { tint in
+                    Button {
+                        onPickTint(tint)
+                    } label: {
+                        Circle()
+                            .fill(tint)
+                            .frame(width: 22, height: 22)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Color.primary.opacity(tint == selectedTint ? 0.9 : 0), lineWidth: 2)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 260)
     }
 }

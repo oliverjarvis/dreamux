@@ -41,6 +41,16 @@ final class WorkspaceStore {
         activeID = workspace.id
     }
 
+    func setIcon(_ symbol: String, for workspaceID: UUID) {
+        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+        workspaces[index].symbol = symbol
+    }
+
+    func setTint(_ tint: Color, for workspaceID: UUID) {
+        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+        workspaces[index].tint = tint
+    }
+
     func remove(_ workspace: Workspace) {
         guard workspaces.count > 1 else { return }
         sessions[workspace.id]?.stop()
