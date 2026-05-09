@@ -121,28 +121,21 @@ struct HomeView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 4)
 
-                LazyVGrid(columns: gridColumns, spacing: 12) {
+                CenteredFlowLayout(spacing: 12, lineSpacing: 12) {
                     ForEach(store.projects) { project in
                         ProjectCard(
                             project: project,
                             onOpen: { openWindow(value: project.id) },
                             onDelete: { pendingDelete = project }
                         )
+                        .frame(width: 180)
                     }
                 }
+                .frame(maxWidth: .infinity)
             }
-            // Cap the grid width and center it in the window so cards
-            // don't sit pinned to the left edge with a wide blank gutter
-            // on the right when only a couple of projects exist.
-            .frame(maxWidth: 880)
-            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
-    }
-
-    private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 12, alignment: .top)]
     }
 
     // MARK: - Actions
@@ -203,7 +196,8 @@ private struct ProjectCard: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: 110, alignment: .topLeading)
             .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -226,6 +220,72 @@ private struct ProjectCard: View {
             Divider()
             Button("Move to Trash…", role: .destructive, action: onDelete)
         }
+    }
+}
+
+// MARK: - Centered flow layout
+
+/// Wraps subviews left-to-right, then centers each row horizontally.
+/// `LazyVGrid`'s adaptive columns always pack into the leading edge,
+/// leaving empty trailing columns when items don't fill the row —
+/// this layout instead measures each row and centers it.
+private struct CenteredFlowLayout: Layout {
+    var spacing: CGFloat = 12
+    var lineSpacing: CGFloat = 12
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let result = arrangement(in: width, subviews: subviews)
+        return CGSize(width: width.isFinite ? width : result.usedWidth, height: result.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrangement(in: bounds.width, subviews: subviews)
+        for (index, frame) in result.frames.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+
+    private func arrangement(in width: CGFloat, subviews: Subviews) -> (frames: [CGRect], height: CGFloat, usedWidth: CGFloat) {
+        guard !subviews.isEmpty else { return ([], 0, 0) }
+
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+
+        // Greedy pack into rows of indices.
+        var rows: [[Int]] = [[]]
+        var rowWidth: CGFloat = 0
+        for (i, size) in sizes.enumerated() {
+            let prefix = rows[rows.count - 1].isEmpty ? 0 : spacing
+            if rowWidth + prefix + size.width > width && !rows[rows.count - 1].isEmpty {
+                rows.append([])
+                rowWidth = 0
+            }
+            rows[rows.count - 1].append(i)
+            let nextPrefix = rows[rows.count - 1].count == 1 ? 0 : spacing
+            rowWidth += nextPrefix + size.width
+        }
+
+        var frames = [CGRect](repeating: .zero, count: subviews.count)
+        var y: CGFloat = 0
+        var usedWidth: CGFloat = 0
+
+        for row in rows {
+            let contentWidth = row.reduce(0) { $0 + sizes[$1].width } + CGFloat(max(0, row.count - 1)) * spacing
+            usedWidth = max(usedWidth, contentWidth)
+            let rowHeight = row.map { sizes[$0].height }.max() ?? 0
+            var x = max(0, (width - contentWidth) / 2)
+            for i in row {
+                frames[i] = CGRect(x: x, y: y, width: sizes[i].width, height: sizes[i].height)
+                x += sizes[i].width + spacing
+            }
+            y += rowHeight + lineSpacing
+        }
+
+        return (frames, max(0, y - lineSpacing), usedWidth)
     }
 }
 
