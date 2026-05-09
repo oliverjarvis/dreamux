@@ -94,9 +94,16 @@ private struct SectionTile: View {
 
 /// 6pt drag strip on the trailing edge. Updates `width` live as the user
 /// drags and flips the cursor to the horizontal-resize variant on hover.
+///
+/// The gesture runs in `.global` coordinate space (and we track the start
+/// X ourselves) because as the rail resizes, the handle moves with it —
+/// the default `.local` translation feeds back through the rail's frame
+/// and produces jittery, oscillating drags.
 private struct ResizeHandle: View {
     @Binding var width: CGFloat
-    @State private var dragOriginWidth: CGFloat?
+
+    @State private var dragStartX: CGFloat?
+    @State private var dragStartWidth: CGFloat?
 
     var body: some View {
         Rectangle()
@@ -111,15 +118,21 @@ private struct ResizeHandle: View {
                 }
             }
             .gesture(
-                DragGesture(minimumDistance: 0)
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
-                        let origin = dragOriginWidth ?? width
-                        if dragOriginWidth == nil { dragOriginWidth = origin }
-                        let proposed = origin + value.translation.width
+                        if dragStartX == nil {
+                            dragStartX = value.startLocation.x
+                            dragStartWidth = width
+                        }
+                        let startX = dragStartX ?? value.startLocation.x
+                        let baseWidth = dragStartWidth ?? width
+                        let delta = value.location.x - startX
+                        let proposed = baseWidth + delta
                         width = min(OuterRail.maxWidth, max(OuterRail.minWidth, proposed))
                     }
                     .onEnded { _ in
-                        dragOriginWidth = nil
+                        dragStartX = nil
+                        dragStartWidth = nil
                     }
             )
     }
