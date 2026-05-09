@@ -29,21 +29,21 @@ final class TabSession: Identifiable {
         // from receiving them. Mark them `ignore` so the events bubble up
         // to AppKit and fire our shortcuts (Cmd+T, Cmd+D, Cmd+W, …).
         let releaseGhosttyShortcuts: (inout TerminalConfiguration.Builder) -> Void = { builder in
-            // `unbind:` actually removes the binding so Ghostty's
-            // `keyIsBinding` returns false — letting the event flow up the
-            // responder chain to AppKit's menu. `=ignore` keeps the binding
-            // alive (as a no-op) and Ghostty still consumes the event,
-            // which is why Cmd+T was silently dropped before.
+            // Ghostty's keybind grammar is `<trigger>=<action>`. The
+            // `unbind` action removes the binding so `keyIsBinding`
+            // returns false — letting the event flow up the responder
+            // chain to AppKit's menu. `=ignore` keeps the binding alive
+            // as a no-op which still gets consumed.
             for key in ["t", "n", "d", "w", "q"] {
-                builder.withCustom("keybind", "unbind:super+\(key)")
-                builder.withCustom("keybind", "unbind:shift+super+\(key)")
-                builder.withCustom("keybind", "unbind:alt+super+\(key)")
-                builder.withCustom("keybind", "unbind:shift+alt+super+\(key)")
+                builder.withCustom("keybind", "super+\(key)=unbind")
+                builder.withCustom("keybind", "shift+super+\(key)=unbind")
+                builder.withCustom("keybind", "alt+super+\(key)=unbind")
+                builder.withCustom("keybind", "shift+alt+super+\(key)=unbind")
             }
-            builder.withCustom("keybind", "unbind:alt+super+left")
-            builder.withCustom("keybind", "unbind:alt+super+right")
-            builder.withCustom("keybind", "unbind:alt+super+up")
-            builder.withCustom("keybind", "unbind:alt+super+down")
+            builder.withCustom("keybind", "alt+super+left=unbind")
+            builder.withCustom("keybind", "alt+super+right=unbind")
+            builder.withCustom("keybind", "alt+super+up=unbind")
+            builder.withCustom("keybind", "alt+super+down=unbind")
         }
 
         let theme = TerminalTheme(
