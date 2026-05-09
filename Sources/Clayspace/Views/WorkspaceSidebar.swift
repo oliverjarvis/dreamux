@@ -115,33 +115,35 @@ private struct WorkspaceButton: View {
             Divider()
             Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
         }
-        // arrowEdge: .leading — arrow attaches to the leading edge of the
-        // popover, so the popover content extends to the *right* of the
-        // tile (into the terminal pane area). Trailing was rendering the
-        // popover to the left, where the outer rail's regularMaterial
-        // background painted over its leading content.
-        .popover(isPresented: $isPickerPresented, arrowEdge: .leading) {
-            IconPickerPopover(
+        // Sheet (not popover) — a popover anchored to a tile near the
+        // window's leading edge gets clipped by neighbouring rails. A
+        // sheet floats above the whole window, centered, with no
+        // hierarchy-clipping concerns.
+        .sheet(isPresented: $isPickerPresented) {
+            CustomizeWorkspaceSheet(
                 initialName: workspace.name,
                 selectedSymbol: workspace.symbol,
                 selectedTint: workspace.tint,
                 onRename: onRename,
                 onPickSymbol: onPickSymbol,
-                onPickTint: onPickTint
+                onPickTint: onPickTint,
+                onDismiss: { isPickerPresented = false }
             )
         }
     }
 }
 
-private struct IconPickerPopover: View {
+private struct CustomizeWorkspaceSheet: View {
     let initialName: String
     let selectedSymbol: String
     let selectedTint: Color
     let onRename: (String) -> Void
     let onPickSymbol: (String) -> Void
     let onPickTint: (Color) -> Void
+    let onDismiss: () -> Void
 
     @State private var name: String = ""
+    @FocusState private var nameFocused: Bool
 
     private static let symbols: [String] = [
         "terminal.fill",
@@ -174,69 +176,92 @@ private struct IconPickerPopover: View {
         .blue, .purple, .pink, .red, .orange, .yellow, .green, .teal, .indigo, .gray
     ]
 
-    private let columns = Array(repeating: GridItem(.fixed(32), spacing: 8), count: 6)
+    private let columns = Array(repeating: GridItem(.fixed(36), spacing: 10), count: 6)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Name")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Customize Workspace")
+                .font(.title3.weight(.semibold))
 
-            TextField("Feature name", text: $name)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(commitName)
-                .onChange(of: name) { _, _ in commitName() }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Name")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                TextField("Feature name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($nameFocused)
+                    .onSubmit { commitName(); onDismiss() }
+                    .onChange(of: name) { _, _ in commitName() }
+            }
 
             Divider()
 
-            Text("Icon")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Icon")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(Self.symbols, id: \.self) { symbol in
-                    Button {
-                        onPickSymbol(symbol)
-                    } label: {
-                        Image(systemName: symbol)
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(symbol == selectedSymbol ? selectedTint.opacity(0.85) : Color.secondary.opacity(0.12))
-                            )
-                            .foregroundStyle(symbol == selectedSymbol ? Color.white : .primary)
+                    LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(Self.symbols, id: \.self) { symbol in
+                        Button {
+                            onPickSymbol(symbol)
+                        } label: {
+                            Image(systemName: symbol)
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 36, height: 36)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(symbol == selectedSymbol ? selectedTint.opacity(0.85) : Color.secondary.opacity(0.12))
+                                )
+                                .foregroundStyle(symbol == selectedSymbol ? Color.white : .primary)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
 
             Divider()
 
-            Text("Tint")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tint")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
-                ForEach(Self.tints, id: \.self) { tint in
-                    Button {
-                        onPickTint(tint)
-                    } label: {
-                        Circle()
-                            .fill(tint)
-                            .frame(width: 22, height: 22)
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(Color.primary.opacity(tint == selectedTint ? 0.9 : 0), lineWidth: 2)
-                            )
+                HStack(spacing: 10) {
+                    ForEach(Self.tints, id: \.self) { tint in
+                        Button {
+                            onPickTint(tint)
+                        } label: {
+                            Circle()
+                                .fill(tint)
+                                .frame(width: 24, height: 24)
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(Color.primary.opacity(tint == selectedTint ? 0.9 : 0), lineWidth: 2)
+                                )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+            }
+
+            HStack {
+                Spacer()
+                Button("Done") {
+                    commitName()
+                    onDismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(14)
-        .frame(width: 260)
-        .onAppear { name = initialName }
+        .padding(20)
+        .frame(width: 380)
+        .onAppear {
+            name = initialName
+            nameFocused = true
+        }
     }
 
     private func commitName() {
