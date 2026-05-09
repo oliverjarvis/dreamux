@@ -7,6 +7,11 @@ final class WorkspaceStore {
     var workspaces: [Workspace]
     var activeID: UUID
 
+    /// All shells in this store default to running here — typically the
+    /// project's root directory, so opening a tab drops you straight into
+    /// the project's folder.
+    let defaultWorkingDirectory: String?
+
     /// Per-workspace session, kept alive for the lifetime of the workspace
     /// so the shell process and scrollback survive sidebar switches.
     private var sessions: [UUID: WorkspaceSession] = [:]
@@ -19,11 +24,15 @@ final class WorkspaceStore {
 
     var canReopenClosed: Bool { !closedStack.isEmpty }
 
-    init() {
+    init(defaultWorkingDirectory: String? = nil) {
+        self.defaultWorkingDirectory = defaultWorkingDirectory
         let initial = [
-            Workspace(name: "Home", symbol: "house.fill", tint: .blue),
-            Workspace(name: "Code", symbol: "chevron.left.forwardslash.chevron.right", tint: .purple),
-            Workspace(name: "Logs", symbol: "doc.text.magnifyingglass", tint: .orange),
+            Workspace(name: "Home", symbol: "house.fill", tint: .blue,
+                      workingDirectory: defaultWorkingDirectory),
+            Workspace(name: "Code", symbol: "chevron.left.forwardslash.chevron.right", tint: .purple,
+                      workingDirectory: defaultWorkingDirectory),
+            Workspace(name: "Logs", symbol: "doc.text.magnifyingglass", tint: .orange,
+                      workingDirectory: defaultWorkingDirectory),
         ]
         self.workspaces = initial
         self.activeID = initial[0].id
@@ -43,7 +52,8 @@ final class WorkspaceStore {
         let workspace = Workspace(
             name: "Workspace \(index + 1)",
             symbol: symbols[index % symbols.count],
-            tint: palette[index % palette.count]
+            tint: palette[index % palette.count],
+            workingDirectory: defaultWorkingDirectory
         )
         workspaces.append(workspace)
         activeID = workspace.id

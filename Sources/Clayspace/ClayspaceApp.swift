@@ -3,86 +3,176 @@ import Bonsplit
 
 @main
 struct ClayspaceApp: App {
-    @State private var store = WorkspaceStore()
+    @State private var projects = ProjectStore()
 
     var body: some Scene {
-        WindowGroup("Clayspace") {
-            ContentView(store: store)
-                .frame(minWidth: 720, minHeight: 480)
+        Window("Clayspace", id: "home") {
+            HomeView(store: projects)
         }
         .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("New Tab") {
-                    store.activeSession?.createTab()
-                }
-                .keyboardShortcut("t", modifiers: [.command])
+            HomeCommands()
+        }
 
-                Button("New Workspace") {
-                    store.addWorkspace()
-                }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
-
-                Button("Reopen Closed Workspace") {
-                    store.reopenClosedWorkspace()
-                }
-                .keyboardShortcut("t", modifiers: [.command, .shift, .option])
-                .disabled(!store.canReopenClosed)
-
-                Divider()
-
-                Button("Split Right") {
-                    store.activeSession?.splitFocused(.horizontal)
-                }
-                .keyboardShortcut("d", modifiers: [.command])
-
-                Button("Split Down") {
-                    store.activeSession?.splitFocused(.vertical)
-                }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
-
-                Divider()
-
-                Button("Close Tab") {
-                    store.activeSession?.closeFocusedTab()
-                }
-                .keyboardShortcut("w", modifiers: [.command])
-
-                Button("Close Workspace") {
-                    if let workspace = store.activeWorkspace {
-                        store.remove(workspace)
-                    }
-                }
-                .keyboardShortcut("w", modifiers: [.command, .shift])
-            }
-
-            CommandMenu("Navigate") {
-                Button("Focus Left Pane") { store.activeSession?.navigateFocus(.left) }
-                    .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
-                Button("Focus Right Pane") { store.activeSession?.navigateFocus(.right) }
-                    .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
-                Button("Focus Pane Above") { store.activeSession?.navigateFocus(.up) }
-                    .keyboardShortcut(.upArrow, modifiers: [.command, .option])
-                Button("Focus Pane Below") { store.activeSession?.navigateFocus(.down) }
-                    .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-
-                Divider()
-
-                ForEach(Array(store.workspaces.prefix(9).enumerated()), id: \.element.id) { index, workspace in
-                    Button("Workspace: \(workspace.name)") {
-                        store.activeID = workspace.id
-                    }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
-                }
-
-                Divider()
-
-                ForEach(0..<9, id: \.self) { index in
-                    Button("Tab \(index + 1)") {
-                        store.activeSession?.selectTab(at: index)
-                    }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
-                }
+        WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
+            if let projectID, let project = projects.project(id: projectID) {
+                ProjectWindow(project: project)
+                    .frame(minWidth: 720, minHeight: 480)
+            } else {
+                MissingProjectView(store: projects)
+                    .frame(minWidth: 480, minHeight: 320)
             }
         }
+        .commands {
+            ProjectCommands()
+        }
+    }
+}
+
+// MARK: - Missing project fallback
+
+private struct MissingProjectView: View {
+    let store: ProjectStore
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 36))
+                .foregroundStyle(.orange)
+            Text("Project unavailable").font(.headline)
+            Text("This project's folder is missing or has been removed.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Back to Home") {
+                openWindow(id: "home")
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - Home commands
+
+private struct HomeCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Show Home") { openWindow(id: "home") }
+                .keyboardShortcut("0", modifiers: [.command, .shift])
+        }
+    }
+}
+
+// MARK: - Project commands
+
+private struct ProjectCommands: Commands {
+    @FocusedValue(\.activeStore) private var store: WorkspaceStore?
+
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Tab") {
+                store?.activeSession?.createTab()
+            }
+            .keyboardShortcut("t", modifiers: [.command])
+            .disabled(store == nil)
+
+            Button("New Workspace") {
+                store?.addWorkspace()
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .disabled(store == nil)
+
+            Button("Reopen Closed Workspace") {
+                store?.reopenClosedWorkspace()
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift, .option])
+            .disabled(!(store?.canReopenClosed ?? false))
+
+            Divider()
+
+            Button("Split Right") {
+                store?.activeSession?.splitFocused(.horizontal)
+            }
+            .keyboardShortcut("d", modifiers: [.command])
+            .disabled(store == nil)
+
+            Button("Split Down") {
+                store?.activeSession?.splitFocused(.vertical)
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(store == nil)
+
+            Divider()
+
+            Button("Close Tab") {
+                store?.activeSession?.closeFocusedTab()
+            }
+            .keyboardShortcut("w", modifiers: [.command])
+            .disabled(store == nil)
+
+            Button("Close Workspace") {
+                if let store, let workspace = store.activeWorkspace {
+                    store.remove(workspace)
+                }
+            }
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+            .disabled(store == nil)
+        }
+
+        CommandMenu("Navigate") {
+            Button("Focus Left Pane") { store?.activeSession?.navigateFocus(.left) }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .disabled(store == nil)
+            Button("Focus Right Pane") { store?.activeSession?.navigateFocus(.right) }
+                .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+                .disabled(store == nil)
+            Button("Focus Pane Above") { store?.activeSession?.navigateFocus(.up) }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .disabled(store == nil)
+            Button("Focus Pane Below") { store?.activeSession?.navigateFocus(.down) }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(store == nil)
+
+            Divider()
+
+            // We always emit nine workspace shortcuts so they're stable;
+            // each one no-ops if there isn't a workspace at that index.
+            ForEach(0..<9, id: \.self) { index in
+                Button(workspaceLabel(at: index)) {
+                    if let store, store.workspaces.indices.contains(index) {
+                        store.activeID = store.workspaces[index].id
+                    }
+                }
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
+                .disabled(!hasWorkspace(at: index))
+            }
+
+            Divider()
+
+            ForEach(0..<9, id: \.self) { index in
+                Button("Tab \(index + 1)") {
+                    store?.activeSession?.selectTab(at: index)
+                }
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
+                .disabled(store == nil)
+            }
+        }
+    }
+
+    private func hasWorkspace(at index: Int) -> Bool {
+        guard let store else { return false }
+        return store.workspaces.indices.contains(index)
+    }
+
+    private func workspaceLabel(at index: Int) -> String {
+        if let store, store.workspaces.indices.contains(index) {
+            return "Workspace: \(store.workspaces[index].name)"
+        }
+        return "Workspace \(index + 1)"
     }
 }
