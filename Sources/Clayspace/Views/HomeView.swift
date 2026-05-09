@@ -131,13 +131,18 @@ struct HomeView: View {
                     }
                 }
             }
+            // Cap the grid width and center it in the window so cards
+            // don't sit pinned to the left edge with a wide blank gutter
+            // on the right when only a couple of projects exist.
+            .frame(maxWidth: 880)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
     }
 
     private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 180, maximum: 240), spacing: 12)]
+        [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 12, alignment: .top)]
     }
 
     // MARK: - Actions
