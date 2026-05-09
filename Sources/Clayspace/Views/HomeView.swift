@@ -121,9 +121,9 @@ struct HomeView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 4)
 
-                LazyVStack(spacing: 6) {
+                LazyVGrid(columns: gridColumns, spacing: 12) {
                     ForEach(store.projects) { project in
-                        ProjectRow(
+                        ProjectCard(
                             project: project,
                             onOpen: { openWindow(value: project.id) },
                             onDelete: { pendingDelete = project }
@@ -131,9 +131,13 @@ struct HomeView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             .padding(.bottom, 20)
         }
+    }
+
+    private var gridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 180, maximum: 240), spacing: 12)]
     }
 
     // MARK: - Actions
@@ -169,7 +173,7 @@ struct HomeView: View {
 
 // MARK: - Row
 
-private struct ProjectRow: View {
+private struct ProjectCard: View {
     let project: Project
     let onOpen: () -> Void
     let onDelete: () -> Void
@@ -178,33 +182,37 @@ private struct ProjectRow: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: "folder.fill")
-                    .font(.title3)
+                    .font(.system(size: 32))
                     .foregroundStyle(.tint)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(project.name).font(.body.weight(.medium))
-                    Text(project.rootPath.path)
+                    Text(project.name)
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(project.createdAt, format: .dateTime.year().month(.abbreviated).day())
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 110, alignment: .topLeading)
+            .padding(14)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovered ? Color.primary.opacity(0.06) : Color.primary.opacity(0.03))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isHovered ? Color.primary.opacity(0.08) : Color.primary.opacity(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(isHovered ? 0.12 : 0.06), lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .help(project.rootPath.path)
         .contextMenu {
             Button("Open in New Window", action: onOpen)
             Button("Show in Finder") {
