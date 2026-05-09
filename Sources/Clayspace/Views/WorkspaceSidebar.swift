@@ -10,10 +10,12 @@ struct WorkspaceSidebar: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 repositoriesSection
-                Divider().padding(.vertical, 6)
-                workItemsSection
+                if !orphanedWorkspaces.isEmpty {
+                    Divider()
+                    orphanedSection
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 12)
@@ -42,7 +44,7 @@ struct WorkspaceSidebar: View {
     // MARK: - Repositories
 
     private var repositoriesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Repositories")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -50,18 +52,19 @@ struct WorkspaceSidebar: View {
                 .padding(.bottom, 2)
 
             if repoStore.repositories.isEmpty {
-                Text("No repos yet — add one to get started.")
+                Text("Add a repository to start creating Work Items inside it.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             } else {
                 ForEach(repoStore.repositories) { repo in
-                    RepoRow(
-                        repository: repo,
-                        onReveal: {
-                            NSWorkspace.shared.activateFileViewerSelecting([repo.rootURL])
-                        }
+                    RepoSection(
+                        repo: repo,
+                        workspaces: store.workspaces(under: repo),
+                        store: store,
+                        onAddWorkItem: { store.addWorkspace(under: repo) }
                     )
                 }
             }
@@ -93,37 +96,23 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    private func handleAddRepo(_ intent: AddRepoIntent) {
-        showAddRepo = false
-        isAddingRepo = true
-        Task {
-            do {
-                switch intent {
-                case .clone(let url, let name):
-                    try await repoStore.clone(url: url, name: name)
-                case .initialize(let name):
-                    try await repoStore.initRepo(name: name)
-                case .importLocal(let path, let name):
-                    try await repoStore.importLocal(path: path, name: name)
-                }
-            } catch {
-                addRepoError = error.localizedDescription
-            }
-            isAddingRepo = false
+    private var orphanedWorkspaces: [Workspace] {
+        store.workspaces.filter { workspace in
+            guard let repoID = workspace.repoID else { return true }
+            return !repoStore.repositories.contains { $0.name == repoID }
         }
     }
 
-    // MARK: - Work items
-
-    private var workItemsSection: some View {
-        VStack(spacing: 8) {
-            Text("Work Items")
+    @ViewBuilder
+    private var orphanedSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Other Work Items")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 2)
 
-            ForEach(store.workspaces) { workspace in
+            ForEach(orphanedWorkspaces) { workspace in
                 WorkspaceButton(
                     workspace: workspace,
                     isActive: workspace.id == store.activeID,
@@ -136,77 +125,144 @@ struct WorkspaceSidebar: View {
                     onPickTint: { store.setTint($0, for: workspace.id) }
                 )
             }
+        }
+    }
 
-            Button {
-                store.addWorkspace()
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(.quaternary)
-                        )
-                        .foregroundStyle(.secondary)
-                    Text("New Work Item")
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+    private func handleAddRepo(_ intent: AddRepoIntent) {
+        showAddRepo = false
+        isAddingRepo = true
+        Task {
+            do {
+                let repo: Repository
+                switch intent {
+                case .clone(let url, let name):
+                    repo = try await repoStore.clone(url: url, name: name)
+                case .initialize(let name):
+                    repo = try await repoStore.initRepo(name: name)
+                case .importLocal(let path, let name):
+                    repo = try await repoStore.importLocal(path: path, name: name)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                // Seed a default work item under the freshly-added repo so
+                // the user lands in a usable terminal immediately.
+                if store.workspaces(under: repo).isEmpty {
+                    store.addWorkspace(under: repo)
+                }
+            } catch {
+                addRepoError = error.localizedDescription
             }
-            .buttonStyle(.plain)
-            .help("New Work Item (⌘T)")
+            isAddingRepo = false
         }
     }
 }
 
-private struct RepoRow: View {
-    let repository: Repository
-    let onReveal: () -> Void
+// MARK: - Repo section (header + nested work items)
+
+private struct RepoSection: View {
+    let repo: Repository
+    let workspaces: [Workspace]
+    @Bindable var store: WorkspaceStore
+    let onAddWorkItem: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            RepoHeader(repo: repo)
+
+            VStack(spacing: 4) {
+                ForEach(workspaces) { workspace in
+                    WorkspaceButton(
+                        workspace: workspace,
+                        isActive: workspace.id == store.activeID,
+                        hasUnread: store.hasUnread(for: workspace),
+                        lastActivityMessage: store.lastActivityMessage(for: workspace),
+                        onSelect: { store.activate(workspace.id) },
+                        onClose: { store.remove(workspace) },
+                        onRename: { store.setName($0, for: workspace.id) },
+                        onPickSymbol: { store.setIcon($0, for: workspace.id) },
+                        onPickTint: { store.setTint($0, for: workspace.id) }
+                    )
+                }
+
+                AddWorkItemRow(action: onAddWorkItem)
+            }
+            .padding(.leading, 16) // indent under the repo header
+        }
+    }
+}
+
+private struct RepoHeader: View {
+    let repo: Repository
 
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 10) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.secondary.opacity(isHovered ? 0.20 : 0.12))
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.12))
                 Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 22, height: 22)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(repository.name)
-                    .font(.callout.weight(.medium))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(repo.name)
+                    .font(.callout.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(repository.defaultBranch)
+                Text(repo.defaultBranch)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isHovered ? Color.primary.opacity(0.05) : Color.clear)
-        )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .help(repository.rootURL.path)
+        .help(repo.rootURL.path)
         .contextMenu {
-            Button("Show in Finder", action: onReveal)
+            Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([repo.rootURL])
+            }
         }
+    }
+}
+
+private struct AddWorkItemRow: View {
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(.quaternary)
+                    )
+                    .foregroundStyle(.secondary)
+                Text("Add Work Item")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isHovered ? Color.primary.opacity(0.04) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 
