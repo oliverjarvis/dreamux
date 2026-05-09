@@ -198,10 +198,13 @@ final class WorkspaceSession {
             return
         }
 
+        // Always store the most recent message so the rail row reflects
+        // it — even if the user is currently looking at this workspace.
+        // The subtitle is informational ("here's what the agent just
+        // said"), so suppressing it when focused-and-active hid the
+        // signal in the place the user is most likely to look.
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !isVisibleAndActive {
-            lastActivityMessage = trimmed
-        }
+        lastActivityMessage = trimmed
 
         NotificationManager.shared.notifyActivity(
             workspaceName: workspace.name,
