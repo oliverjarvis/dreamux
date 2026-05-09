@@ -151,7 +151,7 @@ enum GitOperations {
         }
     }
 
-    private static func runGit(_ args: [String], in cwd: URL) async throws -> String {
+    static func runGit(_ args: [String], in cwd: URL) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()

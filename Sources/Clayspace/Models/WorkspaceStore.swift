@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CryptoKit
 
 @MainActor
 @Observable
@@ -81,24 +82,85 @@ final class WorkspaceStore {
     /// (the actual `git worktree add` and symlink wiring is done by
     /// `FeatureProvisioner` so this method is purely model-side).
     /// The work item's working directory is the `features/<name>/`
-    /// aggregation directory.
+    /// aggregation directory. The id is deterministic (derived from
+    /// the feature name) so a relaunch picks up the same workspace.
     @discardableResult
     func registerFeature(
         name: String,
         featureDirectory: URL,
         linkedRepoIDs: [String]
     ) -> Workspace {
-        let index = workspaces.count
+        let id = Self.stableUUID(forFeature: name)
+        // If we already have it (e.g., a relaunch-time discovery raced
+        // with a fresh user-driven creation), update in place.
+        if let existing = workspaces.firstIndex(where: { $0.id == id }) {
+            workspaces[existing].workingDirectory = featureDirectory.path
+            workspaces[existing].linkedRepoIDs = linkedRepoIDs
+            sessions[id]?.workspace = workspaces[existing]
+            activeID = id
+            return workspaces[existing]
+        }
         let workspace = Workspace(
+            id: id,
             name: name,
-            symbol: paletteSymbol(for: index),
-            tint: paletteColor(for: index),
+            symbol: Self.stableSymbol(for: name),
+            tint: Self.stableColor(for: name),
             workingDirectory: featureDirectory.path,
             linkedRepoIDs: linkedRepoIDs
         )
         workspaces.append(workspace)
         activeID = workspace.id
         return workspace
+    }
+
+    /// Rebuild the feature list from on-disk worktree state. Branch
+    /// names that appear as worktrees in one or more repos become
+    /// features; same-named branches across repos collapse into one
+    /// feature whose `linkedRepoIDs` is the union of those repos.
+    /// Orphan (no-repo) workspaces are preserved.
+    func reloadFeatures(in project: Project, repoStore: RepoStore) async {
+        let mapping = await repoStore.discoverFeatures()
+
+        var discovered: [Workspace] = []
+        for (name, linkedRepos) in mapping.sorted(by: { $0.key < $1.key }) {
+            let dir = await FeatureProvisioner.ensureFeatureDirectory(
+                featureName: name,
+                in: project,
+                across: linkedRepos
+            )
+            // Preserve any in-memory customizations (symbol/tint/name) if
+            // the user already had this feature visible — same id, so we
+            // can look it up.
+            let id = Self.stableUUID(forFeature: name)
+            let existing = workspaces.first { $0.id == id }
+            let workspace = Workspace(
+                id: id,
+                name: existing?.name ?? name,
+                symbol: existing?.symbol ?? Self.stableSymbol(for: name),
+                tint: existing?.tint ?? Self.stableColor(for: name),
+                workingDirectory: dir.path,
+                linkedRepoIDs: linkedRepos.map(\.name)
+            )
+            discovered.append(workspace)
+        }
+
+        // Keep orphan workspaces (no linked repos) — they're transient
+        // shells the user opened that don't correspond to any worktree.
+        let orphans = workspaces.filter { $0.linkedRepoIDs.isEmpty }
+        let merged = discovered + orphans
+        workspaces = merged
+
+        // Sync active session metadata for survivors.
+        for workspace in merged {
+            sessions[workspace.id]?.workspace = workspace
+        }
+
+        // Reset activeID if it pointed to a now-gone workspace.
+        if let activeID, !workspaces.contains(where: { $0.id == activeID }) {
+            self.activeID = workspaces.first?.id
+        } else if activeID == nil {
+            activeID = workspaces.first?.id
+        }
     }
 
     /// Free-floating workspace with no repo. Used by ⌘⇧T as a fallback
@@ -191,9 +253,51 @@ final class WorkspaceStore {
     }
 
     private func paletteColor(for index: Int) -> Color {
-        let palette: [Color] = [
-            .blue, .purple, .orange, .pink, .green, .teal, .indigo, .red,
-        ]
-        return palette[index % palette.count]
+        Self.colorPalette[index % Self.colorPalette.count]
+    }
+
+    private static let symbolPalette: [String] = [
+        "terminal.fill", "circle.grid.3x3.fill", "square.stack.3d.up.fill",
+        "bolt.fill", "leaf.fill", "hammer.fill", "wrench.and.screwdriver.fill",
+        "shippingbox.fill",
+    ]
+
+    private static let colorPalette: [Color] = [
+        .blue, .purple, .orange, .pink, .green, .teal, .indigo, .red,
+    ]
+
+    /// Stable hash → palette index, so a feature keeps the same icon
+    /// and tint across relaunches even though we don't persist
+    /// per-feature customizations yet.
+    private static func paletteIndex(for name: String) -> Int {
+        let digest = SHA256.hash(data: Data(name.utf8))
+        let firstByte = Array(digest).first.map(Int.init) ?? 0
+        return firstByte
+    }
+
+    static func stableSymbol(for name: String) -> String {
+        symbolPalette[paletteIndex(for: name) % symbolPalette.count]
+    }
+
+    static func stableColor(for name: String) -> Color {
+        colorPalette[paletteIndex(for: name) % colorPalette.count]
+    }
+
+    /// Deterministic UUID derived from the feature name — same name in
+    /// the same project always maps to the same UUID, so relaunch-time
+    /// rediscovery doesn't churn the in-memory session map.
+    static func stableUUID(forFeature name: String) -> UUID {
+        let digest = SHA256.hash(data: Data(name.utf8))
+        var bytes = Array(digest.prefix(16))
+        // Mark as RFC 4122 v5 + variant 1 so other code that introspects
+        // the UUID gets a well-formed value.
+        bytes[6] = (bytes[6] & 0x0F) | 0x50
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+        return UUID(uuid: (
+            bytes[0],  bytes[1],  bytes[2],  bytes[3],
+            bytes[4],  bytes[5],  bytes[6],  bytes[7],
+            bytes[8],  bytes[9],  bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
     }
 }

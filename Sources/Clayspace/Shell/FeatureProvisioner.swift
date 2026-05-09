@@ -101,6 +101,44 @@ enum FeatureProvisioner {
         return featureDir
     }
 
+    /// Idempotent rebuild of the `features/<name>/` aggregation
+    /// directory and its symlinks. Used during launch-time feature
+    /// rediscovery so a feature whose worktrees exist on disk gets a
+    /// well-formed aggregation folder even if it was never created
+    /// through the in-app provision flow (or the folder was removed
+    /// out from under us).
+    @discardableResult
+    static func ensureFeatureDirectory(
+        featureName: String,
+        in project: Project,
+        across repos: [Repository]
+    ) async -> URL {
+        let fm = FileManager.default
+        let featureDir = featureDirectory(in: project, name: featureName)
+
+        try? fm.createDirectory(
+            at: featuresDirectory(for: project),
+            withIntermediateDirectories: true
+        )
+        try? fm.createDirectory(at: featureDir, withIntermediateDirectories: true)
+
+        for repo in repos {
+            let symlinkURL = featureDir.appendingPathComponent(repo.name)
+            let target = "../../repos/\(repo.name)/\(featureName)"
+
+            if let existing = try? fm.destinationOfSymbolicLink(atPath: symlinkURL.path),
+               existing == target {
+                continue
+            }
+            try? fm.removeItem(at: symlinkURL)
+            try? fm.createSymbolicLink(
+                atPath: symlinkURL.path,
+                withDestinationPath: target
+            )
+        }
+        return featureDir
+    }
+
     /// Reverse `provision`: remove worktrees, delete branches, drop
     /// the aggregation folder. Best-effort — used during teardown of
     /// finished or abandoned features.

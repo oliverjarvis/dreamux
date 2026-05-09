@@ -90,4 +90,74 @@ final class RepoStore {
         }
         return "main"
     }
+
+    // MARK: - Worktree discovery
+
+    /// Group every non-default-branch worktree across the project's repos
+    /// by branch name. Each entry in the result is a feature whose linked
+    /// repos are the ones that have a worktree on that branch. This is
+    /// what the launch-time feature list is reconstructed from.
+    func discoverFeatures() async -> [String: [Repository]] {
+        var byBranch: [String: [Repository]] = [:]
+        for repo in repositories {
+            for entry in await Self.listWorktrees(in: repo) where !entry.isBare {
+                guard let branch = entry.branch, branch != repo.defaultBranch else { continue }
+                byBranch[branch, default: []].append(repo)
+            }
+        }
+        return byBranch
+    }
+
+    private struct WorktreeEntry {
+        let path: URL
+        let branch: String?
+        let isBare: Bool
+    }
+
+    private static func listWorktrees(in repo: Repository) async -> [WorktreeEntry] {
+        let output: String
+        do {
+            output = try await GitOperations.runGit(
+                ["worktree", "list", "--porcelain"],
+                in: repo.rootURL
+            )
+        } catch {
+            return []
+        }
+
+        var result: [WorktreeEntry] = []
+        var path: URL?
+        var branch: String?
+        var isBare = false
+
+        func flush() {
+            if let p = path {
+                result.append(WorktreeEntry(path: p, branch: branch, isBare: isBare))
+            }
+            path = nil
+            branch = nil
+            isBare = false
+        }
+
+        for raw in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.isEmpty {
+                flush()
+                continue
+            }
+            if line.hasPrefix("worktree ") {
+                path = URL(fileURLWithPath: String(line.dropFirst("worktree ".count)))
+            } else if line.hasPrefix("branch ") {
+                let ref = String(line.dropFirst("branch ".count))
+                let prefix = "refs/heads/"
+                branch = ref.hasPrefix(prefix)
+                    ? String(ref.dropFirst(prefix.count))
+                    : ref
+            } else if line == "bare" {
+                isBare = true
+            }
+        }
+        flush()
+        return result
+    }
 }

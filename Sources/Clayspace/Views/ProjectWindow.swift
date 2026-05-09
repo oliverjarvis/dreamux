@@ -21,7 +21,15 @@ struct ProjectWindow: View {
         ContentView(store: store, repoStore: repoStore)
             .navigationTitle(project.name)
             .navigationSubtitle(project.rootPath.path)
-            .onAppear { repoStore.refresh() }
+            .onAppear {
+                repoStore.refresh()
+                Task {
+                    // Reconstruct the feature list from the worktrees
+                    // we find on disk so a relaunch comes back to the
+                    // same set of work items the user closed with.
+                    await store.reloadFeatures(in: project, repoStore: repoStore)
+                }
+            }
             .focusedSceneValue(\.activeStore, store)
             .focusedSceneValue(\.activeProject, project)
     }
