@@ -87,6 +87,18 @@ final class PTYShellSession: @unchecked Sendable {
         env["COLORTERM"] = "truecolor"
         env["TERM_PROGRAM"] = "Clayspace"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
+
+        // Make `clayspace-hook` discoverable inside the shell. Coding
+        // agents wire it into their hook config (e.g. Claude Code's
+        // Stop / Notification hooks) to push structured notifications
+        // back to the app.
+        if let bin = Bundle.main.resourceURL?
+            .appendingPathComponent("bin", isDirectory: true).path,
+           FileManager.default.fileExists(atPath: bin) {
+            let existing = env["PATH"] ?? "/usr/local/bin:/usr/bin:/bin"
+            env["PATH"] = "\(bin):\(existing)"
+        }
+
         for (k, v) in extraEnv { env[k] = v }
         let envStrings = env.map { "\($0.key)=\($0.value)" }
 

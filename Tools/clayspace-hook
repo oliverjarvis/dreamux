@@ -1,0 +1,51 @@
+#!/bin/sh
+# clayspace-hook — bridge between a coding agent's hook system and
+# Clayspace's notification pipeline. Bundled inside Clayspace.app and
+# prepended to the spawned shell's PATH, so an agent (Claude Code,
+# aider, …) can invoke us by name.
+#
+# Today we just emit an iTerm2-style OSC 9 notification on stdout —
+# Clayspace's PTY reader picks it up and routes it to the right
+# workspace/tab automatically. Future versions will also push a
+# structured payload over a Unix socket so we can include subtitles,
+# transcript snippets, deduplicate across reloads, etc.
+#
+# Usage:
+#   clayspace-hook stop                           # "Task complete"
+#   clayspace-hook notify [message]               # message or $CLAUDE_NOTIFICATION_MESSAGE
+#   clayspace-hook idle [message]                 # "Waiting on you"
+#   clayspace-hook <free text>                    # raw notification
+#
+# Wire it into Claude Code:
+#   claude config add-hook Stop          'clayspace-hook stop'
+#   claude config add-hook Notification  'clayspace-hook notify'
+
+set -eu
+
+emit() {
+    # OSC 9 ; <body> BEL — Clayspace's PTY parser pulls the body out
+    # and uses it as the notification's main text.
+    printf '\033]9;%s\a' "$1"
+}
+
+case "${1:-}" in
+    stop)
+        msg="${2:-Task complete}"
+        emit "$msg"
+        ;;
+    notify)
+        msg="${2:-${CLAUDE_NOTIFICATION_MESSAGE:-Agent is waiting on you}}"
+        emit "$msg"
+        ;;
+    idle)
+        msg="${2:-Agent is waiting on you}"
+        emit "$msg"
+        ;;
+    "")
+        emit "Agent activity"
+        ;;
+    *)
+        # First-arg-as-message form: `clayspace-hook "Build done"`
+        emit "$*"
+        ;;
+esac

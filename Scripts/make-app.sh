@@ -31,6 +31,14 @@ for bundle in "$BIN_DIR"/*.bundle; do
     cp -R "$bundle" "$APP/Contents/Resources/"
 done
 
+# Bundle the agent-hook CLI so we can prepend its directory to the spawned
+# shell's PATH. Coding agents (Claude Code, aider, …) can invoke
+# `clayspace-hook stop` from their hook config to get the same OSC-9 push
+# notification flow that's powering the in-app badges.
+mkdir -p "$APP/Contents/Resources/bin"
+cp "$ROOT/Tools/clayspace-hook" "$APP/Contents/Resources/bin/clayspace-hook"
+chmod +x "$APP/Contents/Resources/bin/clayspace-hook"
+
 # Ad-hoc sign so launchd is willing to run it.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
