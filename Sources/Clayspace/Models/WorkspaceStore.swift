@@ -60,6 +60,10 @@ final class WorkspaceStore {
         sessions[workspace.id]?.anyTabHasUnread ?? false
     }
 
+    func lastActivityMessage(for workspace: Workspace) -> String? {
+        sessions[workspace.id]?.lastActivityMessage
+    }
+
     func addWorkspace() {
         let palette: [Color] = [.blue, .purple, .orange, .pink, .green, .teal, .indigo, .red]
         let symbols = ["terminal.fill", "circle.grid.3x3.fill", "square.stack.3d.up.fill", "globe", "bolt.fill", "leaf.fill"]

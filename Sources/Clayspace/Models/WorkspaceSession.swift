@@ -22,6 +22,11 @@ final class WorkspaceSession {
     /// already see them).
     var isVisible: Bool = false
 
+    /// Most recent agent-emitted notification body, surfaced under the
+    /// workspace's name in the Work Items rail. Cleared when the user
+    /// switches into this workspace (re-entering "reads" the message).
+    var lastActivityMessage: String? = nil
+
     init(workspace: Workspace) {
         self.workspace = workspace
 
@@ -157,6 +162,9 @@ final class WorkspaceSession {
     func didBecomeVisible() {
         isVisible = true
         clearActiveTabUnread()
+        // Re-entering the workspace counts as "reading" the most recent
+        // notification, so wipe the rail subtitle too.
+        lastActivityMessage = nil
         TerminalFocus.focusVisibleTerminal()
     }
 
@@ -190,11 +198,16 @@ final class WorkspaceSession {
             return
         }
 
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !isVisibleAndActive {
+            lastActivityMessage = trimmed
+        }
+
         NotificationManager.shared.notifyActivity(
             workspaceName: workspace.name,
             tabId: tab.id,
             tabTitle: tab.title,
-            message: message
+            message: trimmed
         )
     }
 }

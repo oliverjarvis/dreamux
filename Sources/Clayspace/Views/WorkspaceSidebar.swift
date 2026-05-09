@@ -16,6 +16,7 @@ struct WorkspaceSidebar: View {
                     workspace: workspace,
                     isActive: workspace.id == store.activeID,
                     hasUnread: store.hasUnread(for: workspace),
+                    lastActivityMessage: store.lastActivityMessage(for: workspace),
                     onSelect: { store.activeID = workspace.id },
                     onClose: { store.remove(workspace) },
                     onRename: { store.setName($0, for: workspace.id) },
@@ -60,6 +61,7 @@ private struct WorkspaceButton: View {
     let workspace: Workspace
     let isActive: Bool
     let hasUnread: Bool
+    let lastActivityMessage: String?
     let onSelect: () -> Void
     let onClose: () -> Void
     let onRename: (String) -> Void
@@ -99,12 +101,24 @@ private struct WorkspaceButton: View {
                         .accessibilityHidden(true)
                 }
 
-                Text(workspace.name)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(isActive ? .primary : .secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(workspace.name)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(isActive ? .primary : .secondary)
+                    if let lastActivityMessage, !lastActivityMessage.isEmpty {
+                        // Most recent agent notification — gives the user
+                        // a peek at what the badge is for without having
+                        // to switch into the workspace.
+                        Text(lastActivityMessage)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
