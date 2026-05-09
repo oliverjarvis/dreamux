@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var newProjectRepoMode: CreateRepoMode = .none
     @State private var newProjectRepoURL = ""
     @State private var newProjectRepoName = ""
+    @State private var newProjectImportPath: URL?
     @State private var createError: String?
     @State private var isCreating = false
 
@@ -29,6 +30,7 @@ struct HomeView: View {
                 repoMode: $newProjectRepoMode,
                 repoURL: $newProjectRepoURL,
                 repoName: $newProjectRepoName,
+                importPath: $newProjectImportPath,
                 error: createError,
                 isWorking: isCreating,
                 onCancel: { if !isCreating { showCreate = false } },
@@ -160,6 +162,7 @@ struct HomeView: View {
         newProjectRepoMode = .none
         newProjectRepoURL = ""
         newProjectRepoName = ""
+        newProjectImportPath = nil
         createError = nil
         isCreating = false
     }
@@ -207,6 +210,11 @@ struct HomeView: View {
             let trimmed = newProjectRepoName.trimmingCharacters(in: .whitespacesAndNewlines)
             let name = trimmed.isEmpty ? GitOperations.deriveName(from: url) : trimmed
             return .clone(url: url, name: name)
+        case .importExisting:
+            guard let path = newProjectImportPath else { return nil }
+            let trimmed = newProjectRepoName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = trimmed.isEmpty ? GitOperations.deriveName(from: path.lastPathComponent) : trimmed
+            return .importLocal(path: path, name: name)
         }
     }
 
@@ -216,6 +224,10 @@ struct HomeView: View {
             _ = try await GitOperations.cloneBare(url: url, into: project.rootPath, name: name)
         case .initialize(let name):
             _ = try await GitOperations.initBare(into: project.rootPath, name: name)
+        case .importLocal(let path, let name):
+            // Same engine — `git clone --bare` from a local path treats
+            // it as a URL, mirroring the source's history into our .bare/.
+            _ = try await GitOperations.cloneBare(url: path.path, into: project.rootPath, name: name)
         }
     }
 
@@ -290,8 +302,9 @@ private struct ProjectCard: View {
 
 enum CreateRepoMode: String, CaseIterable, Identifiable {
     case none = "Skip"
-    case initialize = "Initialize new"
-    case clone = "Clone existing"
+    case initialize = "Initialize"
+    case clone = "Clone"
+    case importExisting = "Import"
     var id: String { rawValue }
 }
 
@@ -300,6 +313,7 @@ private struct CreateProjectSheet: View {
     @Binding var repoMode: CreateRepoMode
     @Binding var repoURL: String
     @Binding var repoName: String
+    @Binding var importPath: URL?
     let error: String?
     let isWorking: Bool
     let onCancel: () -> Void
@@ -309,6 +323,28 @@ private struct CreateProjectSheet: View {
     @State private var didTouchRepoName = false
 
     enum Field { case name, repoURL, repoName }
+
+    init(
+        name: Binding<String>,
+        repoMode: Binding<CreateRepoMode>,
+        repoURL: Binding<String>,
+        repoName: Binding<String>,
+        importPath: Binding<URL?>,
+        error: String?,
+        isWorking: Bool,
+        onCancel: @escaping () -> Void,
+        onCreate: @escaping () -> Void
+    ) {
+        self._name = name
+        self._repoMode = repoMode
+        self._repoURL = repoURL
+        self._repoName = repoName
+        self._importPath = importPath
+        self.error = error
+        self.isWorking = isWorking
+        self.onCancel = onCancel
+        self.onCreate = onCreate
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -358,9 +394,22 @@ private struct CreateProjectSheet: View {
                         }
                 }
 
+                if repoMode == .importExisting {
+                    HStack(spacing: 8) {
+                        Text(importPath?.path ?? "Choose source folder…")
+                            .font(.callout)
+                            .foregroundStyle(importPath == nil ? .tertiary : .primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Choose…", action: chooseImportFolder)
+                            .disabled(isWorking)
+                    }
+                }
+
                 if repoMode != .none {
                     TextField(
-                        repoMode == .clone ? "Folder name (auto-detected)" : "Folder name (defaults to project name)",
+                        repoNamePlaceholder,
                         text: $repoName
                     )
                     .textFieldStyle(.roundedBorder)
@@ -369,7 +418,7 @@ private struct CreateProjectSheet: View {
                     .onChange(of: repoName) { _, _ in didTouchRepoName = true }
                 }
 
-                Text("All repos use a bare-with-worktrees layout: .bare/ for git data plus a worktree for the default branch under repos/<name>/.")
+                Text("All repos use a bare-with-worktrees layout: .bare/ for git data plus a worktree for the default branch under repos/<name>/. Import keeps the source folder untouched (we git clone --bare from it).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -414,20 +463,52 @@ private struct CreateProjectSheet: View {
 
     private var canSubmit: Bool {
         guard !trimmedName.isEmpty else { return false }
-        if repoMode == .clone, trimmedRepoURL.isEmpty { return false }
-        return true
+        switch repoMode {
+        case .none, .initialize:
+            return true
+        case .clone:
+            return !trimmedRepoURL.isEmpty
+        case .importExisting:
+            return importPath != nil
+        }
     }
 
     private var workingLabel: String {
         switch repoMode {
         case .clone: return "Cloning repository…"
         case .initialize: return "Initializing repository…"
+        case .importExisting: return "Importing repository…"
         case .none: return "Creating project…"
+        }
+    }
+
+    private var repoNamePlaceholder: String {
+        switch repoMode {
+        case .clone: return "Folder name (auto-detected)"
+        case .initialize: return "Folder name (defaults to project name)"
+        case .importExisting: return "Folder name (defaults to source folder)"
+        case .none: return "Folder name"
         }
     }
 
     private func submitIfReady() {
         guard canSubmit else { return }
         onCreate()
+    }
+
+    private func chooseImportFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Pick the existing local repository to import."
+        if panel.runModal() == .OK, let url = panel.url {
+            importPath = url
+            if !didTouchRepoName {
+                let derived = GitOperations.deriveName(from: url.lastPathComponent)
+                if !derived.isEmpty { repoName = derived }
+            }
+        }
     }
 }

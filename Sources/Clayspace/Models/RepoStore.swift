@@ -62,6 +62,21 @@ final class RepoStore {
         return repo
     }
 
+    @discardableResult
+    func importLocal(path: URL, name: String) async throws -> Repository {
+        // Importing is just `git clone --bare` from a local source path —
+        // the resulting `.bare/` mirrors the source's history and stays
+        // independent (the source folder is untouched). We then lay
+        // down the worktree on the default branch like a normal clone.
+        let repo = try await GitOperations.cloneBare(
+            url: path.path,
+            into: project.rootPath,
+            name: name
+        )
+        refresh()
+        return repo
+    }
+
     private static func detectDefaultBranch(at bareURL: URL) -> String {
         let headFile = bareURL.appendingPathComponent("HEAD")
         guard let content = try? String(contentsOf: headFile, encoding: .utf8) else {

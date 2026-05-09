@@ -103,6 +103,8 @@ struct WorkspaceSidebar: View {
                     try await repoStore.clone(url: url, name: name)
                 case .initialize(let name):
                     try await repoStore.initRepo(name: name)
+                case .importLocal(let path, let name):
+                    try await repoStore.importLocal(path: path, name: name)
                 }
             } catch {
                 addRepoError = error.localizedDescription

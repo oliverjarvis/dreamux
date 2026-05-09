@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 
 enum AddRepoIntent {
     case clone(url: String, name: String)
     case initialize(name: String)
+    case importLocal(path: URL, name: String)
 }
 
 struct AddRepoSheet: View {
@@ -12,6 +14,7 @@ struct AddRepoSheet: View {
 
     @State private var mode: Mode = .clone
     @State private var url: String = ""
+    @State private var importPath: URL?
     @State private var name: String = ""
     @State private var didTouchName = false
     @State private var error: String?
@@ -20,8 +23,9 @@ struct AddRepoSheet: View {
     @FocusState private var focused: Field?
 
     enum Mode: String, CaseIterable, Identifiable {
-        case clone = "Clone Existing"
-        case initialize = "Initialize New"
+        case clone = "Clone"
+        case initialize = "Initialize"
+        case importExisting = "Import"
         var id: String { rawValue }
     }
 
@@ -34,7 +38,7 @@ struct AddRepoSheet: View {
             Text("Add Repository")
                 .font(.title3.weight(.semibold))
 
-            Text("Cloned repos and new repos both land under \(projectName)/repos/<name>/ with a bare repo at .bare/ and a worktree on the default branch.")
+            Text("All three flows land at \(projectName)/repos/<name>/ with a bare repo at .bare/ and a worktree on the default branch. Import keeps the source folder untouched — we git clone --bare from it.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -61,6 +65,21 @@ struct AddRepoSheet: View {
                                 if !derived.isEmpty { name = derived }
                             }
                         }
+                }
+            } else if mode == .importExisting {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Source folder")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(importPath?.path ?? "Choose a folder…")
+                            .font(.callout)
+                            .foregroundStyle(importPath == nil ? .tertiary : .primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Choose…", action: chooseImportFolder)
+                    }
                 }
             }
 
@@ -111,6 +130,7 @@ struct AddRepoSheet: View {
         switch mode {
         case .clone: return !trimmedURL.isEmpty && !trimmedName.isEmpty
         case .initialize: return !trimmedName.isEmpty
+        case .importExisting: return importPath != nil && !trimmedName.isEmpty
         }
     }
 
@@ -135,6 +155,25 @@ struct AddRepoSheet: View {
             onSubmit(.clone(url: trimmedURL, name: trimmedName))
         case .initialize:
             onSubmit(.initialize(name: trimmedName))
+        case .importExisting:
+            guard let importPath else { return }
+            onSubmit(.importLocal(path: importPath, name: trimmedName))
+        }
+    }
+
+    private func chooseImportFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Pick the existing local repository to import."
+        if panel.runModal() == .OK, let url = panel.url {
+            importPath = url
+            if !didTouchName {
+                let derived = GitOperations.deriveName(from: url.lastPathComponent)
+                if !derived.isEmpty { name = derived }
+            }
         }
     }
 }
