@@ -14,6 +14,12 @@ struct WorkspaceTerminalContainer: View {
                 WorkspaceBonsplitPane(session: store.session(for: workspace))
                     .opacity(workspace.id == store.activeID ? 1 : 0)
                     .allowsHitTesting(workspace.id == store.activeID)
+                    // Force the active workspace to the top of the ZStack
+                    // regardless of declaration order so its drop targets
+                    // and gesture recognizers always win — without this,
+                    // drag-drop sometimes routes to whichever workspace
+                    // was rendered latest in the hierarchy.
+                    .zIndex(workspace.id == store.activeID ? 1 : 0)
             }
         }
     }
@@ -34,6 +40,7 @@ private struct WorkspaceBonsplitPane: View {
                 )
             }
         }
+        .onAppear { session.bootstrapIfNeeded() }
     }
 }
 

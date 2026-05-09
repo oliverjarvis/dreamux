@@ -13,6 +13,7 @@ final class WorkspaceSession {
 
     private var tabSessions: [TabID: TabSession] = [:]
     private var titleObservers: [TabID: TitleObserver] = [:]
+    private var didBootstrap = false
 
     init(workspace: Workspace) {
         self.workspace = workspace
@@ -36,7 +37,21 @@ final class WorkspaceSession {
         self.controller = BonsplitController(configuration: configuration)
         self.controller.delegate = self
 
-        // Bonsplit boots with one empty pane; seed it with a terminal.
+        // Bootstrap is deferred to `bootstrapIfNeeded()` (called from
+        // BonsplitView's `onAppear`). Creating the first tab synchronously
+        // in init worked for user-triggered workspaces but broke the three
+        // workspaces seeded in `WorkspaceStore.init()` — those run during
+        // the very first `ContentView` render, before the NSWindow has
+        // finished forming, and the resulting Ghostty surface ends up in
+        // a state where keyboard shortcuts, drag-drop, and splits never
+        // engage. Deferring to onAppear lets every workspace bootstrap
+        // under the same post-mount conditions.
+    }
+
+    /// Idempotent — call from BonsplitView's `onAppear`.
+    func bootstrapIfNeeded() {
+        guard !didBootstrap else { return }
+        didBootstrap = true
         controller.createTab(title: "shell", icon: "terminal.fill")
     }
 
