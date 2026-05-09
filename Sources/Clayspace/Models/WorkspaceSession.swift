@@ -179,6 +179,17 @@ final class WorkspaceSession {
             tab.hasUnread = true
         }
 
+        // Bare BEL (`\a`) is rung by zsh, tab-completion, error tones, and
+        // most CLI agents during normal operation — it's a useless signal
+        // for "the agent wants me". Only fire a macOS banner when the
+        // agent has *explicitly* sent a notification via an OSC sequence
+        // (OSC 9 or OSC 777 ; notify) which carries a real message.
+        // BELs without a payload still light the workspace badge above
+        // so the user has a quiet visual indicator.
+        guard let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
         NotificationManager.shared.notifyActivity(
             workspaceName: workspace.name,
             tabId: tab.id,
