@@ -56,12 +56,18 @@ final class ProjectStore {
         self.projectsRoot = projectsRoot
 
         load()
+        refresh()
     }
 
     func project(id: UUID) -> Project? {
         projects.first { $0.id == id }
     }
 
+    /// Create a new project folder under `projectsRoot` and return a
+    /// `Project` for it. The folder is the source of truth — `refresh()`
+    /// would discover it on next scan even without this call, but doing
+    /// it explicitly lets us hand back a `Project` for the caller to
+    /// open in a window immediately.
     @discardableResult
     func createProject(name: String) throws -> Project {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -84,25 +90,76 @@ final class ProjectStore {
 
         let project = Project(name: safeName, rootPath: url)
         projects.append(project)
+        projects.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         save()
         return project
     }
 
-    func remove(_ project: Project) {
-        projects.removeAll { $0.id == project.id }
+    /// Reconcile the in-memory project list with the contents of
+    /// `projectsRoot`. The directory is the source of truth — anything
+    /// the user `mkdir`'d there shows up automatically, anything that
+    /// was deleted/moved disappears. We persist stable IDs in
+    /// projects.json so the same folder keeps the same identity across
+    /// launches (which keeps SwiftUI window restoration sane).
+    func refresh() {
+        let fm = FileManager.default
+        let contents = (try? fm.contentsOfDirectory(
+            at: projectsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        var byPath: [String: Project] = [:]
+        for project in projects {
+            byPath[project.rootPath.standardizedFileURL.path] = project
+        }
+
+        var refreshed: [Project] = []
+        for url in contents {
+            let standardized = url.standardizedFileURL
+            let resources = try? standardized.resourceValues(forKeys: [
+                .isDirectoryKey, .creationDateKey,
+            ])
+            guard resources?.isDirectory == true else { continue }
+
+            let folderName = standardized.lastPathComponent
+            if let existing = byPath[standardized.path] {
+                if existing.name == folderName {
+                    refreshed.append(existing)
+                } else {
+                    refreshed.append(Project(
+                        id: existing.id,
+                        name: folderName,
+                        rootPath: standardized,
+                        createdAt: existing.createdAt
+                    ))
+                }
+            } else {
+                refreshed.append(Project(
+                    name: folderName,
+                    rootPath: standardized,
+                    createdAt: resources?.creationDate ?? .now
+                ))
+            }
+        }
+
+        refreshed.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        projects = refreshed
         save()
     }
 
-    /// Move the project's folder to the Trash and drop it from the list.
-    /// We use the system trash (not `removeItem`) so the user can recover
-    /// the project from Finder if they change their mind.
+    /// Move the project's folder to the Trash. The list refreshes on the
+    /// next scan; we also drop the entry locally so the home view updates
+    /// immediately. We use the system trash (not `removeItem`) so the
+    /// user can recover the project from Finder if they change their mind.
     func deleteProject(_ project: Project) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: project.rootPath.path) {
             var trashedURL: NSURL?
             try fm.trashItem(at: project.rootPath, resultingItemURL: &trashedURL)
         }
-        remove(project)
+        projects.removeAll { $0.id == project.id }
+        save()
     }
 
     // MARK: - Persistence

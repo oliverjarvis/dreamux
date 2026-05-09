@@ -18,6 +18,7 @@ struct HomeView: View {
             content
         }
         .frame(minWidth: 560, minHeight: 420)
+        .onAppear { store.refresh() }
         .sheet(isPresented: $showCreate, onDismiss: resetCreateState) {
             CreateProjectSheet(
                 name: $newProjectName,
@@ -61,11 +62,20 @@ struct HomeView: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Clayspace").font(.title2.weight(.semibold))
-                Text("Workspaces, tabs, and shells in every project.")
+                Text("Anything in \(store.projectsRoot.path) shows up here.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                store.refresh()
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .keyboardShortcut("r", modifiers: [.command])
+            .help("Rescan the projects folder")
+
             Button(action: showCreateSheet) {
                 Label("New Project", systemImage: "plus")
             }
@@ -116,7 +126,6 @@ struct HomeView: View {
                         ProjectRow(
                             project: project,
                             onOpen: { openWindow(value: project.id) },
-                            onRemove: { store.remove(project) },
                             onDelete: { pendingDelete = project }
                         )
                     }
@@ -163,7 +172,6 @@ struct HomeView: View {
 private struct ProjectRow: View {
     let project: Project
     let onOpen: () -> Void
-    let onRemove: () -> Void
     let onDelete: () -> Void
 
     @State private var isHovered = false
@@ -203,7 +211,6 @@ private struct ProjectRow: View {
                 NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
             }
             Divider()
-            Button("Remove from List", action: onRemove)
             Button("Move to Trash…", role: .destructive, action: onDelete)
         }
     }
