@@ -8,12 +8,19 @@ import Bonsplit
 @MainActor
 @Observable
 final class WorkspaceSession {
-    let workspace: Workspace
+    var workspace: Workspace
     let controller: BonsplitController
 
     private var tabSessions: [TabID: TabSession] = [:]
     private var titleObservers: [TabID: TitleObserver] = [:]
     private var didBootstrap = false
+
+    /// True when this workspace is the one currently visible in its window.
+    /// The store flips this on selection changes; while false, bell events
+    /// always mark tabs unread (the user can't see them yet). While true,
+    /// bell events on the *active* tab don't mark unread (the user can
+    /// already see them).
+    var isVisible: Bool = false
 
     init(workspace: Workspace) {
         self.workspace = workspace
@@ -96,7 +103,12 @@ final class WorkspaceSession {
 
     private func handleDidCreateTab(_ tab: Tab) {
         guard tabSessions[tab.id] == nil else { return }
-        let session = TabSession(cwd: workspace.workingDirectory)
+        let session = TabSession(
+            cwd: workspace.workingDirectory,
+            onBell: { [weak self, tabId = tab.id] in
+                Task { @MainActor in self?.handleBell(tabId: tabId) }
+            }
+        )
         tabSessions[tab.id] = session
         titleObservers[tab.id] = TitleObserver(
             tabId: tab.id,
@@ -113,6 +125,55 @@ final class WorkspaceSession {
 
     private func handleDidSplitPane(newPane: PaneID) {
         controller.createTab(title: "shell", icon: "terminal.fill", inPane: newPane)
+    }
+
+    private func handleDidSelectTab(_ tab: Tab) {
+        // The tab the user just clicked into is now visible; clear its
+        // attention badge. Other tabs in this workspace, and other
+        // workspaces, keep theirs.
+        if isVisible {
+            tabSessions[tab.id]?.hasUnread = false
+        }
+    }
+
+    // MARK: - Activity / unread
+
+    var anyTabHasUnread: Bool {
+        tabSessions.values.contains { $0.hasUnread }
+    }
+
+    /// Called by the store when this workspace becomes the visible one.
+    /// Clears the badge on the active tab so re-entering a workspace
+    /// dismisses the indicator naturally.
+    func didBecomeVisible() {
+        isVisible = true
+        clearActiveTabUnread()
+    }
+
+    func didResignVisible() {
+        isVisible = false
+    }
+
+    private func clearActiveTabUnread() {
+        guard let pane = controller.focusedPaneId,
+              let tab = controller.selectedTab(inPane: pane) else { return }
+        tabSessions[tab.id]?.hasUnread = false
+    }
+
+    fileprivate func handleBell(tabId: TabID) {
+        guard let tab = tabSessions[tabId] else { return }
+
+        let activePaneTab = controller.focusedPaneId.flatMap { controller.selectedTab(inPane: $0) }
+        let isVisibleAndActive = isVisible && activePaneTab?.id == tabId
+        if !isVisibleAndActive {
+            tab.hasUnread = true
+        }
+
+        NotificationManager.shared.notifyActivity(
+            workspaceName: workspace.name,
+            tabId: tab.id,
+            tabTitle: tab.title
+        )
     }
 }
 
@@ -139,6 +200,12 @@ extension WorkspaceSession: BonsplitDelegate {
                                  newPane: PaneID,
                                  orientation: SplitOrientation) {
         MainActor.assumeIsolated { self.handleDidSplitPane(newPane: newPane) }
+    }
+
+    nonisolated func splitTabBar(_ controller: BonsplitController,
+                                 didSelectTab tab: Tab,
+                                 inPane pane: PaneID) {
+        MainActor.assumeIsolated { self.handleDidSelectTab(tab) }
     }
 }
 

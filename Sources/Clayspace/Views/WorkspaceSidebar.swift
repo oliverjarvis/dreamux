@@ -9,8 +9,10 @@ struct WorkspaceSidebar: View {
                 WorkspaceButton(
                     workspace: workspace,
                     isActive: workspace.id == store.activeID,
+                    hasUnread: store.hasUnread(for: workspace),
                     onSelect: { store.activeID = workspace.id },
                     onClose: { store.remove(workspace) },
+                    onRename: { store.setName($0, for: workspace.id) },
                     onPickSymbol: { store.setIcon($0, for: workspace.id) },
                     onPickTint: { store.setTint($0, for: workspace.id) }
                 )
@@ -41,8 +43,10 @@ struct WorkspaceSidebar: View {
 private struct WorkspaceButton: View {
     let workspace: Workspace
     let isActive: Bool
+    let hasUnread: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    let onRename: (String) -> Void
     let onPickSymbol: (String) -> Void
     let onPickTint: (Color) -> Void
 
@@ -63,6 +67,21 @@ private struct WorkspaceButton: View {
                     .foregroundStyle(isActive ? Color.white : workspace.tint)
             }
             .frame(width: 44, height: 44)
+            .overlay(alignment: .topTrailing) {
+                // Attention badge — drawn outside the rounded square so it
+                // notches the corner. Hidden whenever the badge isn't active.
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 10, height: 10)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
+                    )
+                    .offset(x: 4, y: -4)
+                    .opacity(hasUnread ? 1 : 0)
+                    .animation(.snappy(duration: 0.18), value: hasUnread)
+                    .accessibilityHidden(true)
+            }
             .overlay(alignment: .leading) {
                 // Active-pill indicator on the left edge.
                 Capsule()
@@ -76,14 +95,16 @@ private struct WorkspaceButton: View {
         .onHover { isHovered = $0 }
         .help(workspace.name)
         .contextMenu {
-            Button("Customize Icon…") { isPickerPresented = true }
+            Button("Customize…") { isPickerPresented = true }
             Divider()
             Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
         }
         .popover(isPresented: $isPickerPresented, arrowEdge: .trailing) {
             IconPickerPopover(
+                initialName: workspace.name,
                 selectedSymbol: workspace.symbol,
                 selectedTint: workspace.tint,
+                onRename: onRename,
                 onPickSymbol: onPickSymbol,
                 onPickTint: onPickTint
             )
@@ -92,10 +113,14 @@ private struct WorkspaceButton: View {
 }
 
 private struct IconPickerPopover: View {
+    let initialName: String
     let selectedSymbol: String
     let selectedTint: Color
+    let onRename: (String) -> Void
     let onPickSymbol: (String) -> Void
     let onPickTint: (Color) -> Void
+
+    @State private var name: String = ""
 
     private static let symbols: [String] = [
         "terminal.fill",
@@ -132,6 +157,17 @@ private struct IconPickerPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Name")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            TextField("Feature name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(commitName)
+                .onChange(of: name) { _, _ in commitName() }
+
+            Divider()
+
             Text("Icon")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -179,5 +215,12 @@ private struct IconPickerPopover: View {
         }
         .padding(14)
         .frame(width: 260)
+        .onAppear { name = initialName }
+    }
+
+    private func commitName() {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != initialName else { return }
+        onRename(trimmed)
     }
 }

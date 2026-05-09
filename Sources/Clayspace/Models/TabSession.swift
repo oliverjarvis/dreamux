@@ -4,14 +4,22 @@ import GhosttyTerminal
 /// One tab inside a workspace: a single Ghostty surface backed by its own
 /// PTY-managed shell. Lives as long as the user keeps the tab open.
 @MainActor
+@Observable
 final class TabSession: Identifiable {
     let id = UUID()
     let viewState: TerminalViewState
+    /// True when this tab has had agent activity (terminal bell) since the
+    /// user last looked at it. Drives the badge on the workspace tile.
+    var hasUnread: Bool = false
+
     private let shell: PTYShellSession
     private var didStart = false
 
-    init(cwd: String? = nil) {
-        self.shell = PTYShellSession(cwd: cwd)
+    init(
+        cwd: String? = nil,
+        onBell: @escaping @Sendable () -> Void = {}
+    ) {
+        self.shell = PTYShellSession(cwd: cwd, onBell: onBell)
 
         // Ghostty ships with default `super+<letter>` keybinds (super+t,
         // super+d, super+w, …) for actions its own app shell implements.

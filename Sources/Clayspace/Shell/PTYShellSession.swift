@@ -23,10 +23,16 @@ final class PTYShellSession: @unchecked Sendable {
     private let ioQueue = DispatchQueue(label: "com.clayspace.pty.io", qos: .userInitiated)
     private let cwd: String?
     private let extraEnv: [String: String]
+    private let onBell: (@Sendable () -> Void)?
 
-    init(cwd: String? = nil, extraEnv: [String: String] = [:]) {
+    init(
+        cwd: String? = nil,
+        extraEnv: [String: String] = [:],
+        onBell: (@Sendable () -> Void)? = nil
+    ) {
         self.cwd = cwd
         self.extraEnv = extraEnv
+        self.onBell = onBell
 
         // Capture into a holder so the closures can refer to the eventual
         // `self` without a chicken-and-egg with `terminalSession`.
@@ -126,6 +132,7 @@ final class PTYShellSession: @unchecked Sendable {
     private func startReader(fd: Int32) {
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: ioQueue)
         let session = terminalSession
+        let bellHandler = onBell
         source.setEventHandler { [weak self] in
             var buffer = [UInt8](repeating: 0, count: 8192)
             let n = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
@@ -133,6 +140,12 @@ final class PTYShellSession: @unchecked Sendable {
             }
             if n > 0 {
                 session.receive(Data(bytes: buffer, count: n))
+                // BEL (0x07) is the universal "I want your attention" signal
+                // from CLI agents — ring once per chunk so a flurry of bells
+                // collapses into a single host-side notification.
+                if buffer.prefix(n).contains(0x07) {
+                    bellHandler?()
+                }
             } else if n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR) {
                 self?.handleEOF()
             }

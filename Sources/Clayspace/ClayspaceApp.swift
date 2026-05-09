@@ -5,6 +5,11 @@ import Bonsplit
 struct ClayspaceApp: App {
     @State private var projects = ProjectStore()
 
+    init() {
+        // Ask once at launch — the user can revoke later in System Settings.
+        NotificationManager.shared.requestAuthorizationIfNeeded()
+    }
+
     var body: some Scene {
         Window("Clayspace", id: "home") {
             HomeView(store: projects)

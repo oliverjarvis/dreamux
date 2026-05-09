@@ -5,7 +5,13 @@ import SwiftUI
 @Observable
 final class WorkspaceStore {
     var workspaces: [Workspace]
-    var activeID: UUID
+    var activeID: UUID {
+        didSet {
+            guard oldValue != activeID else { return }
+            sessions[oldValue]?.didResignVisible()
+            sessions[activeID]?.didBecomeVisible()
+        }
+    }
 
     /// All shells in this store default to running here — typically the
     /// project's root directory, so opening a tab drops you straight into
@@ -42,7 +48,16 @@ final class WorkspaceStore {
         if let existing = sessions[workspace.id] { return existing }
         let session = WorkspaceSession(workspace: workspace)
         sessions[workspace.id] = session
+        // Match initial visibility — the first workspace's session is
+        // visible from the moment it's created if it matches activeID.
+        if workspace.id == activeID {
+            session.didBecomeVisible()
+        }
         return session
+    }
+
+    func hasUnread(for workspace: Workspace) -> Bool {
+        sessions[workspace.id]?.anyTabHasUnread ?? false
     }
 
     func addWorkspace() {
@@ -60,13 +75,25 @@ final class WorkspaceStore {
     }
 
     func setIcon(_ symbol: String, for workspaceID: UUID) {
-        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
-        workspaces[index].symbol = symbol
+        updateWorkspace(workspaceID) { $0.symbol = symbol }
     }
 
     func setTint(_ tint: Color, for workspaceID: UUID) {
-        guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
-        workspaces[index].tint = tint
+        updateWorkspace(workspaceID) { $0.tint = tint }
+    }
+
+    func setName(_ name: String, for workspaceID: UUID) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        updateWorkspace(workspaceID) { $0.name = trimmed }
+    }
+
+    private func updateWorkspace(_ id: UUID, _ mutate: (inout Workspace) -> Void) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        mutate(&workspaces[index])
+        // Mirror the change into the live session so menu-bar titles,
+        // notifications, etc. read the new value.
+        sessions[id]?.workspace = workspaces[index]
     }
 
     func remove(_ workspace: Workspace) {
