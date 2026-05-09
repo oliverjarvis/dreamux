@@ -152,64 +152,90 @@ private struct RepoSection: View {
     @Bindable var store: WorkspaceStore
     let onAddWorkItem: () -> Void
 
+    @State private var isExpanded = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            RepoHeader(repo: repo)
-
-            VStack(spacing: 4) {
-                ForEach(workspaces) { workspace in
-                    WorkspaceButton(
-                        workspace: workspace,
-                        isActive: workspace.id == store.activeID,
-                        hasUnread: store.hasUnread(for: workspace),
-                        lastActivityMessage: store.lastActivityMessage(for: workspace),
-                        onSelect: { store.activate(workspace.id) },
-                        onClose: { store.remove(workspace) },
-                        onRename: { store.setName($0, for: workspace.id) },
-                        onPickSymbol: { store.setIcon($0, for: workspace.id) },
-                        onPickTint: { store.setTint($0, for: workspace.id) }
-                    )
+            RepoHeader(
+                repo: repo,
+                isExpanded: isExpanded,
+                onToggle: {
+                    withAnimation(.snappy(duration: 0.18)) { isExpanded.toggle() }
                 }
+            )
 
-                AddWorkItemRow(action: onAddWorkItem)
+            if isExpanded {
+                VStack(spacing: 4) {
+                    ForEach(workspaces) { workspace in
+                        WorkspaceButton(
+                            workspace: workspace,
+                            isActive: workspace.id == store.activeID,
+                            hasUnread: store.hasUnread(for: workspace),
+                            lastActivityMessage: store.lastActivityMessage(for: workspace),
+                            onSelect: { store.activate(workspace.id) },
+                            onClose: { store.remove(workspace) },
+                            onRename: { store.setName($0, for: workspace.id) },
+                            onPickSymbol: { store.setIcon($0, for: workspace.id) },
+                            onPickTint: { store.setTint($0, for: workspace.id) }
+                        )
+                    }
+
+                    AddWorkItemRow(action: onAddWorkItem)
+                }
+                .padding(.leading, 16) // indent under the repo header
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .padding(.leading, 16) // indent under the repo header
         }
     }
 }
 
 private struct RepoHeader: View {
     let repo: Repository
+    let isExpanded: Bool
+    let onToggle: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.12))
-                Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 11, weight: .semibold))
+        Button(action: onToggle) {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
-            }
-            .frame(width: 22, height: 22)
+                    .frame(width: 12, alignment: .center)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text(repo.name)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(repo.defaultBranch)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.12))
+                    Image(systemName: "shippingbox.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(repo.name)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(repo.defaultBranch)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isHovered ? Color.primary.opacity(0.04) : Color.clear)
+            )
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .help(repo.rootURL.path)
         .contextMenu {
