@@ -6,7 +6,11 @@ struct HomeView: View {
 
     @State private var showCreate = false
     @State private var newProjectName = ""
+    @State private var newProjectRepoMode: CreateRepoMode = .none
+    @State private var newProjectRepoURL = ""
+    @State private var newProjectRepoName = ""
     @State private var createError: String?
+    @State private var isCreating = false
 
     @State private var pendingDelete: Project?
     @State private var deleteError: String?
@@ -22,8 +26,12 @@ struct HomeView: View {
         .sheet(isPresented: $showCreate, onDismiss: resetCreateState) {
             CreateProjectSheet(
                 name: $newProjectName,
+                repoMode: $newProjectRepoMode,
+                repoURL: $newProjectRepoURL,
+                repoName: $newProjectRepoName,
                 error: createError,
-                onCancel: { showCreate = false },
+                isWorking: isCreating,
+                onCancel: { if !isCreating { showCreate = false } },
                 onCreate: createProject
             )
         }
@@ -149,16 +157,65 @@ struct HomeView: View {
 
     private func resetCreateState() {
         newProjectName = ""
+        newProjectRepoMode = .none
+        newProjectRepoURL = ""
+        newProjectRepoName = ""
         createError = nil
+        isCreating = false
     }
 
     private func createProject() {
-        do {
-            let project = try store.createProject(name: newProjectName)
-            showCreate = false
-            openWindow(value: project.id)
-        } catch {
-            createError = error.localizedDescription
+        guard !isCreating else { return }
+        let projectName = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !projectName.isEmpty else { return }
+
+        let repoIntent = pendingRepoIntent(forProjectName: projectName)
+        isCreating = true
+        createError = nil
+
+        Task {
+            do {
+                let project = try store.createProject(name: projectName)
+
+                // Run the optional repo bootstrap before opening the window
+                // so the project window appears with the repo already in
+                // place (avoids a "Repositories: empty" flash).
+                if let repoIntent {
+                    try await runRepoIntent(repoIntent, in: project)
+                }
+
+                showCreate = false
+                isCreating = false
+                openWindow(value: project.id)
+            } catch {
+                createError = error.localizedDescription
+                isCreating = false
+            }
+        }
+    }
+
+    private func pendingRepoIntent(forProjectName projectName: String) -> AddRepoIntent? {
+        switch newProjectRepoMode {
+        case .none:
+            return nil
+        case .initialize:
+            let trimmed = newProjectRepoName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .initialize(name: trimmed.isEmpty ? projectName : trimmed)
+        case .clone:
+            let url = newProjectRepoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !url.isEmpty else { return nil }
+            let trimmed = newProjectRepoName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = trimmed.isEmpty ? GitOperations.deriveName(from: url) : trimmed
+            return .clone(url: url, name: name)
+        }
+    }
+
+    private func runRepoIntent(_ intent: AddRepoIntent, in project: Project) async throws {
+        switch intent {
+        case .clone(let url, let name):
+            _ = try await GitOperations.cloneBare(url: url, into: project.rootPath, name: name)
+        case .initialize(let name):
+            _ = try await GitOperations.initBare(into: project.rootPath, name: name)
         }
     }
 
@@ -231,54 +288,146 @@ private struct ProjectCard: View {
 
 // MARK: - Create sheet
 
+enum CreateRepoMode: String, CaseIterable, Identifiable {
+    case none = "Skip"
+    case initialize = "Initialize new"
+    case clone = "Clone existing"
+    var id: String { rawValue }
+}
+
 private struct CreateProjectSheet: View {
     @Binding var name: String
+    @Binding var repoMode: CreateRepoMode
+    @Binding var repoURL: String
+    @Binding var repoName: String
     let error: String?
+    let isWorking: Bool
     let onCancel: () -> Void
     let onCreate: () -> Void
 
-    @FocusState private var isNameFocused: Bool
+    @FocusState private var focused: Field?
+    @State private var didTouchRepoName = false
+
+    enum Field { case name, repoURL, repoName }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("New Project")
                 .font(.headline)
             Text("A folder will be created under ~/Documents/Clayspace.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            TextField("Project name", text: $name)
-                .textFieldStyle(.roundedBorder)
-                .focused($isNameFocused)
-                .onSubmit(submit)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Project name")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField("e.g. mobile-app", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused, equals: .name)
+                    .disabled(isWorking)
+                    .onSubmit(submitIfReady)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Repository (optional)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Picker("Repository", selection: $repoMode) {
+                    ForEach(CreateRepoMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(isWorking)
+
+                if repoMode == .clone {
+                    TextField("git@github.com:owner/repo.git", text: $repoURL)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focused, equals: .repoURL)
+                        .disabled(isWorking)
+                        .onChange(of: repoURL) { _, newURL in
+                            if !didTouchRepoName {
+                                let derived = GitOperations.deriveName(from: newURL)
+                                if !derived.isEmpty { repoName = derived }
+                            }
+                        }
+                }
+
+                if repoMode != .none {
+                    TextField(
+                        repoMode == .clone ? "Folder name (auto-detected)" : "Folder name (defaults to project name)",
+                        text: $repoName
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused, equals: .repoName)
+                    .disabled(isWorking)
+                    .onChange(of: repoName) { _, _ in didTouchRepoName = true }
+                }
+
+                Text("All repos use a bare-with-worktrees layout: .bare/ for git data plus a worktree for the default branch under repos/<name>/.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let error {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack {
+                if isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(workingLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Create", action: submit)
+                    .disabled(isWorking)
+                Button(isWorking ? "Creating…" : "Create", action: submitIfReady)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(trimmedName.isEmpty)
+                    .disabled(!canSubmit || isWorking)
             }
         }
         .padding(20)
-        .frame(width: 380)
-        .onAppear { isNameFocused = true }
+        .frame(width: 460)
+        .onAppear { focused = .name }
     }
 
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    private var trimmedRepoURL: String {
+        repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
-    private func submit() {
-        guard !trimmedName.isEmpty else { return }
+    private var canSubmit: Bool {
+        guard !trimmedName.isEmpty else { return false }
+        if repoMode == .clone, trimmedRepoURL.isEmpty { return false }
+        return true
+    }
+
+    private var workingLabel: String {
+        switch repoMode {
+        case .clone: return "Cloning repository…"
+        case .initialize: return "Initializing repository…"
+        case .none: return "Creating project…"
+        }
+    }
+
+    private func submitIfReady() {
+        guard canSubmit else { return }
         onCreate()
     }
 }
