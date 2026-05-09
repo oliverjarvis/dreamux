@@ -17,7 +17,7 @@ struct WorkspaceSidebar: View {
                     isActive: workspace.id == store.activeID,
                     hasUnread: store.hasUnread(for: workspace),
                     lastActivityMessage: store.lastActivityMessage(for: workspace),
-                    onSelect: { store.activeID = workspace.id },
+                    onSelect: { store.activate(workspace.id) },
                     onClose: { store.remove(workspace) },
                     onRename: { store.setName($0, for: workspace.id) },
                     onPickSymbol: { store.setIcon($0, for: workspace.id) },

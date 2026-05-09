@@ -142,6 +142,11 @@ final class WorkspaceSession {
         // workspaces, keep theirs.
         if isVisible {
             tabSessions[tab.id]?.hasUnread = false
+            // If no other tab in this workspace still has unread, the
+            // rail subtitle has been "read" too — wipe it.
+            if !anyTabHasUnread {
+                lastActivityMessage = nil
+            }
             // Bonsplit's select doesn't touch AppKit's responder chain —
             // wire focus to the new tab's terminal so keystrokes land
             // without the user having to click in.
@@ -181,28 +186,21 @@ final class WorkspaceSession {
     fileprivate func handleActivity(tabId: TabID, message: String?) {
         guard let tab = tabSessions[tabId] else { return }
 
-        let activePaneTab = controller.focusedPaneId.flatMap { controller.selectedTab(inPane: $0) }
-        let isVisibleAndActive = isVisible && activePaneTab?.id == tabId
-        if !isVisibleAndActive {
-            tab.hasUnread = true
-        }
+        // Always badge — the user wants the red dot whenever a
+        // notification arrives, even if they happen to be on this
+        // workspace's active tab. Acknowledgement is explicit: clicking
+        // the workspace row, switching tabs, or switching workspaces.
+        tab.hasUnread = true
 
         // Bare BEL (`\a`) is rung by zsh, tab-completion, error tones, and
-        // most CLI agents during normal operation — it's a useless signal
-        // for "the agent wants me". Only fire a macOS banner when the
-        // agent has *explicitly* sent a notification via an OSC sequence
-        // (OSC 9 or OSC 777 ; notify) which carries a real message.
-        // BELs without a payload still light the workspace badge above
-        // so the user has a quiet visual indicator.
+        // most CLI agents during normal operation — useless as a "the
+        // agent wants me" signal. Only fire a macOS banner / subtitle
+        // when the agent has *explicitly* sent a notification via OSC 9
+        // or OSC 777 ; notify which carries a real message.
         guard let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return
         }
 
-        // Always store the most recent message so the rail row reflects
-        // it — even if the user is currently looking at this workspace.
-        // The subtitle is informational ("here's what the agent just
-        // said"), so suppressing it when focused-and-active hid the
-        // signal in the place the user is most likely to look.
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         lastActivityMessage = trimmed
 
@@ -212,6 +210,14 @@ final class WorkspaceSession {
             tabTitle: tab.title,
             message: trimmed
         )
+    }
+
+    /// Explicit user acknowledgement — clears the badge on the active
+    /// tab and wipes the rail subtitle. Called by the store when the
+    /// user clicks an already-active workspace row.
+    func dismissActivity() {
+        clearActiveTabUnread()
+        lastActivityMessage = nil
     }
 }
 

@@ -64,6 +64,18 @@ final class WorkspaceStore {
         sessions[workspace.id]?.lastActivityMessage
     }
 
+    /// Tap the workspace row. Switches to it if not already active;
+    /// otherwise dismisses any pending unread badge / activity message
+    /// so a click on the currently-visible workspace functions as an
+    /// "I see it" acknowledgement.
+    func activate(_ workspaceID: UUID) {
+        if activeID != workspaceID {
+            activeID = workspaceID  // didSet drives the visibility transition
+        } else {
+            sessions[workspaceID]?.dismissActivity()
+        }
+    }
+
     func addWorkspace() {
         let palette: [Color] = [.blue, .purple, .orange, .pink, .green, .teal, .indigo, .red]
         let symbols = ["terminal.fill", "circle.grid.3x3.fill", "square.stack.3d.up.fill", "globe", "bolt.fill", "leaf.fill"]
