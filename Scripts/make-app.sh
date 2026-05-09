@@ -31,13 +31,20 @@ for bundle in "$BIN_DIR"/*.bundle; do
     cp -R "$bundle" "$APP/Contents/Resources/"
 done
 
-# Bundle the agent-hook CLI so we can prepend its directory to the spawned
-# shell's PATH. Coding agents (Claude Code, aider, …) can invoke
-# `clayspace-hook stop` from their hook config to get the same OSC-9 push
-# notification flow that's powering the in-app badges.
+# Bundle our PATH-shim CLIs into Resources/bin so spawned shells can
+# resolve them automatically. Two scripts ship today:
+#
+#   clayspace-hook  — emits OSC 9 notifications consumed by the PTY
+#                     parser; agents call it from their hook config.
+#   claude          — wraps the real Claude Code binary, injecting our
+#                     hooks inline via --settings on every invocation
+#                     so the user doesn't have to install anything to
+#                     ~/.claude or .claude/settings.json.
 mkdir -p "$APP/Contents/Resources/bin"
-cp "$ROOT/Tools/clayspace-hook" "$APP/Contents/Resources/bin/clayspace-hook"
-chmod +x "$APP/Contents/Resources/bin/clayspace-hook"
+for tool in clayspace-hook claude; do
+    cp "$ROOT/Tools/$tool" "$APP/Contents/Resources/bin/$tool"
+    chmod +x "$APP/Contents/Resources/bin/$tool"
+done
 
 # Ad-hoc sign so launchd is willing to run it.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true

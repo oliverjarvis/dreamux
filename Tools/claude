@@ -1,0 +1,70 @@
+#!/bin/sh
+# claude — Clayspace's PATH shim. Bundled at
+# Clayspace.app/Contents/Resources/bin/ and prepended to spawned shells'
+# PATH, so typing `claude` in a Clayspace tab hits us first instead of
+# the real binary.
+#
+# Each invocation we:
+#   1. Resolve the real `claude` (walking PATH, skipping our own dir).
+#   2. Build an inline `--settings` JSON pointing Stop/Notification
+#      hooks at `clayspace-hook` (the sibling script).
+#   3. exec the real claude with --settings <json> "$@".
+#
+# Result: notifications work in any Clayspace tab without writing a
+# single byte to ~/.claude/settings.json or any project's .claude/.
+# Outside Clayspace, vanilla `claude` keeps working as normal.
+#
+# Opt-out:
+#   CLAYSPACE_CLAUDE_INTEGRATION=0  →  pass through unmodified.
+#
+# Fallbacks: any unexpected condition (real claude missing, hook script
+# missing, opt-out flag set) reverts to a clean exec of real claude.
+
+set -eu
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Find real claude — first match in PATH that isn't this shim.
+REAL_CLAUDE=""
+OLD_IFS="$IFS"
+IFS=":"
+for dir in $PATH; do
+    [ -z "$dir" ] && continue
+    [ "$dir" = "$SELF_DIR" ] && continue
+    if [ -x "$dir/claude" ]; then
+        REAL_CLAUDE="$dir/claude"
+        break
+    fi
+done
+IFS="$OLD_IFS"
+
+if [ -z "$REAL_CLAUDE" ]; then
+    cat >&2 <<MSG
+clayspace: 'claude' isn't installed.
+
+Install it (https://docs.anthropic.com/claude-code) and try again, e.g.:
+
+    npm install -g @anthropic-ai/claude-code
+
+MSG
+    exit 127
+fi
+
+# Opt-out
+if [ "${CLAYSPACE_CLAUDE_INTEGRATION:-1}" = "0" ]; then
+    exec "$REAL_CLAUDE" "$@"
+fi
+
+HOOK="$SELF_DIR/clayspace-hook"
+if [ ! -x "$HOOK" ]; then
+    # Hook script missing → nothing to inject, pass through.
+    exec "$REAL_CLAUDE" "$@"
+fi
+
+# Build inline hooks JSON. The path is wrapped in escaped quotes so it
+# tolerates spaces (Clayspace.app could live anywhere). The single-quoted
+# segments stay literal; "$HOOK" expands the path between escaped JSON
+# quotes.
+SETTINGS_JSON='{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" stop"}]}],"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" notify"}]}]}}'
+
+exec "$REAL_CLAUDE" --settings "$SETTINGS_JSON" "$@"
