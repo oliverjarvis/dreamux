@@ -70,10 +70,12 @@ final class WorkspaceSession {
 
     func createTab() {
         controller.createTab(title: "shell", icon: "terminal.fill")
+        TerminalFocus.focusVisibleTerminal()
     }
 
     func splitFocused(_ orientation: SplitOrientation) {
         controller.splitPane(orientation: orientation)
+        TerminalFocus.focusVisibleTerminal()
     }
 
     func closeFocusedTab() {
@@ -133,6 +135,10 @@ final class WorkspaceSession {
         // workspaces, keep theirs.
         if isVisible {
             tabSessions[tab.id]?.hasUnread = false
+            // Bonsplit's select doesn't touch AppKit's responder chain —
+            // wire focus to the new tab's terminal so keystrokes land
+            // without the user having to click in.
+            TerminalFocus.focusVisibleTerminal()
         }
     }
 
@@ -144,10 +150,12 @@ final class WorkspaceSession {
 
     /// Called by the store when this workspace becomes the visible one.
     /// Clears the badge on the active tab so re-entering a workspace
-    /// dismisses the indicator naturally.
+    /// dismisses the indicator naturally, and focuses the active
+    /// terminal so the user can start typing immediately.
     func didBecomeVisible() {
         isVisible = true
         clearActiveTabUnread()
+        TerminalFocus.focusVisibleTerminal()
     }
 
     func didResignVisible() {
