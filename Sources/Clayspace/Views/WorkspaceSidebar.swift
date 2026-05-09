@@ -27,23 +27,27 @@ struct WorkspaceSidebar: View {
             Button {
                 store.addWorkspace()
             } label: {
-                VStack(spacing: 4) {
+                HStack(spacing: 10) {
                     Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 44, height: 44)
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 28, height: 28)
                         .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(.quaternary)
                         )
                         .foregroundStyle(.secondary)
-                    // Reserve the same caption-line space the named tiles
-                    // use, so the +-button's icon aligns vertically with
-                    // them instead of bouncing up.
-                    Color.clear.frame(height: 12)
+                    Text("New Work Item")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("New Workspace (⌘T)")
+            .help("New Work Item (⌘T)")
 
             Spacer()
         }
@@ -67,51 +71,61 @@ private struct WorkspaceButton: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(spacing: 4) {
+            HStack(spacing: 10) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(workspace.tint.opacity(isActive ? 0.95 : (isHovered ? 0.35 : 0.18)))
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(workspace.tint.opacity(isActive ? 0.95 : (isHovered ? 0.32 : 0.18)))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(workspace.tint.opacity(isActive ? 0 : 0.3), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(workspace.tint.opacity(isActive ? 0 : 0.28), lineWidth: 1)
                         )
                     Image(systemName: workspace.symbol)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(isActive ? Color.white : workspace.tint)
                 }
-                .frame(width: 44, height: 44)
+                .frame(width: 28, height: 28)
                 .overlay(alignment: .topTrailing) {
-                    // Attention badge — drawn outside the rounded square
-                    // so it notches the corner. Hidden when no unread.
+                    // Attention badge — anchored to the icon's corner.
                     Circle()
                         .fill(Color.red)
-                        .frame(width: 10, height: 10)
+                        .frame(width: 9, height: 9)
                         .overlay(
                             Circle()
                                 .strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
                         )
-                        .offset(x: 4, y: -4)
+                        .offset(x: 3, y: -3)
                         .opacity(hasUnread ? 1 : 0)
                         .animation(.snappy(duration: 0.18), value: hasUnread)
                         .accessibilityHidden(true)
                 }
-                .overlay(alignment: .leading) {
-                    // Active-pill indicator on the left edge.
-                    Capsule()
-                        .fill(.primary)
-                        .frame(width: 3, height: isActive ? 24 : 0)
-                        .offset(x: -10)
-                        .animation(.snappy(duration: 0.18), value: isActive)
-                }
 
                 Text(workspace.name)
-                    .font(.caption2.weight(.medium))
+                    .font(.callout.weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(isActive ? .primary : .secondary)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        isActive
+                            ? Color.primary.opacity(0.10)
+                            : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                    )
+            )
+            .overlay(alignment: .leading) {
+                // Active-pill indicator hugging the leading edge of the row.
+                Capsule()
+                    .fill(.primary)
+                    .frame(width: 3, height: isActive ? 22 : 0)
+                    .offset(x: -8)
+                    .animation(.snappy(duration: 0.18), value: isActive)
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

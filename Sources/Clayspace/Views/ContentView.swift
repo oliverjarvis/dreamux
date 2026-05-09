@@ -35,7 +35,7 @@ private struct FeaturesDetail: View {
     var body: some View {
         HStack(spacing: 0) {
             WorkspaceSidebar(store: store)
-                .frame(width: 92)
+                .frame(width: 200)
                 .frame(maxHeight: .infinity)
                 .background(.regularMaterial)
 
