@@ -22,6 +22,12 @@ struct ClayspaceApp: App {
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
 
+                Button("Reopen Closed Workspace") {
+                    store.reopenClosedWorkspace()
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift, .option])
+                .disabled(!store.canReopenClosed)
+
                 Divider()
 
                 Button("Split Right") {

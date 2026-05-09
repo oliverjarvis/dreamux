@@ -11,6 +11,14 @@ final class WorkspaceStore {
     /// so the shell process and scrollback survive sidebar switches.
     private var sessions: [UUID: WorkspaceSession] = [:]
 
+    /// Stack of recently-closed workspaces. The shell session is gone (the
+    /// PTY was torn down on close), but we keep the metadata so the user
+    /// can reopen by name/icon/tint and start a fresh shell.
+    private var closedStack: [Workspace] = []
+    private let closedStackLimit = 10
+
+    var canReopenClosed: Bool { !closedStack.isEmpty }
+
     init() {
         let initial = [
             Workspace(name: "Home", symbol: "house.fill", tint: .blue),
@@ -59,6 +67,26 @@ final class WorkspaceStore {
         if activeID == workspace.id, let first = workspaces.first {
             activeID = first.id
         }
+        closedStack.append(workspace)
+        if closedStack.count > closedStackLimit {
+            closedStack.removeFirst(closedStack.count - closedStackLimit)
+        }
+    }
+
+    @discardableResult
+    func reopenClosedWorkspace() -> Workspace? {
+        guard let last = closedStack.popLast() else { return nil }
+        // Mint a fresh id so the new session map entry can't collide with a
+        // stale one if the user reopens, closes, and reopens again.
+        let restored = Workspace(
+            name: last.name,
+            symbol: last.symbol,
+            tint: last.tint,
+            workingDirectory: last.workingDirectory
+        )
+        workspaces.append(restored)
+        activeID = restored.id
+        return restored
     }
 
     var activeWorkspace: Workspace? {
