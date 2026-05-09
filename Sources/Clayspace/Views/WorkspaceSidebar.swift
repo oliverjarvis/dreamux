@@ -74,7 +74,7 @@ struct WorkspaceSidebar: View {
     private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader(
-                "Features",
+                "Work Items / Features",
                 addAction: { showAddFeature = true },
                 disabled: repoStore.repositories.isEmpty || isWorking,
                 disabledHint: "Add a repository before creating features."
@@ -159,9 +159,19 @@ struct WorkspaceSidebar: View {
             }
             .buttonStyle(.plain)
             .disabled(disabled)
-            .help(disabled ? (disabledHint ?? "Working…") : "Add \(title.dropLast())")
+            .help(disabled ? (disabledHint ?? "Working…") : addHelpText(for: title))
         }
         .padding(.bottom, 2)
+    }
+
+    private func addHelpText(for title: String) -> String {
+        // Section titles like "Work Items / Features" don't pluralize
+        // nicely with `dropLast()` — special-case them.
+        switch title {
+        case "Work Items / Features": return "New Feature"
+        case "Repositories": return "Add Repository"
+        default: return "Add \(title.dropLast())"
+        }
     }
 
     // MARK: - Actions
