@@ -29,14 +29,20 @@ final class TabSession: Identifiable {
         // from receiving them. Mark them `ignore` so the events bubble up
         // to AppKit and fire our shortcuts (Cmd+T, Cmd+D, Cmd+W, …).
         let releaseGhosttyShortcuts: (inout TerminalConfiguration.Builder) -> Void = { builder in
-            for key in ["t", "n", "d", "w", "q",
-                        "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+            // Letter shortcuts that have SwiftUI menu equivalents — release
+            // them so the menu fires instead of Ghostty's default action.
+            //
+            // Note: digits (Cmd+1..9) used to be in this list as literal
+            // "1", "2", … but Ghostty's keybind parser wants names like
+            // "one", "two", and an invalid keybind line poisons the rest
+            // of the config — including default backspace handling. Until
+            // we wire the proper names, keep this list to letters only.
+            for key in ["t", "n", "d", "w", "q"] {
                 builder.withCustom("keybind", "super+\(key)=ignore")
                 builder.withCustom("keybind", "shift+super+\(key)=ignore")
                 builder.withCustom("keybind", "alt+super+\(key)=ignore")
+                builder.withCustom("keybind", "shift+alt+super+\(key)=ignore")
             }
-            builder.withCustom("keybind", "super+left=ignore")
-            builder.withCustom("keybind", "super+right=ignore")
             builder.withCustom("keybind", "alt+super+left=ignore")
             builder.withCustom("keybind", "alt+super+right=ignore")
             builder.withCustom("keybind", "alt+super+up=ignore")
