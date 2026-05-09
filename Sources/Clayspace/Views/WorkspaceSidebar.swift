@@ -45,11 +45,25 @@ struct WorkspaceSidebar: View {
 
     private var repositoriesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Repositories")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 2)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Repositories")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    showAddRepo = true
+                } label: {
+                    Image(systemName: isAddingRepo ? "hourglass" : "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isAddingRepo)
+                .help(isAddingRepo ? "Adding repository…" : "Add Repository")
+            }
+            .padding(.bottom, 2)
 
             if repoStore.repositories.isEmpty {
                 Text("Add a repository to start creating Work Items inside it.")
@@ -68,31 +82,6 @@ struct WorkspaceSidebar: View {
                     )
                 }
             }
-
-            Button {
-                showAddRepo = true
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: isAddingRepo ? "hourglass" : "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(.quaternary)
-                        )
-                        .foregroundStyle(.secondary)
-                    Text(isAddingRepo ? "Adding…" : "Add Repository")
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isAddingRepo)
         }
     }
 
