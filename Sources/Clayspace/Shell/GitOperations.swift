@@ -221,6 +221,59 @@ enum GitOperations {
         _ = try? await runGit(["branch", "-D", branch], in: repoRootURL)
     }
 
+    // MARK: - Merge
+
+    enum MergeOutcome: Equatable {
+        case alreadyUpToDate
+        case merged
+        case conflicted(paths: [String])
+    }
+
+    /// Merge `feature` into `baseBranch` from inside the worktree where
+    /// `baseBranch` is checked out. Always uses `--no-ff` so the merge
+    /// commit is explicit and easy to revert later. On conflict, leaves
+    /// the worktree in a conflicted state for the user (or an agent) to
+    /// resolve — does *not* abort automatically.
+    static func mergeBranch(
+        feature: String,
+        into baseBranch: String,
+        in baseWorktreeURL: URL
+    ) async throws -> MergeOutcome {
+        let message = "Merge branch '\(feature)' into \(baseBranch)"
+        do {
+            let output = try await runGit(
+                ["merge", "--no-ff", "--no-edit", "-m", message, feature],
+                in: baseWorktreeURL
+            )
+            if output.lowercased().contains("already up to date") {
+                return .alreadyUpToDate
+            }
+            return .merged
+        } catch let GitError.commandFailed(args, stderr) {
+            let conflicted = await conflictedPaths(in: baseWorktreeURL)
+            if !conflicted.isEmpty {
+                return .conflicted(paths: conflicted)
+            }
+            throw GitError.commandFailed(args: args, stderr: stderr)
+        }
+    }
+
+    static func conflictedPaths(in worktreeURL: URL) async -> [String] {
+        let output = (try? await runGit(
+            ["diff", "--name-only", "--diff-filter=U"],
+            in: worktreeURL
+        )) ?? ""
+        return output
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+    }
+
+    /// Abort an in-progress merge so the worktree returns to a clean
+    /// state. Best-effort.
+    static func abortMerge(in worktreeURL: URL) async {
+        _ = try? await runGit(["merge", "--abort"], in: worktreeURL)
+    }
+
     // MARK: - Names
 
     /// Heuristic name extraction from a clone URL. `git@host:foo/bar.git` →

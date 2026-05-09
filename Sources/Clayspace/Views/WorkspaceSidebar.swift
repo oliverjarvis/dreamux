@@ -9,6 +9,7 @@ struct WorkspaceSidebar: View {
     @State private var addError: String?
     @State private var isWorking = false
     @State private var pendingClose: Workspace?
+    @State private var pendingMerge: Workspace?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -33,6 +34,19 @@ struct WorkspaceSidebar: View {
                 projectName: repoStore.project.name,
                 onSubmit: handleAddRepo,
                 onCancel: { showAddRepo = false }
+            )
+        }
+        .sheet(
+            item: $pendingMerge,
+            onDismiss: {}
+        ) { workspace in
+            MergeFeatureSheet(
+                workspace: workspace,
+                repos: repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) },
+                onOpenConflictTab: { url, title in
+                    openConflictTab(workspace: workspace, url: url, title: title)
+                },
+                onDismiss: { pendingMerge = nil }
             )
         }
         .alert(
@@ -97,7 +111,8 @@ struct WorkspaceSidebar: View {
                         onClose: { pendingClose = workspace },
                         onRename: { store.setName($0, for: workspace.id) },
                         onPickSymbol: { store.setIcon($0, for: workspace.id) },
-                        onPickTint: { store.setTint($0, for: workspace.id) }
+                        onPickTint: { store.setTint($0, for: workspace.id) },
+                        onMerge: workspace.linkedRepoIDs.isEmpty ? nil : { pendingMerge = workspace }
                     )
                 }
 
@@ -239,6 +254,14 @@ struct WorkspaceSidebar: View {
         }
     }
 
+    private func openConflictTab(workspace: Workspace, url: URL, title: String) {
+        // Make sure the workspace is active so the new tab is the visible
+        // one, then use its session to open a tab cd'd into the conflict.
+        store.activate(workspace.id)
+        guard let session = store.session(for: workspace) as WorkspaceSession? else { return }
+        session.openTab(at: url.path, title: title)
+    }
+
     private func closeFeature(_ workspace: Workspace, removeWorktrees: Bool) {
         let project = repoStore.project
         let linkedRepos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
@@ -266,6 +289,7 @@ private struct WorkspaceButton: View {
     let onRename: (String) -> Void
     let onPickSymbol: (String) -> Void
     let onPickTint: (Color) -> Void
+    var onMerge: (() -> Void)? = nil
 
     @State private var isHovered = false
     @State private var isPickerPresented = false
@@ -343,6 +367,9 @@ private struct WorkspaceButton: View {
         .help(workspace.workingDirectory ?? workspace.name)
         .contextMenu {
             Button("Customize…") { isPickerPresented = true }
+            if !workspace.linkedRepoIDs.isEmpty, let onMerge {
+                Button("Merge…", action: onMerge)
+            }
             Divider()
             Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
         }

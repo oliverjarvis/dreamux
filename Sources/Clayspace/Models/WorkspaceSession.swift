@@ -110,8 +110,10 @@ final class WorkspaceSession {
 
     private func handleDidCreateTab(_ tab: Tab) {
         guard tabSessions[tab.id] == nil else { return }
+        let cwd = nextTabCwdOverride ?? workspace.workingDirectory
+        nextTabCwdOverride = nil
         let session = TabSession(
-            cwd: workspace.workingDirectory,
+            cwd: cwd,
             onActivity: { [weak self, tabId = tab.id] message in
                 Task { @MainActor in
                     self?.handleActivity(tabId: tabId, message: message)
@@ -158,6 +160,23 @@ final class WorkspaceSession {
 
     var anyTabHasUnread: Bool {
         tabSessions.values.contains { $0.hasUnread }
+    }
+
+    /// Override for the next tab's cwd. Used by the merge UI to drop a
+    /// tab inside a conflicted worktree (which isn't symlinked into
+    /// the aggregation directory). Read once and cleared in
+    /// `handleDidCreateTab`.
+    private var nextTabCwdOverride: String?
+
+    /// Open a new tab whose shell starts in `path` instead of this
+    /// workspace's default working directory. Used to drop the user
+    /// (and their agent) straight into a conflicted worktree.
+    func openTab(at path: String, title: String, icon: String = "exclamationmark.triangle.fill") {
+        nextTabCwdOverride = path
+        controller.createTab(title: title, icon: icon)
+        // The didCreateTab delegate fires synchronously inside
+        // createTab and consumes the override; just in case, clear here.
+        nextTabCwdOverride = nil
     }
 
     /// Called by the store when this workspace becomes the visible one.
