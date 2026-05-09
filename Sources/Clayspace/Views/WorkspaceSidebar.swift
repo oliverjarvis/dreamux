@@ -5,6 +5,12 @@ struct WorkspaceSidebar: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            Text("Work Items")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 4)
+
             ForEach(store.workspaces) { workspace in
                 WorkspaceButton(
                     workspace: workspace,
