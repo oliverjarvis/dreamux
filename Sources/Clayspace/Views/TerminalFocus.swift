@@ -1,4 +1,6 @@
 import AppKit
+import GhosttyTerminal
+import os
 
 /// Finds whichever Ghostty terminal NSView is currently visible in the
 /// key window and makes it the first responder, so keystrokes flow
@@ -10,40 +12,56 @@ import AppKit
 /// selectTab to wire focus back up.
 @MainActor
 enum TerminalFocus {
+    private static let logger = Logger(
+        subsystem: "com.clayspace.Clayspace",
+        category: "TerminalFocus"
+    )
+
     /// Defers to the next runloop so SwiftUI has time to lay out the
     /// newly-selected tab before we go hunting for its NSView.
     static func focusVisibleTerminal() {
-        DispatchQueue.main.async {
-            guard let window = NSApp.keyWindow,
-                  let content = window.contentView else { return }
-            guard let view = visibleTerminalView(in: content) else { return }
-            window.makeFirstResponder(view)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            attemptFocus()
         }
     }
 
-    /// AppTerminalView lives in GhosttyTerminal — match by class-name
-    /// suffix instead of importing it directly so this helper stays
-    /// tolerant of the surrounding module structure.
-    private static func visibleTerminalView(in root: NSView) -> NSView? {
-        if root.className.hasSuffix("AppTerminalView"),
-           !isEffectivelyHidden(root) {
-            return root
+    private static func attemptFocus() {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            logger.info("no key window")
+            return
         }
-        for sub in root.subviews {
-            if let found = visibleTerminalView(in: sub) {
-                return found
+        guard let content = window.contentView else {
+            logger.info("key window has no contentView")
+            return
+        }
+
+        var terminals: [AppTerminalView] = []
+        collectTerminals(in: content, into: &terminals)
+
+        if terminals.isEmpty {
+            logger.info("no AppTerminalView found in window tree")
+            return
+        }
+
+        // Pick the first one we can hand focus to. AppKit's
+        // makeFirstResponder returns false if the view rejects (which is
+        // typically the case for off-screen/hidden Ghostty surfaces).
+        for terminal in terminals {
+            if window.makeFirstResponder(terminal) {
+                logger.info("focused terminal — \(terminal.classForCoder, privacy: .public)")
+                return
             }
         }
-        return nil
+
+        logger.info("\(terminals.count, privacy: .public) terminal(s) found, none accepted firstResponder")
     }
 
-    private static func isEffectivelyHidden(_ view: NSView) -> Bool {
-        var current: NSView? = view
-        while let v = current {
-            if v.isHidden { return true }
-            if let layer = v.layer, layer.opacity < 0.99 { return true }
-            current = v.superview
+    private static func collectTerminals(in root: NSView, into out: inout [AppTerminalView]) {
+        if let terminal = root as? AppTerminalView {
+            out.append(terminal)
         }
-        return false
+        for sub in root.subviews {
+            collectTerminals(in: sub, into: &out)
+        }
     }
 }
