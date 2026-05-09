@@ -73,17 +73,14 @@ struct WorkspaceSidebar: View {
 
     private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(
-                "Work Items / Features",
-                addAction: { showAddFeature = true },
-                disabled: repoStore.repositories.isEmpty || isWorking,
-                disabledHint: "Add a repository before creating features."
-            )
+            Text("Work Items / Features")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 2)
 
-            if store.workspaces.isEmpty {
-                Text(repoStore.repositories.isEmpty
-                     ? "Add a repository, then create your first feature."
-                     : "Click + to create your first feature.")
+            if store.workspaces.isEmpty, repoStore.repositories.isEmpty {
+                Text("Add a repository, then create your first feature.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -103,8 +100,40 @@ struct WorkspaceSidebar: View {
                         onPickTint: { store.setTint($0, for: workspace.id) }
                     )
                 }
+
+                addFeatureRow
             }
         }
+    }
+
+    private var addFeatureRow: some View {
+        Button {
+            showAddFeature = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isWorking ? "hourglass" : "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.quaternary)
+                    )
+                    .foregroundStyle(.secondary)
+                Text(isWorking ? "Adding…" : "Add Feature")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(repoStore.repositories.isEmpty || isWorking)
+        .help(repoStore.repositories.isEmpty
+              ? "Add a repository before creating features."
+              : "New Feature")
     }
 
     // MARK: - Repositories
@@ -159,19 +188,9 @@ struct WorkspaceSidebar: View {
             }
             .buttonStyle(.plain)
             .disabled(disabled)
-            .help(disabled ? (disabledHint ?? "Working…") : addHelpText(for: title))
+            .help(disabled ? (disabledHint ?? "Working…") : "Add Repository")
         }
         .padding(.bottom, 2)
-    }
-
-    private func addHelpText(for title: String) -> String {
-        // Section titles like "Work Items / Features" don't pluralize
-        // nicely with `dropLast()` — special-case them.
-        switch title {
-        case "Work Items / Features": return "New Feature"
-        case "Repositories": return "Add Repository"
-        default: return "Add \(title.dropLast())"
-        }
     }
 
     // MARK: - Actions
