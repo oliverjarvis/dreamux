@@ -30,7 +30,8 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Optional
+import time
+from typing import Optional, Tuple
 
 
 def emit(message: str) -> None:
@@ -64,29 +65,41 @@ def read_stdin_json() -> Optional[dict]:
         return None
 
 
-def last_assistant_text(transcript_path: str) -> str:
-    """Walk the JSONL transcript and return the cleaned text content of
-    the most recent assistant turn (or '' if none)."""
-    last = None
+def scan_transcript(
+    transcript_path: str,
+) -> Tuple[int, Optional[dict], int]:
+    """Walk the JSONL transcript and return (last_user_idx,
+    last_assistant_entry, last_assistant_idx). Indices are -1 if the
+    corresponding entry doesn't exist; the assistant entry is None when
+    the transcript has no assistant turns."""
+    last_user_idx = -1
+    last_assistant_idx = -1
+    last_assistant: Optional[dict] = None
     try:
         with open(transcript_path, encoding="utf-8") as f:
-            for line in f:
+            for i, line in enumerate(f):
                 try:
                     entry = json.loads(line)
                 except Exception:
                     continue
-                if entry.get("type") == "assistant":
-                    last = entry
+                kind = entry.get("type")
+                if kind == "user":
+                    last_user_idx = i
+                elif kind == "assistant":
+                    last_assistant_idx = i
+                    last_assistant = entry
     except Exception:
-        return ""
+        pass
+    return last_user_idx, last_assistant, last_assistant_idx
 
-    if not last:
-        return ""
 
-    msg = last.get("message", last)
+def extract_text(entry: dict) -> str:
+    """Pull the text out of an assistant transcript entry — Claude Code
+    uses a list of `{type, text}` content blocks; fall back to a plain
+    string for older or simpler shapes."""
+    msg = entry.get("message", entry)
     content = msg.get("content", "")
     if isinstance(content, list):
-        # Claude Code transcripts use a list of {type, text} blocks.
         parts = []
         for block in content:
             if isinstance(block, dict):
@@ -99,7 +112,6 @@ def last_assistant_text(transcript_path: str) -> str:
         text = content
     else:
         text = ""
-
     return text.strip()
 
 
@@ -113,10 +125,34 @@ def stop_handler() -> None:
     if not transcript_path or not os.path.exists(transcript_path):
         return
 
-    text = last_assistant_text(transcript_path)
+    # Poll the transcript until the just-completed assistant turn lands.
+    # Claude Code's Stop hook can fire before the turn is flushed to
+    # disk, which is why we'd otherwise emit the *previous* turn's text
+    # (or nothing at all on the first response).
+    #
+    # The signal that the turn has flushed: the file ends with an
+    # assistant entry that comes AFTER the most recent user entry. While
+    # the file ends with a user entry (or nothing), we keep polling.
+    deadline = time.monotonic() + 3.0
+    assistant_entry: Optional[dict] = None
+    while True:
+        user_idx, candidate, candidate_idx = scan_transcript(transcript_path)
+        if candidate is not None and candidate_idx > user_idx:
+            assistant_entry = candidate
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+
+    if assistant_entry is None:
+        # Timed out without a fresh assistant entry — likely an
+        # interrupt or a session that ended without a new response.
+        return
+
+    text = extract_text(assistant_entry)
     if not text:
         return
-    # Common interrupt markers — skip so Ctrl+C bailouts don't ping.
+
     lowered = text.lower()
     interrupt_markers = (
         "[request interrupted by user]",
@@ -125,11 +161,8 @@ def stop_handler() -> None:
     if any(marker in lowered for marker in interrupt_markers):
         return
 
-    # Trim long completions so the banner stays readable.
     if len(text) > 200:
         text = text[:200].rstrip() + "…"
-
-    # Collapse newlines — banner is single-line.
     text = " ".join(text.split())
     if not text:
         return
