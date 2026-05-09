@@ -8,6 +8,9 @@ struct HomeView: View {
     @State private var newProjectName = ""
     @State private var createError: String?
 
+    @State private var pendingDelete: Project?
+    @State private var deleteError: String?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -22,6 +25,33 @@ struct HomeView: View {
                 onCancel: { showCreate = false },
                 onCreate: createProject
             )
+        }
+        .alert(
+            "Move \(pendingDelete?.name ?? "project") to Trash?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            presenting: pendingDelete
+        ) { project in
+            Button("Move to Trash", role: .destructive) {
+                deleteProject(project)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { project in
+            Text("The folder at \(project.rootPath.path) will be moved to the Trash. You can recover it from Finder if you change your mind.")
+        }
+        .alert(
+            "Couldn't delete project",
+            isPresented: Binding(
+                get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } }
+            ),
+            presenting: deleteError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error)
         }
     }
 
@@ -86,7 +116,8 @@ struct HomeView: View {
                         ProjectRow(
                             project: project,
                             onOpen: { openWindow(value: project.id) },
-                            onRemove: { store.remove(project) }
+                            onRemove: { store.remove(project) },
+                            onDelete: { pendingDelete = project }
                         )
                     }
                 }
@@ -117,6 +148,14 @@ struct HomeView: View {
             createError = error.localizedDescription
         }
     }
+
+    private func deleteProject(_ project: Project) {
+        do {
+            try store.deleteProject(project)
+        } catch {
+            deleteError = error.localizedDescription
+        }
+    }
 }
 
 // MARK: - Row
@@ -125,6 +164,7 @@ private struct ProjectRow: View {
     let project: Project
     let onOpen: () -> Void
     let onRemove: () -> Void
+    let onDelete: () -> Void
 
     @State private var isHovered = false
 
@@ -159,8 +199,12 @@ private struct ProjectRow: View {
         .onHover { isHovered = $0 }
         .contextMenu {
             Button("Open in New Window", action: onOpen)
+            Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
+            }
             Divider()
-            Button("Remove from List", role: .destructive, action: onRemove)
+            Button("Remove from List", action: onRemove)
+            Button("Move to Trash…", role: .destructive, action: onDelete)
         }
     }
 }

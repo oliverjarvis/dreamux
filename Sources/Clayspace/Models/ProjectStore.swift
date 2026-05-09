@@ -93,6 +93,18 @@ final class ProjectStore {
         save()
     }
 
+    /// Move the project's folder to the Trash and drop it from the list.
+    /// We use the system trash (not `removeItem`) so the user can recover
+    /// the project from Finder if they change their mind.
+    func deleteProject(_ project: Project) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: project.rootPath.path) {
+            var trashedURL: NSURL?
+            try fm.trashItem(at: project.rootPath, resultingItemURL: &trashedURL)
+        }
+        remove(project)
+    }
+
     // MARK: - Persistence
 
     private func load() {
