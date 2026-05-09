@@ -61,10 +61,17 @@ if [ ! -x "$HOOK" ]; then
     exec "$REAL_CLAUDE" "$@"
 fi
 
-# Build inline hooks JSON. The path is wrapped in escaped quotes so it
-# tolerates spaces (Clayspace.app could live anywhere). The single-quoted
-# segments stay literal; "$HOOK" expands the path between escaped JSON
-# quotes.
-SETTINGS_JSON='{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" stop"}]}],"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" notify"}]}]}}'
+# Build inline hooks JSON.
+#
+# We only wire `Notification`, not `Stop`. Stop fires at the end of every
+# assistant turn — including Ctrl+C interrupts — which makes for very
+# noisy notifications. Notification is the event Claude Code itself
+# raises when it actually wants the user's attention (permission
+# requests, idle-waiting), which is what the user actually wants pinged.
+#
+# The path is wrapped in escaped quotes so it tolerates spaces in the
+# bundle path. Single-quoted segments stay literal; "$HOOK" expands the
+# path between escaped JSON quotes.
+SETTINGS_JSON='{"hooks":{"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" notify"}]}]}}'
 
 exec "$REAL_CLAUDE" --settings "$SETTINGS_JSON" "$@"
