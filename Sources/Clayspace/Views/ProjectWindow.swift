@@ -20,6 +20,7 @@ struct ProjectWindow: View {
             .navigationTitle(project.name)
             .navigationSubtitle(project.rootPath.path)
             .focusedSceneValue(\.activeStore, store)
+            .focusedSceneValue(\.activeProject, project)
     }
 }
 
@@ -29,9 +30,18 @@ private struct ActiveStoreKey: FocusedValueKey {
     typealias Value = WorkspaceStore
 }
 
+private struct ActiveProjectKey: FocusedValueKey {
+    typealias Value = Project
+}
+
 extension FocusedValues {
     var activeStore: WorkspaceStore? {
         get { self[ActiveStoreKey.self] }
         set { self[ActiveStoreKey.self] = newValue }
+    }
+
+    var activeProject: Project? {
+        get { self[ActiveProjectKey.self] }
+        set { self[ActiveProjectKey.self] = newValue }
     }
 }

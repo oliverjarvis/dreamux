@@ -29,6 +29,60 @@ struct ClayspaceApp: App {
         }
         .commands {
             ProjectCommands()
+            IntegrationCommands()
+        }
+    }
+}
+
+// MARK: - Integration commands
+
+private struct IntegrationCommands: Commands {
+    @FocusedValue(\.activeProject) private var project: Project?
+
+    var body: some Commands {
+        CommandMenu("Integrations") {
+            Button("Install Claude Code Hooks…") {
+                guard let project else { return }
+                installClaudeCode(into: project)
+            }
+            .disabled(project == nil)
+
+            Divider()
+
+            Button("Reveal Clayspace Hook Script") {
+                guard let path = ClaudeCodeIntegration.hookExecutablePath else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }
+            .disabled(ClaudeCodeIntegration.hookExecutablePath == nil)
+        }
+    }
+
+    private func installClaudeCode(into project: Project) {
+        do {
+            let result = try ClaudeCodeIntegration.install(into: project.rootPath)
+            let alert = NSAlert()
+            alert.messageText = "Claude Code hooks installed"
+            let stopState = result.stopInstalled ? "added" : "refreshed"
+            let notifyState = result.notificationInstalled ? "added" : "refreshed"
+            alert.informativeText = """
+            Wrote \(result.settingsPath).
+
+            Stop hook: \(stopState).
+            Notification hook: \(notifyState).
+
+            Open a tab in this project, run `claude`, and Clayspace \
+            will get push notifications when Claude finishes a task or \
+            asks for input.
+            """
+            alert.addButton(withTitle: "Done")
+            alert.runModal()
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Couldn't install Claude Code hooks"
+            alert.informativeText = error.localizedDescription
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
         }
     }
 }
