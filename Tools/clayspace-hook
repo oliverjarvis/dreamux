@@ -25,6 +25,15 @@ set -eu
 emit() {
     # OSC 9 ; <body> BEL — Clayspace's PTY parser pulls the body out
     # and uses it as the notification's main text.
+    #
+    # Prefer /dev/tty over stdout. Coding agents (Claude Code, etc.)
+    # commonly capture hook stdout to surface output in their UI, which
+    # would swallow the OSC sequence. /dev/tty resolves to the
+    # controlling terminal of this process — i.e. our Clayspace PTY —
+    # bypassing any pipe the agent might have set up.
+    if [ -w /dev/tty ]; then
+        printf '\033]9;%s\a' "$1" > /dev/tty 2>/dev/null && return
+    fi
     printf '\033]9;%s\a' "$1"
 }
 
