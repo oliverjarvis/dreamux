@@ -1,5 +1,7 @@
 import Foundation
 import UserNotifications
+import AppKit
+import os
 
 /// Posts macOS notifications when a tab signals activity (e.g. a coding
 /// agent finishes or asks a question — the convention is to ring the
@@ -18,6 +20,16 @@ final class NotificationManager: NSObject {
         // where macOS suppresses notifications while our app is frontmost
         // (see `userNotificationCenter(_:willPresent:withCompletionHandler:)`).
         UNUserNotificationCenter.current().delegate = self
+    }
+
+    /// Open System Settings on the per-app Notifications pane. Useful
+    /// after macOS denied us — `requestAuthorization` won't re-prompt
+    /// once status is `.denied`, so the user has to flip the switch.
+    func openSystemNotificationSettings() {
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.clayspace.Clayspace"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications?id=\(bundleID)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     func requestAuthorizationIfNeeded() {
@@ -66,8 +78,15 @@ final class NotificationManager: NSObject {
         }
     }
 
+    private static let logger = Logger(
+        subsystem: "com.clayspace.Clayspace",
+        category: "Notifications"
+    )
+
     private static func log(_ message: String) {
-        print("[Clayspace.Notifications] \(message)")
+        // Use unified logging so the user can grep with:
+        //   log show --predicate 'subsystem == "com.clayspace.Clayspace"' --info --last 5m
+        logger.info("\(message, privacy: .public)")
     }
 }
 

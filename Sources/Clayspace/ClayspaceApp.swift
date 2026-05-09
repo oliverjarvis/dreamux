@@ -69,6 +69,9 @@ private struct HomeCommands: Commands {
         CommandGroup(after: .appInfo) {
             Button("Show Home") { openWindow(id: "home") }
                 .keyboardShortcut("0", modifiers: [.command, .shift])
+            Button("Notification Settings…") {
+                NotificationManager.shared.openSystemNotificationSettings()
+            }
         }
     }
 }
