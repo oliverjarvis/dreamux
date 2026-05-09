@@ -21,14 +21,20 @@ struct WorkspaceSidebar: View {
             Button {
                 store.addWorkspace()
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 44, height: 44)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(.quaternary)
-                    )
-                    .foregroundStyle(.secondary)
+                VStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 44, height: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(.quaternary)
+                        )
+                        .foregroundStyle(.secondary)
+                    // Reserve the same caption-line space the named tiles
+                    // use, so the +-button's icon aligns vertically with
+                    // them instead of bouncing up.
+                    Color.clear.frame(height: 12)
+                }
             }
             .buttonStyle(.plain)
             .help("New Workspace (⌘T)")
@@ -55,41 +61,51 @@ private struct WorkspaceButton: View {
 
     var body: some View {
         Button(action: onSelect) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(workspace.tint.opacity(isActive ? 0.95 : (isHovered ? 0.35 : 0.18)))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(workspace.tint.opacity(isActive ? 0 : 0.3), lineWidth: 1)
-                    )
-                Image(systemName: workspace.symbol)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(isActive ? Color.white : workspace.tint)
+            VStack(spacing: 4) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(workspace.tint.opacity(isActive ? 0.95 : (isHovered ? 0.35 : 0.18)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(workspace.tint.opacity(isActive ? 0 : 0.3), lineWidth: 1)
+                        )
+                    Image(systemName: workspace.symbol)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(isActive ? Color.white : workspace.tint)
+                }
+                .frame(width: 44, height: 44)
+                .overlay(alignment: .topTrailing) {
+                    // Attention badge — drawn outside the rounded square
+                    // so it notches the corner. Hidden when no unread.
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 10, height: 10)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
+                        )
+                        .offset(x: 4, y: -4)
+                        .opacity(hasUnread ? 1 : 0)
+                        .animation(.snappy(duration: 0.18), value: hasUnread)
+                        .accessibilityHidden(true)
+                }
+                .overlay(alignment: .leading) {
+                    // Active-pill indicator on the left edge.
+                    Capsule()
+                        .fill(.primary)
+                        .frame(width: 3, height: isActive ? 24 : 0)
+                        .offset(x: -10)
+                        .animation(.snappy(duration: 0.18), value: isActive)
+                }
+
+                Text(workspace.name)
+                    .font(.caption2.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .frame(maxWidth: .infinity)
             }
-            .frame(width: 44, height: 44)
-            .overlay(alignment: .topTrailing) {
-                // Attention badge — drawn outside the rounded square so it
-                // notches the corner. Hidden whenever the badge isn't active.
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 10, height: 10)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
-                    )
-                    .offset(x: 4, y: -4)
-                    .opacity(hasUnread ? 1 : 0)
-                    .animation(.snappy(duration: 0.18), value: hasUnread)
-                    .accessibilityHidden(true)
-            }
-            .overlay(alignment: .leading) {
-                // Active-pill indicator on the left edge.
-                Capsule()
-                    .fill(.primary)
-                    .frame(width: 3, height: isActive ? 24 : 0)
-                    .offset(x: -10)
-                    .animation(.snappy(duration: 0.18), value: isActive)
-            }
+            .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -99,7 +115,12 @@ private struct WorkspaceButton: View {
             Divider()
             Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
         }
-        .popover(isPresented: $isPickerPresented, arrowEdge: .trailing) {
+        // arrowEdge: .leading — arrow attaches to the leading edge of the
+        // popover, so the popover content extends to the *right* of the
+        // tile (into the terminal pane area). Trailing was rendering the
+        // popover to the left, where the outer rail's regularMaterial
+        // background painted over its leading content.
+        .popover(isPresented: $isPickerPresented, arrowEdge: .leading) {
             IconPickerPopover(
                 initialName: workspace.name,
                 selectedSymbol: workspace.symbol,
