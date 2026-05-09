@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var store: WorkspaceStore
+    @Bindable var repoStore: RepoStore
 
     @State private var section: AppSection = .features
     @State private var railWidth: CGFloat = OuterRail.collapsedWidth
@@ -22,7 +23,7 @@ struct ContentView: View {
     private var sectionDetail: some View {
         switch section {
         case .features:
-            FeaturesDetail(store: store)
+            FeaturesDetail(store: store, repoStore: repoStore)
         }
     }
 }
@@ -31,11 +32,12 @@ struct ContentView: View {
 /// tabs/terminals pane — now lives behind the "Features" section.
 private struct FeaturesDetail: View {
     @Bindable var store: WorkspaceStore
+    @Bindable var repoStore: RepoStore
 
     var body: some View {
         HStack(spacing: 0) {
-            WorkspaceSidebar(store: store)
-                .frame(width: 200)
+            WorkspaceSidebar(store: store, repoStore: repoStore)
+                .frame(width: 220)
                 .frame(maxHeight: .infinity)
                 .background(.regularMaterial)
 

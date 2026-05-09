@@ -2,14 +2,124 @@ import SwiftUI
 
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
+    @Bindable var repoStore: RepoStore
+
+    @State private var showAddRepo = false
+    @State private var addRepoError: String?
+    @State private var isAddingRepo = false
 
     var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 8) {
+                repositoriesSection
+                Divider().padding(.vertical, 6)
+                workItemsSection
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+        }
+        .sheet(isPresented: $showAddRepo) {
+            AddRepoSheet(
+                projectName: repoStore.project.name,
+                onSubmit: handleAddRepo,
+                onCancel: { showAddRepo = false }
+            )
+        }
+        .alert(
+            "Couldn't add repository",
+            isPresented: Binding(
+                get: { addRepoError != nil },
+                set: { if !$0 { addRepoError = nil } }
+            ),
+            presenting: addRepoError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error)
+        }
+    }
+
+    // MARK: - Repositories
+
+    private var repositoriesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Repositories")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 2)
+
+            if repoStore.repositories.isEmpty {
+                Text("No repos yet — add one to get started.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            } else {
+                ForEach(repoStore.repositories) { repo in
+                    RepoRow(
+                        repository: repo,
+                        onReveal: {
+                            NSWorkspace.shared.activateFileViewerSelecting([repo.rootURL])
+                        }
+                    )
+                }
+            }
+
+            Button {
+                showAddRepo = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: isAddingRepo ? "hourglass" : "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(.quaternary)
+                        )
+                        .foregroundStyle(.secondary)
+                    Text(isAddingRepo ? "Adding…" : "Add Repository")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isAddingRepo)
+        }
+    }
+
+    private func handleAddRepo(_ intent: AddRepoIntent) {
+        showAddRepo = false
+        isAddingRepo = true
+        Task {
+            do {
+                switch intent {
+                case .clone(let url, let name):
+                    try await repoStore.clone(url: url, name: name)
+                case .initialize(let name):
+                    try await repoStore.initRepo(name: name)
+                }
+            } catch {
+                addRepoError = error.localizedDescription
+            }
+            isAddingRepo = false
+        }
+    }
+
+    // MARK: - Work items
+
+    private var workItemsSection: some View {
         VStack(spacing: 8) {
             Text("Work Items")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 4)
+                .padding(.bottom, 2)
 
             ForEach(store.workspaces) { workspace in
                 WorkspaceButton(
@@ -49,11 +159,52 @@ struct WorkspaceSidebar: View {
             }
             .buttonStyle(.plain)
             .help("New Work Item (⌘T)")
+        }
+    }
+}
 
-            Spacer()
+private struct RepoRow: View {
+    let repository: Repository
+    let onReveal: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.secondary.opacity(isHovered ? 0.20 : 0.12))
+                Image(systemName: "shippingbox.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(repository.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(repository.defaultBranch)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isHovered ? Color.primary.opacity(0.05) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .help(repository.rootURL.path)
+        .contextMenu {
+            Button("Show in Finder", action: onReveal)
+        }
     }
 }
 

@@ -7,18 +7,21 @@ struct ProjectWindow: View {
     let project: Project
 
     @State private var store: WorkspaceStore
+    @State private var repoStore: RepoStore
 
     init(project: Project) {
         self.project = project
         _store = State(
             initialValue: WorkspaceStore(defaultWorkingDirectory: project.rootPath.path)
         )
+        _repoStore = State(initialValue: RepoStore(project: project))
     }
 
     var body: some View {
-        ContentView(store: store)
+        ContentView(store: store, repoStore: repoStore)
             .navigationTitle(project.name)
             .navigationSubtitle(project.rootPath.path)
+            .onAppear { repoStore.refresh() }
             .focusedSceneValue(\.activeStore, store)
             .focusedSceneValue(\.activeProject, project)
     }
