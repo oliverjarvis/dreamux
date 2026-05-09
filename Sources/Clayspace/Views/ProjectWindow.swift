@@ -21,22 +21,9 @@ struct ProjectWindow: View {
         ContentView(store: store, repoStore: repoStore)
             .navigationTitle(project.name)
             .navigationSubtitle(project.rootPath.path)
-            .onAppear {
-                repoStore.refresh()
-                seedDefaultWorkspaceIfNeeded()
-            }
+            .onAppear { repoStore.refresh() }
             .focusedSceneValue(\.activeStore, store)
             .focusedSceneValue(\.activeProject, project)
-    }
-
-    /// Cover the "project just got created with a repo" path: when the
-    /// window opens for a project whose only repo has no work items yet,
-    /// seed one so the user lands in a usable terminal immediately.
-    private func seedDefaultWorkspaceIfNeeded() {
-        guard store.workspaces.isEmpty,
-              let firstRepo = repoStore.repositories.first
-        else { return }
-        store.addWorkspace(under: firstRepo)
     }
 }
 

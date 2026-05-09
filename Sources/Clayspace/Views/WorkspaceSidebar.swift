@@ -4,21 +4,29 @@ struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
 
+    @State private var showAddFeature = false
     @State private var showAddRepo = false
-    @State private var addRepoError: String?
-    @State private var isAddingRepo = false
+    @State private var addError: String?
+    @State private var isWorking = false
+    @State private var pendingClose: Workspace?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 16) {
+                featuresSection
+                Divider()
                 repositoriesSection
-                if !orphanedWorkspaces.isEmpty {
-                    Divider()
-                    orphanedSection
-                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 12)
+        }
+        .sheet(isPresented: $showAddFeature) {
+            AddFeatureSheet(
+                projectName: repoStore.project.name,
+                availableRepos: repoStore.repositories,
+                onSubmit: handleCreateFeature,
+                onCancel: { showAddFeature = false }
+            )
         }
         .sheet(isPresented: $showAddRepo) {
             AddRepoSheet(
@@ -28,12 +36,32 @@ struct WorkspaceSidebar: View {
             )
         }
         .alert(
-            "Couldn't add repository",
+            "Close \(pendingClose?.name ?? "feature")?",
             isPresented: Binding(
-                get: { addRepoError != nil },
-                set: { if !$0 { addRepoError = nil } }
+                get: { pendingClose != nil },
+                set: { if !$0 { pendingClose = nil } }
             ),
-            presenting: addRepoError
+            presenting: pendingClose
+        ) { workspace in
+            Button("Close & Remove Worktrees", role: .destructive) {
+                closeFeature(workspace, removeWorktrees: true)
+            }
+            Button("Close (Keep Worktrees)") {
+                closeFeature(workspace, removeWorktrees: false)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { workspace in
+            Text(workspace.linkedRepoIDs.isEmpty
+                 ? "Close this feature and stop its shells."
+                 : "Removing worktrees will run `git worktree remove` and `git branch -D \(workspace.name)` in each linked repo. Pick \"Keep Worktrees\" to leave the on-disk worktrees in place.")
+        }
+        .alert(
+            "Couldn't apply change",
+            isPresented: Binding(
+                get: { addError != nil },
+                set: { if !$0 { addError = nil } }
+            ),
+            presenting: addError
         ) { _ in
             Button("OK", role: .cancel) {}
         } message: { error in
@@ -41,245 +69,163 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    // MARK: - Repositories
+    // MARK: - Features
 
-    private var repositoriesSection: some View {
+    private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Repositories")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    showAddRepo = true
-                } label: {
-                    Image(systemName: isAddingRepo ? "hourglass" : "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 18, height: 18)
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(isAddingRepo)
-                .help(isAddingRepo ? "Adding repository…" : "Add Repository")
-            }
-            .padding(.bottom, 2)
+            sectionHeader(
+                "Features",
+                addAction: { showAddFeature = true },
+                disabled: repoStore.repositories.isEmpty || isWorking,
+                disabledHint: "Add a repository before creating features."
+            )
 
-            if repoStore.repositories.isEmpty {
-                Text("Add a repository to start creating Work Items inside it.")
+            if store.workspaces.isEmpty {
+                Text(repoStore.repositories.isEmpty
+                     ? "Add a repository, then create your first feature."
+                     : "Click + to create your first feature.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             } else {
-                ForEach(repoStore.repositories) { repo in
-                    RepoSection(
-                        repo: repo,
-                        workspaces: store.workspaces(under: repo),
-                        store: store,
-                        onAddWorkItem: { store.addWorkspace(under: repo) }
+                ForEach(store.workspaces) { workspace in
+                    WorkspaceButton(
+                        workspace: workspace,
+                        isActive: workspace.id == store.activeID,
+                        hasUnread: store.hasUnread(for: workspace),
+                        lastActivityMessage: store.lastActivityMessage(for: workspace),
+                        onSelect: { store.activate(workspace.id) },
+                        onClose: { pendingClose = workspace },
+                        onRename: { store.setName($0, for: workspace.id) },
+                        onPickSymbol: { store.setIcon($0, for: workspace.id) },
+                        onPickTint: { store.setTint($0, for: workspace.id) }
                     )
                 }
             }
         }
     }
 
-    private var orphanedWorkspaces: [Workspace] {
-        store.workspaces.filter { workspace in
-            guard let repoID = workspace.repoID else { return true }
-            return !repoStore.repositories.contains { $0.name == repoID }
+    // MARK: - Repositories
+
+    private var repositoriesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader(
+                "Repositories",
+                addAction: { showAddRepo = true },
+                disabled: isWorking
+            )
+
+            if repoStore.repositories.isEmpty {
+                Text("No repositories in this project yet.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            } else {
+                ForEach(repoStore.repositories) { repo in
+                    RepoRow(
+                        repository: repo,
+                        onReveal: {
+                            NSWorkspace.shared.activateFileViewerSelecting([repo.rootURL])
+                        }
+                    )
+                }
+            }
         }
     }
 
+    // MARK: - Header
+
     @ViewBuilder
-    private var orphanedSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Other Work Items")
+    private func sectionHeader(
+        _ title: String,
+        addAction: @escaping () -> Void,
+        disabled: Bool,
+        disabledHint: String? = nil
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 2)
-
-            ForEach(orphanedWorkspaces) { workspace in
-                WorkspaceButton(
-                    workspace: workspace,
-                    isActive: workspace.id == store.activeID,
-                    hasUnread: store.hasUnread(for: workspace),
-                    lastActivityMessage: store.lastActivityMessage(for: workspace),
-                    onSelect: { store.activate(workspace.id) },
-                    onClose: { store.remove(workspace) },
-                    onRename: { store.setName($0, for: workspace.id) },
-                    onPickSymbol: { store.setIcon($0, for: workspace.id) },
-                    onPickTint: { store.setTint($0, for: workspace.id) }
-                )
+            Spacer()
+            Button(action: addAction) {
+                Image(systemName: isWorking ? "hourglass" : "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            .help(disabled ? (disabledHint ?? "Working…") : "Add \(title.dropLast())")
+        }
+        .padding(.bottom, 2)
+    }
+
+    // MARK: - Actions
+
+    private func handleCreateFeature(name: String, repoIDs: [String]) {
+        showAddFeature = false
+        isWorking = true
+        let project = repoStore.project
+        let selectedRepos = repoStore.repositories.filter { repoIDs.contains($0.name) }
+        Task {
+            do {
+                let dir = try await FeatureProvisioner.provision(
+                    featureName: name,
+                    in: project,
+                    across: selectedRepos
+                )
+                store.registerFeature(
+                    name: name,
+                    featureDirectory: dir,
+                    linkedRepoIDs: repoIDs
+                )
+            } catch {
+                addError = error.localizedDescription
+            }
+            isWorking = false
         }
     }
 
     private func handleAddRepo(_ intent: AddRepoIntent) {
         showAddRepo = false
-        isAddingRepo = true
+        isWorking = true
         Task {
             do {
-                let repo: Repository
                 switch intent {
                 case .clone(let url, let name):
-                    repo = try await repoStore.clone(url: url, name: name)
+                    _ = try await repoStore.clone(url: url, name: name)
                 case .initialize(let name):
-                    repo = try await repoStore.initRepo(name: name)
+                    _ = try await repoStore.initRepo(name: name)
                 case .importLocal(let path, let name):
-                    repo = try await repoStore.importLocal(path: path, name: name)
-                }
-                // Seed a default work item under the freshly-added repo so
-                // the user lands in a usable terminal immediately.
-                if store.workspaces(under: repo).isEmpty {
-                    store.addWorkspace(under: repo)
+                    _ = try await repoStore.importLocal(path: path, name: name)
                 }
             } catch {
-                addRepoError = error.localizedDescription
+                addError = error.localizedDescription
             }
-            isAddingRepo = false
+            isWorking = false
         }
     }
-}
 
-// MARK: - Repo section (header + nested work items)
-
-private struct RepoSection: View {
-    let repo: Repository
-    let workspaces: [Workspace]
-    @Bindable var store: WorkspaceStore
-    let onAddWorkItem: () -> Void
-
-    @State private var isExpanded = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            RepoHeader(
-                repo: repo,
-                isExpanded: isExpanded,
-                onToggle: {
-                    withAnimation(.snappy(duration: 0.18)) { isExpanded.toggle() }
-                }
+    private func closeFeature(_ workspace: Workspace, removeWorktrees: Bool) {
+        let project = repoStore.project
+        let linkedRepos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
+        store.remove(workspace)
+        guard removeWorktrees, !linkedRepos.isEmpty else { return }
+        Task {
+            await FeatureProvisioner.teardown(
+                featureName: workspace.name,
+                in: project,
+                across: linkedRepos
             )
-
-            if isExpanded {
-                VStack(spacing: 4) {
-                    ForEach(workspaces) { workspace in
-                        WorkspaceButton(
-                            workspace: workspace,
-                            isActive: workspace.id == store.activeID,
-                            hasUnread: store.hasUnread(for: workspace),
-                            lastActivityMessage: store.lastActivityMessage(for: workspace),
-                            onSelect: { store.activate(workspace.id) },
-                            onClose: { store.remove(workspace) },
-                            onRename: { store.setName($0, for: workspace.id) },
-                            onPickSymbol: { store.setIcon($0, for: workspace.id) },
-                            onPickTint: { store.setTint($0, for: workspace.id) }
-                        )
-                    }
-
-                    AddWorkItemRow(action: onAddWorkItem)
-                }
-                .padding(.leading, 16) // indent under the repo header
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
         }
     }
 }
 
-private struct RepoHeader: View {
-    let repo: Repository
-    let isExpanded: Bool
-    let onToggle: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 12, alignment: .center)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.12))
-                    Image(systemName: "shippingbox.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(width: 22, height: 22)
-
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(repo.name)
-                        .font(.callout.weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(repo.defaultBranch)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovered ? Color.primary.opacity(0.04) : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help(repo.rootURL.path)
-        .contextMenu {
-            Button("Show in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([repo.rootURL])
-            }
-        }
-    }
-}
-
-private struct AddWorkItemRow: View {
-    let action: () -> Void
-
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 22, height: 22)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(.quaternary)
-                    )
-                    .foregroundStyle(.secondary)
-                Text("Add Work Item")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHovered ? Color.primary.opacity(0.04) : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-    }
-}
+// MARK: - Workspace pill
 
 private struct WorkspaceButton: View {
     let workspace: Workspace
@@ -311,7 +257,6 @@ private struct WorkspaceButton: View {
                 }
                 .frame(width: 28, height: 28)
                 .overlay(alignment: .topTrailing) {
-                    // Attention badge — anchored to the icon's corner.
                     Circle()
                         .fill(Color.red)
                         .frame(width: 9, height: 9)
@@ -325,16 +270,16 @@ private struct WorkspaceButton: View {
                         .accessibilityHidden(true)
                 }
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(workspace.name)
                         .font(.callout.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .foregroundStyle(isActive ? .primary : .secondary)
+                    if !workspace.linkedRepoIDs.isEmpty {
+                        repoChips
+                    }
                     if let lastActivityMessage, !lastActivityMessage.isEmpty {
-                        // Most recent agent notification — gives the user
-                        // a peek at what the badge is for without having
-                        // to switch into the workspace.
                         Text(lastActivityMessage)
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
@@ -356,7 +301,6 @@ private struct WorkspaceButton: View {
                     )
             )
             .overlay(alignment: .leading) {
-                // Active-pill indicator hugging the leading edge of the row.
                 Capsule()
                     .fill(.primary)
                     .frame(width: 3, height: isActive ? 22 : 0)
@@ -367,16 +311,12 @@ private struct WorkspaceButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help(workspace.name)
+        .help(workspace.workingDirectory ?? workspace.name)
         .contextMenu {
             Button("Customize…") { isPickerPresented = true }
             Divider()
             Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
         }
-        // Sheet (not popover) — a popover anchored to a tile near the
-        // window's leading edge gets clipped by neighbouring rails. A
-        // sheet floats above the whole window, centered, with no
-        // hierarchy-clipping concerns.
         .sheet(isPresented: $isPickerPresented) {
             CustomizeWorkspaceSheet(
                 initialName: workspace.name,
@@ -389,7 +329,76 @@ private struct WorkspaceButton: View {
             )
         }
     }
+
+    private var repoChips: some View {
+        HStack(spacing: 4) {
+            ForEach(workspace.linkedRepoIDs.prefix(3), id: \.self) { repo in
+                Text(repo)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(Color.secondary.opacity(0.15))
+                    )
+            }
+            if workspace.linkedRepoIDs.count > 3 {
+                Text("+\(workspace.linkedRepoIDs.count - 3)")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
 }
+
+// MARK: - Repo row (passive, in the Repositories footer)
+
+private struct RepoRow: View {
+    let repository: Repository
+    let onReveal: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.12))
+                Image(systemName: "shippingbox.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 22, height: 22)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(repository.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(repository.defaultBranch)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isHovered ? Color.primary.opacity(0.04) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .help(repository.rootURL.path)
+        .contextMenu {
+            Button("Show in Finder", action: onReveal)
+        }
+    }
+}
+
+// MARK: - Customize sheet
 
 private struct CustomizeWorkspaceSheet: View {
     let initialName: String
@@ -404,48 +413,30 @@ private struct CustomizeWorkspaceSheet: View {
     @FocusState private var nameFocused: Bool
 
     private static let symbols: [String] = [
-        "terminal.fill",
-        "house.fill",
-        "chevron.left.forwardslash.chevron.right",
-        "doc.text.magnifyingglass",
-        "circle.grid.3x3.fill",
-        "square.stack.3d.up.fill",
-        "globe",
-        "bolt.fill",
-        "leaf.fill",
-        "hammer.fill",
-        "wrench.and.screwdriver.fill",
-        "server.rack",
-        "cloud.fill",
-        "cpu.fill",
-        "externaldrive.fill",
-        "shippingbox.fill",
-        "graduationcap.fill",
-        "briefcase.fill",
-        "paintpalette.fill",
-        "gamecontroller.fill",
-        "music.note",
-        "flag.fill",
-        "star.fill",
-        "heart.fill"
+        "terminal.fill", "house.fill", "chevron.left.forwardslash.chevron.right",
+        "doc.text.magnifyingglass", "circle.grid.3x3.fill", "square.stack.3d.up.fill",
+        "globe", "bolt.fill", "leaf.fill", "hammer.fill",
+        "wrench.and.screwdriver.fill", "server.rack", "cloud.fill", "cpu.fill",
+        "externaldrive.fill", "shippingbox.fill", "graduationcap.fill",
+        "briefcase.fill", "paintpalette.fill", "gamecontroller.fill",
+        "music.note", "flag.fill", "star.fill", "heart.fill",
     ]
 
     private static let tints: [Color] = [
-        .blue, .purple, .pink, .red, .orange, .yellow, .green, .teal, .indigo, .gray
+        .blue, .purple, .pink, .red, .orange, .yellow, .green, .teal, .indigo, .gray,
     ]
 
     private let columns = Array(repeating: GridItem(.fixed(36), spacing: 10), count: 6)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Customize Workspace")
+            Text("Customize Feature")
                 .font(.title3.weight(.semibold))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Name")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-
                 TextField("Feature name", text: $name)
                     .textFieldStyle(.roundedBorder)
                     .focused($nameFocused)
@@ -459,8 +450,7 @@ private struct CustomizeWorkspaceSheet: View {
                 Text("Icon")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-
-                    LazyVGrid(columns: columns, spacing: 10) {
+                LazyVGrid(columns: columns, spacing: 10) {
                     ForEach(Self.symbols, id: \.self) { symbol in
                         Button {
                             onPickSymbol(symbol)
@@ -485,7 +475,6 @@ private struct CustomizeWorkspaceSheet: View {
                 Text("Tint")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-
                 HStack(spacing: 10) {
                     ForEach(Self.tints, id: \.self) { tint in
                         Button {

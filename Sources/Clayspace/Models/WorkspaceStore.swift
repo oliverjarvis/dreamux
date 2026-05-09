@@ -74,36 +74,39 @@ final class WorkspaceStore {
     }
 
     func workspaces(under repo: Repository) -> [Workspace] {
-        workspaces.filter { $0.repoID == repo.name }
+        workspaces.filter { $0.linkedRepoIDs.contains(repo.name) }
     }
 
-    /// Add a work item scoped to a repository. The shell launches inside
-    /// the repo's default-branch worktree so the user lands in real code
-    /// the moment they open a tab.
+    /// Register a feature work item with already-provisioned worktrees
+    /// (the actual `git worktree add` and symlink wiring is done by
+    /// `FeatureProvisioner` so this method is purely model-side).
+    /// The work item's working directory is the `features/<name>/`
+    /// aggregation directory.
     @discardableResult
-    func addWorkspace(under repo: Repository, name: String? = nil) -> Workspace {
-        let existingForRepo = workspaces.filter { $0.repoID == repo.name }.count
-        let resolvedName = name ?? (existingForRepo == 0 ? "main" : "Work Item \(existingForRepo + 1)")
-        let workingDir = repo.rootURL
-            .appendingPathComponent(repo.defaultBranch, isDirectory: true)
-            .path
+    func registerFeature(
+        name: String,
+        featureDirectory: URL,
+        linkedRepoIDs: [String]
+    ) -> Workspace {
+        let index = workspaces.count
         let workspace = Workspace(
-            name: resolvedName,
-            symbol: paletteSymbol(for: existingForRepo),
-            tint: paletteColor(for: existingForRepo),
-            workingDirectory: workingDir,
-            repoID: repo.name
+            name: name,
+            symbol: paletteSymbol(for: index),
+            tint: paletteColor(for: index),
+            workingDirectory: featureDirectory.path,
+            linkedRepoIDs: linkedRepoIDs
         )
         workspaces.append(workspace)
         activeID = workspace.id
         return workspace
     }
 
-    /// Free-floating workspace with no repo. Used by ⌘⇧T / the legacy
-    /// "+ New Work Item" affordance for projects without repositories.
+    /// Free-floating workspace with no repo. Used by ⌘⇧T as a fallback
+    /// when there are no repositories and the user just wants a shell
+    /// rooted at the project.
     @discardableResult
     func addWorkspace() -> Workspace {
-        let index = workspaces.filter { $0.repoID == nil }.count
+        let index = workspaces.filter { $0.linkedRepoIDs.isEmpty }.count
         let workspace = Workspace(
             name: "Workspace \(index + 1)",
             symbol: paletteSymbol(for: index),
@@ -159,7 +162,7 @@ final class WorkspaceStore {
             symbol: last.symbol,
             tint: last.tint,
             workingDirectory: last.workingDirectory,
-            repoID: last.repoID
+            linkedRepoIDs: last.linkedRepoIDs
         )
         workspaces.append(restored)
         activeID = restored.id

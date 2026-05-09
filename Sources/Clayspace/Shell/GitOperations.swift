@@ -188,6 +188,41 @@ enum GitOperations {
         }
     }
 
+    // MARK: - Worktrees
+
+    /// Create a worktree at `<repoRootURL>/<branch>/` on a branch named
+    /// `<branch>`. If the branch already exists locally, the worktree
+    /// is checked out from it; otherwise a fresh branch is created off
+    /// the repository's current HEAD.
+    static func addWorktree(in repoRootURL: URL, branch: String) async throws {
+        let exists = (try? await runGit(
+            ["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"],
+            in: repoRootURL
+        )) != nil
+        let args: [String]
+        if exists {
+            args = ["worktree", "add", branch, branch]
+        } else {
+            args = ["worktree", "add", "-b", branch, branch]
+        }
+        _ = try await runGit(args, in: repoRootURL)
+    }
+
+    /// Remove a worktree, force if needed, and prune.
+    static func removeWorktree(at worktreeURL: URL, in repoRootURL: URL) async throws {
+        _ = try? await runGit(["worktree", "remove", "--force", worktreeURL.path], in: repoRootURL)
+        _ = try? await runGit(["worktree", "prune"], in: repoRootURL)
+    }
+
+    /// Force-delete a local branch — used during feature teardown so
+    /// abandoned branches don't pile up. We use `-D` because the
+    /// expected case is "branch never merged."
+    static func deleteBranch(in repoRootURL: URL, branch: String) async throws {
+        _ = try? await runGit(["branch", "-D", branch], in: repoRootURL)
+    }
+
+    // MARK: - Names
+
     /// Heuristic name extraction from a clone URL. `git@host:foo/bar.git` →
     /// `bar`; `https://host/foo/bar` → `bar`; falls back to a sanitized
     /// version of whatever's after the last `/` or `:`.

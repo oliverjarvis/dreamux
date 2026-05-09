@@ -1,0 +1,131 @@
+import Foundation
+
+enum FeatureError: LocalizedError {
+    case alreadyExists(name: String)
+    case noRepositories
+    case directoryCreationFailed(underlying: Error)
+    case symlinkFailed(repo: String, underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .alreadyExists(let name):
+            return "A feature named “\(name)” already exists in this project."
+        case .noRepositories:
+            return "Pick at least one repository for the feature."
+        case .directoryCreationFailed(let error):
+            return "Couldn't create the feature folder: \(error.localizedDescription)"
+        case .symlinkFailed(let repo, let error):
+            return "Couldn't link the worktree for \(repo): \(error.localizedDescription)"
+        }
+    }
+}
+
+/// Sets up (and tears down) the on-disk shape for a Clayspace feature:
+///
+///     <project>/repos/<repo>/<feature>/      ← worktree per repo, branch == feature name
+///     <project>/features/<feature>/<repo>    ← symlink → ../../repos/<repo>/<feature>
+///
+/// The aggregation directory at `features/<feature>/` is what tabs cd
+/// into so the agent sees one folder containing every relevant repo.
+@MainActor
+enum FeatureProvisioner {
+    static func featuresDirectory(for project: Project) -> URL {
+        project.rootPath.appendingPathComponent("features", isDirectory: true)
+    }
+
+    static func featureDirectory(in project: Project, name: String) -> URL {
+        featuresDirectory(for: project).appendingPathComponent(name, isDirectory: true)
+    }
+
+    /// Provision worktrees in each repo and rewire the
+    /// `features/<name>/` aggregation directory. Idempotent for the
+    /// aggregation dir but fails if a worktree at this name already
+    /// exists in any of the linked repos (git wouldn't let us anyway).
+    @discardableResult
+    static func provision(
+        featureName: String,
+        in project: Project,
+        across repos: [Repository]
+    ) async throws -> URL {
+        guard !repos.isEmpty else { throw FeatureError.noRepositories }
+
+        let fm = FileManager.default
+        let featureDir = featureDirectory(in: project, name: featureName)
+
+        // Create the parent `features/` and the per-feature folder.
+        do {
+            try fm.createDirectory(
+                at: featuresDirectory(for: project),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            throw FeatureError.directoryCreationFailed(underlying: error)
+        }
+
+        if fm.fileExists(atPath: featureDir.path) {
+            throw FeatureError.alreadyExists(name: featureName)
+        }
+
+        do {
+            try fm.createDirectory(at: featureDir, withIntermediateDirectories: true)
+        } catch {
+            throw FeatureError.directoryCreationFailed(underlying: error)
+        }
+
+        // Create worktrees + symlinks. On failure roll the whole feature
+        // back so a half-provisioned state doesn't sit on disk.
+        var provisionedRepos: [Repository] = []
+        do {
+            for repo in repos {
+                try await GitOperations.addWorktree(in: repo.rootURL, branch: featureName)
+                provisionedRepos.append(repo)
+
+                let symlinkURL = featureDir.appendingPathComponent(repo.name)
+                // Relative target keeps the symlink portable if the project
+                // folder is moved.
+                let relativeTarget = "../../repos/\(repo.name)/\(featureName)"
+                do {
+                    try fm.createSymbolicLink(
+                        atPath: symlinkURL.path,
+                        withDestinationPath: relativeTarget
+                    )
+                } catch {
+                    throw FeatureError.symlinkFailed(repo: repo.name, underlying: error)
+                }
+            }
+        } catch {
+            await rollback(featureName: featureName, project: project, repos: provisionedRepos)
+            throw error
+        }
+
+        return featureDir
+    }
+
+    /// Reverse `provision`: remove worktrees, delete branches, drop
+    /// the aggregation folder. Best-effort — used during teardown of
+    /// finished or abandoned features.
+    static func teardown(
+        featureName: String,
+        in project: Project,
+        across repos: [Repository]
+    ) async {
+        for repo in repos {
+            let worktreeURL = repo.rootURL
+                .appendingPathComponent(featureName, isDirectory: true)
+            if FileManager.default.fileExists(atPath: worktreeURL.path) {
+                try? await GitOperations.removeWorktree(at: worktreeURL, in: repo.rootURL)
+            }
+            try? await GitOperations.deleteBranch(in: repo.rootURL, branch: featureName)
+        }
+        let featureDir = featureDirectory(in: project, name: featureName)
+        try? FileManager.default.removeItem(at: featureDir)
+    }
+
+    private static func rollback(
+        featureName: String,
+        project: Project,
+        repos: [Repository]
+    ) async {
+        await teardown(featureName: featureName, in: project, across: repos)
+    }
+}
