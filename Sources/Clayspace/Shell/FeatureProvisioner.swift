@@ -98,7 +98,54 @@ enum FeatureProvisioner {
             throw error
         }
 
+        writeReadme(in: featureDir, featureName: featureName, repos: provisionedRepos)
         return featureDir
+    }
+
+    /// Drop a small CLAYSPACE.md alongside the symlinks so a coding
+    /// agent (or a human running `ls` for the first time) knows the
+    /// aggregation directory itself isn't a git repo and to `cd` into
+    /// one of the symlinked subfolders before running git commands.
+    private static func writeReadme(
+        in featureDir: URL,
+        featureName: String,
+        repos: [Repository]
+    ) {
+        let url = featureDir.appendingPathComponent("CLAYSPACE.md")
+        let entries = repos.map { "- `\($0.name)/` — worktree on branch `\(featureName)` of repo `\($0.name)`" }.joined(separator: "\n")
+        let body = """
+        # Feature: \(featureName)
+
+        This folder is **not** a git repository. It's a Clayspace feature
+        aggregation directory — each subfolder is a symlink to a separate
+        git worktree, one per repository this feature spans.
+
+        ## Layout
+
+        \(entries)
+
+        ## Working in a repo
+
+        `cd` into one of the subfolders before running `git`:
+
+            cd \(repos.first?.name ?? "<repo>")
+            git status        # works — this is a real worktree
+            git add ...
+            git commit ...
+
+        Each subfolder is checked out on the branch named `\(featureName)`
+        in its respective repo. They were created via `git worktree add`
+        off each repo's default branch.
+
+        ## Multi-repo work
+
+        This feature is intentionally multi-rooted: changes in different
+        repos can be made and committed independently in their own
+        subfolders. They share only the branch name. Clayspace's Merge
+        action will merge each branch into its own repo's default
+        branch, in parallel.
+        """
+        try? body.write(to: url, atomically: true, encoding: .utf8)
     }
 
     /// Idempotent rebuild of the `features/<name>/` aggregation
@@ -136,6 +183,10 @@ enum FeatureProvisioner {
                 withDestinationPath: target
             )
         }
+        // Idempotent rebuild includes the README — covers features that
+        // were created by a pre-readme build of Clayspace, or where the
+        // file got deleted.
+        writeReadme(in: featureDir, featureName: featureName, repos: repos)
         return featureDir
     }
 
