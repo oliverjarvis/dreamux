@@ -36,6 +36,7 @@ struct MergeFeatureSheet: View {
 
     @State private var states: [String: MergeRepoState] = [:]
     @State private var isBatchRunning = false
+    @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -73,7 +74,11 @@ struct MergeFeatureSheet: View {
         }
         .padding(20)
         .frame(width: 540)
-        .onAppear { initializeStates() }
+        .onAppear {
+            initializeStates()
+            startPolling()
+        }
+        .onDisappear { pollTask?.cancel() }
     }
 
     // MARK: - Header
@@ -216,6 +221,48 @@ struct MergeFeatureSheet: View {
             map[repo.name] = .pending
         }
         states = map
+    }
+
+    /// Poll every ~2.5s while the sheet is open. For any repo that's
+    /// still showing as conflicted in our state map, ask git whether
+    /// the conflict has been resolved. This is what makes the sheet
+    /// flip to "Merged" automatically once the user (or their agent)
+    /// finishes resolving and commits.
+    private func startPolling() {
+        pollTask?.cancel()
+        pollTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(2500))
+                if Task.isCancelled { return }
+                await pollConflictedRepos()
+            }
+        }
+    }
+
+    private func pollConflictedRepos() async {
+        for repo in repos {
+            guard case .conflicted = states[repo.name] ?? .pending else { continue }
+            let baseURL = baseWorktreeURL(for: repo)
+            let probe = await GitOperations.mergeProbe(
+                in: baseURL,
+                feature: workspace.name,
+                baseBranch: repo.defaultBranch
+            )
+            switch probe {
+            case .inProgress:
+                // Refresh the conflicted file list — the agent might
+                // have resolved a few but not all yet.
+                let paths = await GitOperations.conflictedPaths(in: baseURL)
+                if !paths.isEmpty {
+                    states[repo.name] = .conflicted(paths: paths)
+                }
+            case .merged:
+                states[repo.name] = .merged
+            case .notMerged:
+                // External `git merge --abort` or unrelated change.
+                states[repo.name] = .pending
+            }
+        }
     }
 
     private var hasPending: Bool {

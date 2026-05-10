@@ -274,6 +274,43 @@ enum GitOperations {
         _ = try? await runGit(["merge", "--abort"], in: worktreeURL)
     }
 
+    enum MergeProbe {
+        case inProgress
+        case merged
+        case notMerged
+    }
+
+    /// Probe whether a merge is happening, has happened, or hasn't.
+    /// Used by the merge sheet to detect the moment the user (or an
+    /// agent) finishes resolving conflicts and commits, so the row
+    /// can flip to "Merged" without a manual refresh.
+    ///
+    /// `inProgress` is signalled by `MERGE_HEAD` existing in the
+    /// worktree's git dir. `merged` is signalled by the feature tip
+    /// being reachable from the base branch (so we don't depend on
+    /// the merge commit's subject being intact). Anything else —
+    /// merge aborted, never started, branch missing — is reported as
+    /// `notMerged`.
+    static func mergeProbe(
+        in worktreeURL: URL,
+        feature: String,
+        baseBranch: String
+    ) async -> MergeProbe {
+        if (try? await runGit(
+            ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
+            in: worktreeURL
+        )) != nil {
+            return .inProgress
+        }
+        if (try? await runGit(
+            ["merge-base", "--is-ancestor", feature, baseBranch],
+            in: worktreeURL
+        )) != nil {
+            return .merged
+        }
+        return .notMerged
+    }
+
     // MARK: - Names
 
     /// Heuristic name extraction from a clone URL. `git@host:foo/bar.git` →
