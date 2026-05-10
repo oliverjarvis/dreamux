@@ -43,6 +43,7 @@ struct WorkspaceSidebar: View {
             MergeFeatureSheet(
                 workspace: workspace,
                 repos: repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) },
+                project: repoStore.project,
                 onOpenConflictTab: { url, title in
                     openConflictTab(workspace: workspace, url: url, title: title)
                 },

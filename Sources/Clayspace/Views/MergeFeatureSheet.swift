@@ -10,10 +10,12 @@ enum MergeRepoState: Equatable {
     case merged
     case conflicted(paths: [String])
     case failed(message: String)
+    case cleaningUp
+    case cleanedUp
 
     var isTerminal: Bool {
         switch self {
-        case .pending, .working: return false
+        case .pending, .working, .cleaningUp: return false
         default: return true
         }
     }
@@ -24,11 +26,19 @@ enum MergeRepoState: Equatable {
         default: return false
         }
     }
+
+    var canCleanup: Bool {
+        switch self {
+        case .merged, .upToDate: return true
+        default: return false
+        }
+    }
 }
 
 struct MergeFeatureSheet: View {
     let workspace: Workspace
     let repos: [Repository]
+    let project: Project
     /// Opens a new tab in the workspace at the given absolute path,
     /// with a tab title indicating the conflict.
     let onOpenConflictTab: (URL, String) -> Void
@@ -142,13 +152,7 @@ struct MergeFeatureSheet: View {
                     }
                     .buttonStyle(.bordered)
                 }
-                if case .merged = state {
-                    Button("Cleanup Worktree & Branch") {
-                        Task { await cleanup(repo) }
-                    }
-                    .buttonStyle(.bordered)
-                }
-                if case .upToDate = state {
+                if state.canCleanup {
                     Button("Cleanup Worktree & Branch") {
                         Task { await cleanup(repo) }
                     }
@@ -210,6 +214,15 @@ struct MergeFeatureSheet: View {
             Label("Failed", systemImage: "xmark.octagon.fill")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.red)
+        case .cleaningUp:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Cleaning up…").font(.caption)
+            }
+        case .cleanedUp:
+            Label("Cleaned up", systemImage: "trash")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -304,12 +317,24 @@ struct MergeFeatureSheet: View {
     }
 
     private func cleanup(_ repo: Repository) async {
+        states[repo.name] = .cleaningUp
+
+        // Remove the worktree, delete the branch, drop the dangling
+        // symlink in the feature aggregation directory so `cd <repo>`
+        // from the feature dir doesn't lead into a broken link.
         let worktreeURL = repo.rootURL
             .appendingPathComponent(workspace.name, isDirectory: true)
         if FileManager.default.fileExists(atPath: worktreeURL.path) {
             try? await GitOperations.removeWorktree(at: worktreeURL, in: repo.rootURL)
         }
         try? await GitOperations.deleteBranch(in: repo.rootURL, branch: workspace.name)
+
+        let symlinkURL = FeatureProvisioner
+            .featureDirectory(in: project, name: workspace.name)
+            .appendingPathComponent(repo.name)
+        try? FileManager.default.removeItem(at: symlinkURL)
+
+        states[repo.name] = .cleanedUp
     }
 
     // MARK: - Helpers
