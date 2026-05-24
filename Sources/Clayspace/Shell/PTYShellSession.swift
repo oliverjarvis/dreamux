@@ -174,6 +174,12 @@ final class PTYShellSession: @unchecked Sendable {
         cleanup()
     }
 
+    /// Push text into the PTY as if the user typed it. Caller is
+    /// responsible for any trailing newline (use `\n` to "press enter").
+    func send(_ text: String) {
+        writeToPTY(Data(text.utf8))
+    }
+
     // MARK: - Private
 
     private func startReader(fd: Int32) {

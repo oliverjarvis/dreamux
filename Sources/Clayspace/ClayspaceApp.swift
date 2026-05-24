@@ -19,9 +19,13 @@ struct ClayspaceApp: App {
         }
 
         WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
-            if let projectID, let project = projects.project(id: projectID) {
-                ProjectWindow(project: project)
-                    .frame(minWidth: 720, minHeight: 480)
+            if let id = projectID, let project = projects.project(id: id) {
+                ProjectWindow(
+                    project: project,
+                    onSwitchProject: { projectID = $0 }
+                )
+                .environment(projects)
+                .frame(minWidth: 720, minHeight: 480)
             } else {
                 MissingProjectView(store: projects)
                     .frame(minWidth: 480, minHeight: 320)

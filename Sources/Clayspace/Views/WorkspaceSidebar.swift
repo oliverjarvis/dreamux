@@ -3,6 +3,7 @@ import SwiftUI
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
+    @Binding var sidebarMode: SidebarMode
 
     @State private var showAddFeature = false
     @State private var showAddRepo = false
@@ -10,10 +11,12 @@ struct WorkspaceSidebar: View {
     @State private var isWorking = false
     @State private var pendingClose: Workspace?
     @State private var pendingMerge: Workspace?
+    @State private var repositoriesExpanded = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
+                runTile
                 featuresSection
                 Divider()
                 repositoriesSection
@@ -84,6 +87,69 @@ struct WorkspaceSidebar: View {
         }
     }
 
+    // MARK: - Run / Signals
+
+    private var runTile: some View {
+        VStack(spacing: 4) {
+            modeTile(
+                mode: .run,
+                title: "Run",
+                symbol: "play.fill",
+                tint: .green,
+                hint: "Configure how to start and stop this project"
+            )
+            modeTile(
+                mode: .signals,
+                title: "Signals",
+                symbol: "waveform.path.ecg",
+                tint: .purple,
+                hint: "View log streams from running services"
+            )
+        }
+    }
+
+    private func modeTile(
+        mode: SidebarMode,
+        title: String,
+        symbol: String,
+        tint: Color,
+        hint: String
+    ) -> some View {
+        Button {
+            sidebarMode = mode
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(tint.opacity(sidebarMode == mode ? 0.95 : 0.18))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(tint.opacity(sidebarMode == mode ? 0 : 0.28), lineWidth: 1)
+                        )
+                    Image(systemName: symbol)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(sidebarMode == mode ? Color.white : tint)
+                }
+                .frame(width: 28, height: 28)
+
+                Text(title)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(sidebarMode == mode ? .primary : .secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(sidebarMode == mode ? Color.primary.opacity(0.10) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(hint)
+    }
+
     // MARK: - Features
 
     private var featuresSection: some View {
@@ -105,10 +171,17 @@ struct WorkspaceSidebar: View {
                 ForEach(store.workspaces) { workspace in
                     WorkspaceButton(
                         workspace: workspace,
-                        isActive: workspace.id == store.activeID,
+                        isActive: workspace.id == store.activeID && sidebarMode == .workspace,
                         hasUnread: store.hasUnread(for: workspace),
                         lastActivityMessage: store.lastActivityMessage(for: workspace),
-                        onSelect: { store.activate(workspace.id) },
+                        onSelect: {
+                            // Picking a Work Item flips back to the
+                            // terminal view, otherwise the activation
+                            // would happen silently while the Run page
+                            // stayed on screen.
+                            sidebarMode = .workspace
+                            store.activate(workspace.id)
+                        },
                         onClose: { pendingClose = workspace },
                         onRename: { store.setName($0, for: workspace.id) },
                         onPickSymbol: { store.setIcon($0, for: workspace.id) },
@@ -156,26 +229,29 @@ struct WorkspaceSidebar: View {
 
     private var repositoriesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader(
+            collapsibleHeader(
                 "Repositories",
+                isExpanded: $repositoriesExpanded,
                 addAction: { showAddRepo = true },
                 disabled: isWorking
             )
 
-            if repoStore.repositories.isEmpty {
-                Text("No repositories in this project yet.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 4)
-            } else {
-                ForEach(repoStore.repositories) { repo in
-                    RepoRow(
-                        repository: repo,
-                        onReveal: {
-                            NSWorkspace.shared.activateFileViewerSelecting([repo.rootURL])
-                        }
-                    )
+            if repositoriesExpanded {
+                if repoStore.repositories.isEmpty {
+                    Text("No repositories in this project yet.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+                } else {
+                    ForEach(repoStore.repositories) { repo in
+                        RepoRow(
+                            repository: repo,
+                            onReveal: {
+                                NSWorkspace.shared.activateFileViewerSelecting([repo.rootURL])
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -205,6 +281,60 @@ struct WorkspaceSidebar: View {
             .buttonStyle(.plain)
             .disabled(disabled)
             .help(disabled ? (disabledHint ?? "Working…") : "Add Repository")
+        }
+        .padding(.bottom, 2)
+    }
+
+    /// Section header with a leading disclosure chevron that toggles the
+    /// `isExpanded` binding when clicked. The "Add" button stays on the
+    /// trailing edge and is independently clickable — it both expands the
+    /// section (so the user can see what they just added) and fires the
+    /// add action.
+    @ViewBuilder
+    private func collapsibleHeader(
+        _ title: String,
+        isExpanded: Binding<Bool>,
+        addAction: @escaping () -> Void,
+        disabled: Bool,
+        disabledHint: String? = nil
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isExpanded.wrappedValue.toggle()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                if !isExpanded.wrappedValue {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        isExpanded.wrappedValue = true
+                    }
+                }
+                addAction()
+            } label: {
+                Image(systemName: isWorking ? "hourglass" : "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            .help(disabled ? (disabledHint ?? "Working…") : "Add \(title.dropLast())")
         }
         .padding(.bottom, 2)
     }

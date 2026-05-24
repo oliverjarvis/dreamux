@@ -86,4 +86,11 @@ final class TabSession: Identifiable {
     func stop() {
         shell.stop()
     }
+
+    /// Push text into the tab's shell as if the user typed it. Used by
+    /// the Run-setup flow to drop a Claude prompt straight into a fresh
+    /// tab. Caller controls the trailing newline.
+    func send(_ text: String) {
+        shell.send(text)
+    }
 }
