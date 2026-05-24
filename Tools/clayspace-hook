@@ -31,7 +31,27 @@ import json
 import os
 import sys
 import time
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
+
+
+# When CLAYSPACE_HOOK_DEBUG=1 is set in the agent's env, every hook
+# invocation appends a line to this log so we can see whether Stop fired,
+# what stdin payload Claude Code sent, why a stop-handler returned early,
+# and whether emit() actually wrote the OSC. Off by default — set the env
+# var only when diagnosing.
+DEBUG_LOG_PATH = os.path.expanduser("~/Library/Logs/Clayspace-hook.log")
+
+
+def log(event: str, **fields: Any) -> None:
+    if os.environ.get("CLAYSPACE_HOOK_DEBUG") != "1":
+        return
+    try:
+        os.makedirs(os.path.dirname(DEBUG_LOG_PATH), exist_ok=True)
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            payload = {"t": time.strftime("%H:%M:%S"), "event": event, **fields}
+            f.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
 
 
 def emit(message: str) -> None:
@@ -43,11 +63,13 @@ def emit(message: str) -> None:
         with open("/dev/tty", "w") as tty:
             tty.write(seq)
             tty.flush()
+            log("emit", channel="/dev/tty", message=message)
             return
-    except OSError:
-        pass
+    except OSError as exc:
+        log("emit_tty_fail", error=str(exc))
     sys.stdout.write(seq)
     sys.stdout.flush()
+    log("emit", channel="stdout", message=message)
 
 
 def read_stdin_json() -> Optional[dict]:
@@ -117,12 +139,15 @@ def extract_text(entry: dict) -> str:
 
 def stop_handler() -> None:
     payload = read_stdin_json()
+    log("stop_in", payload_keys=list(payload.keys()) if payload else None)
     if payload is None:
         # No JSON input — be conservative and skip rather than spamming.
+        log("stop_skip", reason="no_stdin_json")
         return
 
     transcript_path = payload.get("transcript_path") or ""
     if not transcript_path or not os.path.exists(transcript_path):
+        log("stop_skip", reason="no_transcript", path=transcript_path)
         return
 
     # Poll the transcript until the just-completed assistant turn lands.
@@ -147,10 +172,12 @@ def stop_handler() -> None:
     if assistant_entry is None:
         # Timed out without a fresh assistant entry — likely an
         # interrupt or a session that ended without a new response.
+        log("stop_skip", reason="poll_timeout")
         return
 
     text = extract_text(assistant_entry)
     if not text:
+        log("stop_skip", reason="empty_text")
         return
 
     lowered = text.lower()
@@ -159,6 +186,7 @@ def stop_handler() -> None:
         "[interrupted by user]",
     )
     if any(marker in lowered for marker in interrupt_markers):
+        log("stop_skip", reason="interrupted")
         return
 
     if len(text) > 200:
@@ -188,6 +216,7 @@ def idle_handler() -> None:
 
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    log("invoke", cmd=cmd, argv=sys.argv[1:])
     if cmd == "stop":
         stop_handler()
     elif cmd == "notify":
