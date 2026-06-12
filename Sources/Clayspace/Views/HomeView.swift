@@ -15,6 +15,17 @@ struct HomeView: View {
     @State private var isCreating = false
 
     @State private var pendingDelete: Project?
+
+    /// One-shot per process: true exactly once, for the launch
+    /// presentation of Home. Static because the view struct is
+    /// recreated on every render and the window can be reopened.
+    @MainActor private static var didAttemptLaunchRedirect = false
+
+    @MainActor private static func consumeLaunchRedirect() -> Bool {
+        if didAttemptLaunchRedirect { return false }
+        didAttemptLaunchRedirect = true
+        return true
+    }
     @State private var deleteError: String?
 
     var body: some View {
@@ -28,12 +39,28 @@ struct HomeView: View {
         .task {
             // e2e harness convenience: jump straight into the named
             // project's window so drivers don't have to script the
-            // project grid. No-op on normal launches (env var unset)
-            // and when the name doesn't match a discovered project.
-            guard let name = E2EMode.autoOpenProjectName else { return }
+            // project grid. No-op when the name doesn't match a
+            // discovered project.
+            if let name = E2EMode.autoOpenProjectName {
+                store.refresh()
+                if let project = store.projects.first(where: { $0.name == name }) {
+                    openProject(project.id)
+                }
+                return
+            }
+            // Normal launches skip the grid: the first Home presentation
+            // per process redirects into the last-opened project (or the
+            // first one) so the user lands in a workspace, not a menu.
+            // Later presentations (⇧⌘0, the rail's Home row) show Home
+            // normally. E2E runs keep the grid scriptable unless the
+            // auto-open env var asked otherwise.
+            guard !E2EMode.isActive, HomeView.consumeLaunchRedirect() else { return }
             store.refresh()
-            if let project = store.projects.first(where: { $0.name == name }) {
-                openProject(project.id)
+            if case .project(let id) = LaunchDestination.resolve(
+                lastOpenedID: LastOpenedProject.load(),
+                projects: store.projects
+            ) {
+                openProject(id)
             }
         }
         .sheet(isPresented: $showCreate, onDismiss: resetCreateState) {
