@@ -60,6 +60,9 @@ private struct ProjectWindowContents: View {
         .navigationTitle(project.name)
         .navigationSubtitle(project.rootPath.path)
         .onAppear {
+            // Remember where the user was so the next launch can land
+            // here instead of the Home grid.
+            LastOpenedProject.record(project.id)
             // e2e only (no-op otherwise): expose this window's live
             // stores to the automation server, keyed by project id.
             E2ERegistry.shared.registerWindowStores(
