@@ -12,6 +12,7 @@ struct ProjectsRail: View {
     let onSelect: (UUID) -> Void
 
     @Environment(\.openWindow) private var openWindow
+    @State private var showCreate = false
 
     static let width: CGFloat = 180
 
@@ -45,10 +46,22 @@ struct ProjectsRail: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 10)
             }
+
+            Divider()
+                .padding(.horizontal, 10)
+
+            NewProjectRailRow { showCreate = true }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(.regularMaterial)
         .onAppear { projects.refresh() }
+        .sheet(isPresented: $showCreate) {
+            CreateProjectSheet(store: projects) { project in
+                onSelect(project.id)
+            }
+        }
     }
 
     /// Snapshot the existing project-window list before asking SwiftUI to
@@ -105,6 +118,40 @@ private struct HomeRailRow: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .help("Show Home (⇧⌘0)")
+    }
+}
+
+// MARK: - New Project row
+
+/// "＋ New Project" pinned under the list, styled like HomeRailRow so
+/// it reads as part of the rail's navigation rather than chrome.
+private struct NewProjectRailRow: View {
+    let onClick: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onClick) {
+            HStack(spacing: 10) {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 16, height: 16)
+                Text("New Project")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(isHovered ? 0.08 : 0.0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help("Create a new project")
     }
 }
 
