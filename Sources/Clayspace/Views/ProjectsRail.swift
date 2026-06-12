@@ -12,7 +12,10 @@ struct ProjectsRail: View {
     let onSelect: (UUID) -> Void
 
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @State private var showCreate = false
+    @State private var pendingDelete: Project?
+    @State private var deleteError: String?
 
     static let width: CGFloat = 180
 
@@ -38,7 +41,8 @@ struct ProjectsRail: View {
                             project: project,
                             isActive: project.id == currentProjectID,
                             onClick: { onSelect(project.id) },
-                            onOpenInNewWindow: { openInNewWindow(project.id) }
+                            onOpenInNewWindow: { openInNewWindow(project.id) },
+                            onDelete: { pendingDelete = project }
                         )
                         .frame(height: 34)
                     }
@@ -61,6 +65,55 @@ struct ProjectsRail: View {
             CreateProjectSheet(store: projects) { project in
                 onSelect(project.id)
             }
+        }
+        .alert(
+            "Move \(pendingDelete?.name ?? "project") to Trash?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            presenting: pendingDelete
+        ) { project in
+            Button("Move to Trash", role: .destructive) {
+                deleteProject(project)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { project in
+            Text("The folder at \(project.rootPath.path) will be moved to the Trash. You can recover it from Finder if you change your mind.")
+        }
+        .alert(
+            "Couldn't delete project",
+            isPresented: Binding(
+                get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } }
+            ),
+            presenting: deleteError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error)
+        }
+    }
+
+    /// Delete and, when the row was the project this window is showing,
+    /// move the window somewhere sensible: the first remaining project,
+    /// or Home when the list just emptied (a project window can't exist
+    /// without a project). Other windows showing the deleted project
+    /// fall back to MissingProjectView on their own.
+    private func deleteProject(_ project: Project) {
+        let wasCurrent = project.id == currentProjectID
+        do {
+            try projects.deleteProject(project)
+        } catch {
+            deleteError = error.localizedDescription
+            return
+        }
+        guard wasCurrent else { return }
+        if let fallback = projects.projects.first {
+            onSelect(fallback.id)
+        } else {
+            openWindow(id: "home")
+            dismissWindow(id: "project", value: project.id)
         }
     }
 
@@ -167,6 +220,7 @@ private struct ProjectRow: NSViewRepresentable {
     let isActive: Bool
     let onClick: () -> Void
     let onOpenInNewWindow: () -> Void
+    let onDelete: () -> Void
 
     func makeNSView(context: Context) -> ProjectRowView {
         let view = ProjectRowView()
@@ -174,7 +228,8 @@ private struct ProjectRow: NSViewRepresentable {
             project: project,
             isActive: isActive,
             onClick: onClick,
-            onOpenInNewWindow: onOpenInNewWindow
+            onOpenInNewWindow: onOpenInNewWindow,
+            onDelete: onDelete
         )
         return view
     }
@@ -184,7 +239,8 @@ private struct ProjectRow: NSViewRepresentable {
             project: project,
             isActive: isActive,
             onClick: onClick,
-            onOpenInNewWindow: onOpenInNewWindow
+            onOpenInNewWindow: onOpenInNewWindow,
+            onDelete: onDelete
         )
     }
 }
@@ -201,6 +257,7 @@ final class ProjectRowView: NSView, NSDraggingSource {
     private var isHovered: Bool = false
     private var onClick: (() -> Void)?
     private var onOpenInNewWindow: (() -> Void)?
+    private var onDelete: (() -> Void)?
 
     private var mouseDownPoint: NSPoint?
     private var isDragging: Bool = false
@@ -213,7 +270,8 @@ final class ProjectRowView: NSView, NSDraggingSource {
         project: Project,
         isActive: Bool,
         onClick: @escaping () -> Void,
-        onOpenInNewWindow: @escaping () -> Void
+        onOpenInNewWindow: @escaping () -> Void,
+        onDelete: @escaping () -> Void
     ) {
         let changed = self.project?.id != project.id
             || self.project?.name != project.name
@@ -222,6 +280,7 @@ final class ProjectRowView: NSView, NSDraggingSource {
         self.isActive = isActive
         self.onClick = onClick
         self.onOpenInNewWindow = onOpenInNewWindow
+        self.onDelete = onDelete
         toolTip = project.rootPath.path
         if changed { needsDisplay = true }
     }
@@ -347,6 +406,16 @@ final class ProjectRowView: NSView, NSDraggingSource {
         finderItem.target = self
         menu.addItem(finderItem)
 
+        menu.addItem(.separator())
+
+        let deleteItem = NSMenuItem(
+            title: "Move to Trash…",
+            action: #selector(handleDelete),
+            keyEquivalent: ""
+        )
+        deleteItem.target = self
+        menu.addItem(deleteItem)
+
         return menu
     }
 
@@ -357,6 +426,10 @@ final class ProjectRowView: NSView, NSDraggingSource {
     @objc private func handleShowInFinder() {
         guard let project else { return }
         NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
+    }
+
+    @objc private func handleDelete() {
+        onDelete?()
     }
 
     private func beginDrag(with event: NSEvent) {
