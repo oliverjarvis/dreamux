@@ -15,6 +15,7 @@ struct HomeView: View {
     @State private var isCreating = false
 
     @State private var pendingDelete: Project?
+    @State private var deleteError: String?
 
     /// One-shot per process: true exactly once, for the launch
     /// presentation of Home. Static because the view struct is
@@ -26,7 +27,13 @@ struct HomeView: View {
         didAttemptLaunchRedirect = true
         return true
     }
-    @State private var deleteError: String?
+
+    /// A project window appearing means launch already landed somewhere
+    /// — any later Home presentation is deliberate, so the redirect
+    /// must not fire. Called from ProjectWindowContents.onAppear.
+    @MainActor static func disarmLaunchRedirect() {
+        didAttemptLaunchRedirect = true
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

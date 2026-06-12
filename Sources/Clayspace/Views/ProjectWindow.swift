@@ -63,6 +63,7 @@ private struct ProjectWindowContents: View {
             // Remember where the user was so the next launch can land
             // here instead of the Home grid.
             LastOpenedProject.record(project.id)
+            HomeView.disarmLaunchRedirect()
             // e2e only (no-op otherwise): expose this window's live
             // stores to the automation server, keyed by project id.
             E2ERegistry.shared.registerWindowStores(
