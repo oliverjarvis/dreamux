@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""fake skills — Clayspace's test stand-in for `npx -y skills`.
+
+Pointed at via CLAYSPACE_SKILLS_BIN so SkillsCLI/SkillsStore tests and
+the e2e harness exercise install/list/remove/update with no network
+and no node. Maintains real `.agents/skills/<name>/SKILL.md` dirs under
+a "scope root": the cwd for project scope, $SKILLS_FAKE_GLOBAL_DIR for
+-g/--global (required when a global flag is passed, so tests never
+touch the real home directory).
+
+Every invocation is appended as a JSON line to $SKILLS_FAKE_LOG (when
+set) for argv assertions.
+
+Supported invocations (the only ones SkillsCLI makes):
+    skills add <source> -s <names...> -a <agents...> [-g] -y
+    skills list --json [-g]
+    skills remove -s <names...> -a <agents...> [--global] -y
+    skills update [<names...>] (-g|-p) -y
+"""
+import json
+import os
+import sys
+
+
+def fail(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def log_invocation(argv):
+    path = os.environ.get("SKILLS_FAKE_LOG")
+    if path:
+        with open(path, "a") as f:
+            f.write(json.dumps({"argv": argv, "cwd": os.getcwd()}) + "\n")
+
+
+def parse(argv):
+    """Split argv into positionals and flag→values lists. -s/-a absorb
+    values until the next flag; bare flags map to []."""
+    flags, positionals, current = {}, [], None
+    for arg in argv:
+        if arg.startswith("-"):
+            current = arg
+            flags.setdefault(current, [])
+        elif current is not None:
+            flags[current].append(arg)
+        else:
+            positionals.append(arg)
+    return positionals, flags
+
+
+def is_global(flags):
+    return "-g" in flags or "--global" in flags
+
+
+def scope_root(flags):
+    if is_global(flags):
+        root = os.environ.get("SKILLS_FAKE_GLOBAL_DIR")
+        if not root:
+            fail("fake-skills: global op without SKILLS_FAKE_GLOBAL_DIR")
+        os.makedirs(root, exist_ok=True)
+        return root
+    return os.getcwd()
+
+
+def skills_dir(flags):
+    return os.path.join(scope_root(flags), ".agents", "skills")
+
+
+def cmd_add(positionals, flags):
+    if not positionals:
+        fail("fake-skills: add needs a source")
+    names = flags.get("-s") or flags.get("--skill") or []
+    if not names:
+        fail("fake-skills: add needs -s")
+    base = skills_dir(flags)
+    for name in names:
+        d = os.path.join(base, name)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "SKILL.md"), "w") as f:
+            f.write("---\nname: %s\ndescription: fake\n---\nfake skill body\n" % name)
+    # Lockfile presence mirrors the real CLI closely enough for tests.
+    with open(os.path.join(scope_root(flags), "skills-lock.json"), "w") as f:
+        json.dump({"skills": sorted(os.listdir(base))}, f)
+    print("Installed %d skill(s)" % len(names))
+
+
+def cmd_list(flags):
+    base = skills_dir(flags)
+    scope = "global" if is_global(flags) else "project"
+    entries = sorted(os.listdir(base)) if os.path.isdir(base) else []
+    print(json.dumps([
+        {"name": n, "path": os.path.join(base, n), "scope": scope,
+         "agents": ["claude-code", "codex"]}
+        for n in entries
+        if os.path.isdir(os.path.join(base, n))
+    ]))
+
+
+def cmd_remove(positionals, flags):
+    names = (flags.get("-s") or flags.get("--skill") or []) + positionals
+    base = skills_dir(flags)
+    for name in names:
+        d = os.path.join(base, name)
+        if os.path.isdir(d):
+            import shutil
+            shutil.rmtree(d)
+    print("Removed %d skill(s)" % len(names))
+
+
+def main():
+    argv = sys.argv[1:]
+    log_invocation(argv)
+    if not argv:
+        fail("fake-skills: no arguments")
+    positionals, flags = parse(argv[1:])
+    if argv[0] == "add":
+        cmd_add(positionals, flags)
+    elif argv[0] in ("list", "ls"):
+        cmd_list(flags)
+    elif argv[0] in ("remove", "rm"):
+        cmd_remove(positionals, flags)
+    elif argv[0] in ("update", "upgrade"):
+        print("Updated")
+    else:
+        fail("fake-skills: unsupported subcommand " + argv[0])
+
+
+if __name__ == "__main__":
+    main()
