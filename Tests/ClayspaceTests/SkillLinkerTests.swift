@@ -114,6 +114,109 @@ final class SkillLinkerTests: XCTestCase {
             "repo-owned\n")
     }
 
+    func testPrivateSpelledProjectRootSurvivesInstallAndUninstall() async throws {
+        // TestSandbox lives under temporaryDirectory (/var/folders/…),
+        // which macOS also exposes as /private/var/folders/… — the same
+        // directory under two spellings. All identity and relative-path
+        // math must be lexical: URL.standardizedFileURL strips /private
+        // only when the path EXISTS, so existence-dependent
+        // normalization mixes spellings (root-crossing link targets) and
+        // flips link identity across install/uninstall (leaked links).
+        let varPath = project.rootPath.path
+        guard varPath.hasPrefix("/var/") else {
+            throw XCTSkip("sandbox is not under /var/, so there is no /private alias to exercise")
+        }
+        let privateRoot = URL(fileURLWithPath: "/private" + varPath, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: privateRoot.path) else {
+            throw XCTSkip("/private spelling does not resolve on this machine")
+        }
+
+        try installCanonicalSkill("foo")
+        SkillLinker.reconcile(projectRoot: privateRoot)
+
+        let fm = FileManager.default
+        for agentDir in [".agents", ".claude"] {
+            let link = mainWorktree().appendingPathComponent("\(agentDir)/skills/foo")
+            // repos/<repo>/<branch>/<agentDir>/skills → project root is
+            // exactly five ups, whatever the root spelling. A
+            // root-crossing target like ../../../../../../private/…
+            // means the math mixed spellings.
+            XCTAssertEqual(
+                try fm.destinationOfSymbolicLink(atPath: link.path),
+                "../../../../../.agents/skills/foo",
+                "\(agentDir) link target must be pure component math")
+        }
+
+        // Uninstall, then reconcile under the same /private spelling.
+        // The canonical dir no longer exists, so any existence-dependent
+        // normalization stops recognizing our links and leaks them.
+        try fm.removeItem(at: project.rootPath.appendingPathComponent(".agents/skills/foo"))
+        SkillLinker.reconcile(projectRoot: privateRoot)
+
+        for agentDir in [".agents", ".claude"] {
+            let link = mainWorktree().appendingPathComponent("\(agentDir)/skills/foo")
+            XCTAssertNil(
+                try? fm.destinationOfSymbolicLink(atPath: link.path),
+                "stale link \(link.path) must be removed")
+            XCTAssertFalse(fm.fileExists(atPath: link.path))
+        }
+    }
+
+    func testExcludeFilePreservesUserContent() async throws {
+        let excludeURL = alpha.rootURL.appendingPathComponent(".bare/info/exclude")
+        try FileManager.default.createDirectory(
+            at: excludeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "# my stuff\nnode_modules/\n*.log\n".write(
+            to: excludeURL, atomically: true, encoding: .utf8)
+
+        try installCanonicalSkill("foo")
+        SkillLinker.reconcile(projectRoot: project.rootPath)
+
+        var exclude = try String(contentsOf: excludeURL, encoding: .utf8)
+        XCTAssertTrue(exclude.contains("# my stuff"))
+        XCTAssertTrue(exclude.contains("node_modules/"))
+        XCTAssertTrue(exclude.contains("*.log"))
+        XCTAssertTrue(exclude.contains(SkillLinker.excludeBlockStart))
+        XCTAssertTrue(exclude.contains("/.agents/skills/foo"))
+        XCTAssertTrue(exclude.contains("/.claude/skills/foo"))
+
+        // Uninstall: managed block disappears, user content survives.
+        try FileManager.default.removeItem(
+            at: project.rootPath.appendingPathComponent(".agents/skills/foo"))
+        SkillLinker.reconcile(projectRoot: project.rootPath)
+
+        exclude = try String(contentsOf: excludeURL, encoding: .utf8)
+        XCTAssertTrue(exclude.contains("# my stuff"))
+        XCTAssertTrue(exclude.contains("node_modules/"))
+        XCTAssertTrue(exclude.contains("*.log"))
+        XCTAssertFalse(exclude.contains(SkillLinker.excludeBlockStart))
+        XCTAssertFalse(exclude.contains("foo"))
+    }
+
+    func testForeignSymlinkIsSkippedAndReported() async throws {
+        // A symlink someone else put where our link would go, pointing
+        // somewhere outside the canonical store.
+        let elsewhere = sandbox.root.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        let foreign = mainWorktree().appendingPathComponent(".claude/skills/foo")
+        try FileManager.default.createDirectory(
+            at: foreign.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            atPath: foreign.path, withDestinationPath: elsewhere.path)
+
+        try installCanonicalSkill("foo")
+        let report = SkillLinker.reconcile(projectRoot: project.rootPath)
+
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: foreign.path),
+            elsewhere.path,
+            "foreign symlink must not be retargeted or removed")
+        XCTAssertEqual(report.skipped.count, 1)
+        XCTAssertTrue(
+            report.skipped.contains { $0.contains(foreign.path) },
+            "skipped must mention the foreign link, got \(report.skipped)")
+    }
+
     func testUninstalledSkillLinksAreRemoved() async throws {
         try installCanonicalSkill("foo")
         SkillLinker.reconcile(projectRoot: project.rootPath)

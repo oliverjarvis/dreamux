@@ -56,6 +56,12 @@ enum SkillLinker {
         let skills = installedSkillNames(projectRoot: projectRoot)
         var report = SkillLinkReport()
         for repoDir in repoDirectories(projectRoot: projectRoot) {
+            // A directory under repos/ without .bare isn't a Clayspace
+            // repo layout — there's no shared info/exclude to suppress
+            // the links, so linking into it would create git noise.
+            guard FileManager.default.fileExists(
+                atPath: repoDir.appendingPathComponent(".bare").path)
+            else { continue }
             updateExcludeFile(repoRoot: repoDir, skills: skills)
             for worktree in Repository(rootURL: repoDir).worktrees {
                 reconcile(worktree: worktree, projectRoot: projectRoot,
@@ -74,9 +80,13 @@ enum SkillLinker {
         report: inout SkillLinkReport
     ) {
         let fm = FileManager.default
+        // No standardizedFileURL anywhere in here: every URL below is
+        // built by appending literal components to projectRoot, so both
+        // sides of every comparison share one spelling and plain
+        // component math is correct (see lexicallyResolving for why
+        // filesystem-dependent normalization must be avoided).
         let canonicalRoot = projectRoot
             .appendingPathComponent(".agents/skills", isDirectory: true)
-            .standardizedFileURL
 
         for agentDir in agentDirNames {
             let skillsParent = worktree.appendingPathComponent(
@@ -94,8 +104,7 @@ enum SkillLinker {
             for skill in skills {
                 let linkURL = skillsParent.appendingPathComponent(skill)
                 let canonical = canonicalRoot.appendingPathComponent(skill, isDirectory: true)
-                let target = relativePath(
-                    from: skillsParent.standardizedFileURL, to: canonical.standardizedFileURL)
+                let target = relativePath(from: skillsParent, to: canonical)
 
                 if let existingDest = try? fm.destinationOfSymbolicLink(atPath: linkURL.path) {
                     if existingDest == target { continue }
@@ -130,10 +139,42 @@ enum SkillLinker {
     private static func isOurLink(_ url: URL, canonicalRoot: URL) -> Bool {
         guard let dest = try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)
         else { return false }
-        let resolved = URL(fileURLWithPath: dest, relativeTo: url.deletingLastPathComponent())
-            .standardizedFileURL
-        return resolved.path.hasPrefix(canonicalRoot.path + "/")
-            || resolved.path == canonicalRoot.path
+        let resolved = lexicallyResolving(dest, against: url.deletingLastPathComponent())
+        return resolved.hasPrefix(canonicalRoot.path + "/")
+            || resolved == canonicalRoot.path
+    }
+
+    /// Resolve a symlink destination against the link's directory with
+    /// pure component math: absolute paths pass through, "." is
+    /// dropped, ".." pops one component (never above the root).
+    ///
+    /// Filesystem-independent folding is required here, not a nicety:
+    /// `URL.standardizedFileURL` strips macOS's `/private` prefix only
+    /// when the path currently EXISTS, so identity built on it flips
+    /// across install/uninstall — the moment a skill's canonical dir is
+    /// deleted, its links resolve to the `/private/…` spelling while
+    /// `canonicalRoot` keeps the `/var/…` one, `isOurLink` says no, and
+    /// the stale links leak forever. Lexical folding is physically
+    /// correct for links we manage (every component below the project
+    /// root is a real directory we own, no symlinked ancestors inside
+    /// the walk); a foreign link that mis-folds merely gets skipped,
+    /// which is the conservative outcome.
+    static func lexicallyResolving(_ path: String, against base: URL) -> String {
+        if path.hasPrefix("/") { return path }
+        var parts = base.pathComponents   // absolute file URL: starts with "/"
+        for component in path.split(separator: "/") {
+            switch component {
+            case ".":
+                continue
+            case "..":
+                if parts.count > 1 { parts.removeLast() }   // never above root
+            default:
+                parts.append(String(component))
+            }
+        }
+        // parts == ["/"] must join to "/", not ""; otherwise drop the
+        // leading "/" component and rebuild from the root.
+        return parts.count == 1 ? "/" : "/" + parts.dropFirst().joined(separator: "/")
     }
 
     private static func removeIfEmpty(_ dir: URL) {
@@ -197,7 +238,11 @@ enum SkillLinker {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// Relative path from directory `dir` to `target` (both standardized).
+    /// Relative path from directory `dir` to `target`, by pure
+    /// component math. Both URLs must share one spelling of their
+    /// common ancestor (true for everything SkillLinker builds — all
+    /// URLs derive from the same `projectRoot`); no filesystem access,
+    /// so the result is stable whether or not the paths exist yet.
     static func relativePath(from dir: URL, to target: URL) -> String {
         let fromParts = dir.pathComponents
         let toParts = target.pathComponents
