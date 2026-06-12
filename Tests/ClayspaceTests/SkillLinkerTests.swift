@@ -238,4 +238,17 @@ final class SkillLinkerTests: XCTestCase {
             encoding: .utf8)) ?? ""
         XCTAssertFalse(exclude.contains("foo"))
     }
+
+    func testProvisionLinksProjectSkillsIntoNewWorktree() async throws {
+        try installCanonicalSkill("foo")
+        // No explicit reconcile: provisioning itself must wire the links.
+        _ = try await FeatureProvisioner.provision(
+            featureName: "feature-y", in: project, across: [alpha])
+
+        let worktree = alpha.rootURL.appendingPathComponent("feature-y", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: worktree.appendingPathComponent(".agents/skills/foo/SKILL.md").path))
+        let status = try await GitOperations.runGit(["status", "--porcelain"], in: worktree)
+        XCTAssertEqual(status.trimmingCharacters(in: .whitespacesAndNewlines), "")
+    }
 }

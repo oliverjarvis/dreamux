@@ -99,6 +99,9 @@ enum FeatureProvisioner {
         }
 
         writeReadme(in: featureDir, featureName: featureName, repos: provisionedRepos)
+        // New worktrees must see project-scope skills immediately —
+        // discovery stops at the repo root, so links are the bridge.
+        SkillLinker.reconcile(projectRoot: project.rootPath)
         return featureDir
     }
 
@@ -187,6 +190,7 @@ enum FeatureProvisioner {
         // were created by a pre-readme build of Clayspace, or where the
         // file got deleted.
         writeReadme(in: featureDir, featureName: featureName, repos: repos)
+        SkillLinker.reconcile(projectRoot: project.rootPath)
         return featureDir
     }
 
