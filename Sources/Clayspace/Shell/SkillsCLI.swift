@@ -153,6 +153,7 @@ struct SkillsCLI: Sendable {
                         let tailErr = errPipe.fileHandleForReading.readDataToEndOfFile()
                         if !tailOut.isEmpty { collector.append(tailOut, isStdout: true, onLine: onLine) }
                         if !tailErr.isEmpty { collector.append(tailErr, isStdout: false, onLine: onLine) }
+                        collector.flushPartial(onLine: onLine)
 
                         if process.terminationStatus != 0 {
                             let stderr = collector.stderrText
@@ -217,5 +218,17 @@ private final class SkillsOutputCollector: @unchecked Sendable {
         if let onLine {
             for line in lines { onLine(line) }
         }
+    }
+
+    /// Emit whatever's left in the line buffer once the process has
+    /// exited — output that ended without a trailing newline would
+    /// otherwise never reach `onLine`. Mirrors
+    /// `OutputAccumulator.flushPartial` in GitOperations.swift.
+    func flushPartial(onLine: (@Sendable (String) -> Void)?) {
+        lock.lock()
+        let tail = lineBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        lineBuffer = ""
+        lock.unlock()
+        if !tail.isEmpty, let onLine { onLine(tail) }
     }
 }

@@ -108,6 +108,34 @@ final class SkillsCLITests: XCTestCase {
         XCTAssertEqual(argv, ["remove", "-s", "p1", "-a", "*", "-y"])
     }
 
+    func testUpdateArgv() async throws {
+        try await cli.add(source: "a/b", skills: ["p1"], extraAgents: [], scope: .project(projectRoot))
+
+        try await cli.update(skills: ["p1"], scope: .project(projectRoot))
+        let projectArgv = try XCTUnwrap(loggedInvocations().last?["argv"] as? [String])
+        XCTAssertEqual(projectArgv, ["update", "p1", "-p", "-y"])
+
+        try await cli.update(skills: ["p1"], scope: .global)
+        let globalArgv = try XCTUnwrap(loggedInvocations().last?["argv"] as? [String])
+        XCTAssertEqual(globalArgv, ["update", "p1", "-g", "-y"])
+    }
+
+    func testOnLineDeliversTrailingLineWithoutNewline() async throws {
+        // A stand-in CLI whose output ends WITHOUT a trailing newline —
+        // the streaming path must still deliver that final line.
+        let script = projectRoot.deletingLastPathComponent()
+            .appendingPathComponent("printf-script")
+        try "#!/bin/sh\nprintf 'line one\\nlast line no newline'\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: script.path)
+        setenv("CLAYSPACE_SKILLS_BIN", script.path, 1)
+
+        let box = LineBox()
+        try await cli.update(skills: [], scope: .project(projectRoot)) { box.append($0) }
+        XCTAssertEqual(box.all, ["line one", "last line no newline"])
+    }
+
     func testNodeUnavailableWithoutOverride() async {
         unsetenv("CLAYSPACE_SKILLS_BIN")
         do {
@@ -115,5 +143,22 @@ final class SkillsCLITests: XCTestCase {
             XCTFail("expected nodeUnavailable")
         } catch SkillsCLIError.nodeUnavailable {
         } catch { XCTFail("unexpected error: \(error)") }
+    }
+}
+
+/// Thread-safe accumulator for `onLine` callbacks, which arrive on a
+/// background queue (@Sendable, off-main).
+private final class LineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    func append(_ line: String) {
+        lock.lock(); defer { lock.unlock() }
+        lines.append(line)
+    }
+
+    var all: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return lines
     }
 }
