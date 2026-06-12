@@ -76,6 +76,9 @@ enum NodeDetector {
 
     /// Tiny process runner: stdout on success, nil on failed launch or
     /// non-zero exit. Probes are short-lived; no streaming needed.
+    /// No timeout: probes are expected to exit immediately, and the
+    /// login-shell probe inherits the user's rc files — callers should
+    /// not run `detect()` on a UI-blocking path.
     private static func runProcess(executable: String, arguments: [String]) async -> String? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -84,7 +87,9 @@ enum NodeDetector {
                 process.arguments = arguments
                 let outPipe = Pipe()
                 process.standardOutput = outPipe
-                process.standardError = Pipe()
+                // nullDevice, not Pipe(): an undrained stderr pipe would
+                // deadlock a chatty probe once its 64KB buffer fills.
+                process.standardError = FileHandle.nullDevice
                 do {
                     try process.run()
                 } catch {
@@ -97,7 +102,7 @@ enum NodeDetector {
                     continuation.resume(returning: nil)
                     return
                 }
-                continuation.resume(returning: String(data: data, encoding: .utf8))
+                continuation.resume(returning: String(data: data, encoding: .utf8) ?? "")
             }
         }
     }
