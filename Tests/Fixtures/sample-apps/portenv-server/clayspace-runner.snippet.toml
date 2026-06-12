@@ -1,0 +1,18 @@
+[[runners]]
+name = "portenv-server"
+cwd = "{{CWD}}"
+# start invokes server.py by absolute path so stop's pkill pattern can
+# anchor on it — a bare `pkill -f 'python3 server.py'` would SIGTERM
+# matching processes anywhere on the host (see the stop-safety test in
+# RunnerLifecycleTests). The pattern deliberately omits "python3":
+# macOS's python3 shim re-execs the real interpreter under a different
+# argv[0], so only the script path reliably survives into the command
+# line.
+start = 'python3 "$PWD/server.py"'
+stop = 'pkill -f "$PWD/server.py"'
+port = 4600
+port_env = "PORTENV_SERVER_PORT"
+# {port} resolves to the instance's effective (per-worktree) port, so
+# each running worktree opens its own URL. fixedport-server omits the
+# key on purpose — it covers the no-open path.
+open = "http://localhost:{port}/"

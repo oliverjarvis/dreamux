@@ -271,11 +271,11 @@ struct SignalsView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Spacer()
-            let runningCount = runners.runners.filter { runners.status[$0.name]?.isRunning == true }.count
+            let runningCount = runners.statusByInstance.values.filter(\.isRunning).count
             if runningCount > 0 {
                 HStack(spacing: 4) {
                     Circle().fill(Color.green).frame(width: 6, height: 6)
-                    Text("\(runningCount) runner\(runningCount == 1 ? "" : "s") running")
+                    Text("\(runningCount) instance\(runningCount == 1 ? "" : "s") running")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

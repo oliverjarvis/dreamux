@@ -6,8 +6,17 @@ struct ClayspaceApp: App {
     @State private var projects = ProjectStore()
 
     init() {
-        // Ask once at launch — the user can revoke later in System Settings.
-        NotificationManager.shared.requestAuthorizationIfNeeded()
+        if let socketPath = E2EMode.socketPath {
+            // e2e harness launch: skip the notification permission
+            // dialog (nothing can click it mid-run) and bring the
+            // automation server up before any window exists, so the
+            // driver's first ping lands no matter how fast it connects.
+            E2ERegistry.shared.registerProjectStore(_projects.wrappedValue)
+            E2EServer.start(socketPath: socketPath)
+        } else {
+            // Ask once at launch — the user can revoke later in System Settings.
+            NotificationManager.shared.requestAuthorizationIfNeeded()
+        }
     }
 
     var body: some Scene {

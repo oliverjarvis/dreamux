@@ -22,6 +22,19 @@ enum ProjectError: LocalizedError {
 /// persisted as JSON under Application Support; project directories
 /// themselves live under ~/Documents/Clayspace by default so the user
 /// can browse them in Finder.
+///
+/// Two environment variables exist purely for the e2e test harness, so
+/// a sandboxed app launch never touches the user's real Documents or
+/// Application Support:
+///
+/// - `CLAYSPACE_PROJECTS_ROOT` replaces `~/Documents/Clayspace` as the
+///   directory projects are discovered in and created under.
+/// - `CLAYSPACE_STATE_DIR` replaces `~/Library/Application Support/
+///   Clayspace` as the home of `projects.json`.
+///
+/// Both are honored only when set to a non-empty value, and the
+/// directories are created on demand. When unset, behavior is identical
+/// to a normal user launch.
 @MainActor
 @Observable
 final class ProjectStore {
@@ -32,26 +45,37 @@ final class ProjectStore {
 
     init() {
         let fm = FileManager.default
+        let env = ProcessInfo.processInfo.environment
 
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-        let appDir = appSupport.appendingPathComponent("Clayspace", isDirectory: true)
+        let appDir: URL
+        if let override = env["CLAYSPACE_STATE_DIR"], !override.isEmpty {
+            appDir = URL(fileURLWithPath: override, isDirectory: true)
+        } else {
+            let appSupport = (try? fm.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )) ?? URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Library/Application Support")
+            appDir = appSupport.appendingPathComponent("Clayspace", isDirectory: true)
+        }
         try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
         self.storeURL = appDir.appendingPathComponent("projects.json")
 
-        let documents = (try? fm.url(
-            for: .documentDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Documents")
-        let projectsRoot = documents.appendingPathComponent("Clayspace", isDirectory: true)
+        let projectsRoot: URL
+        if let override = env["CLAYSPACE_PROJECTS_ROOT"], !override.isEmpty {
+            projectsRoot = URL(fileURLWithPath: override, isDirectory: true)
+        } else {
+            let documents = (try? fm.url(
+                for: .documentDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )) ?? URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Documents")
+            projectsRoot = documents.appendingPathComponent("Clayspace", isDirectory: true)
+        }
         try? fm.createDirectory(at: projectsRoot, withIntermediateDirectories: true)
         self.projectsRoot = projectsRoot
 

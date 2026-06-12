@@ -19,6 +19,41 @@ final class PTYShellSession: @unchecked Sendable {
     private var readSource: DispatchSourceRead?
     private var isStarted = false
     private var isStopped = false
+    private var producedOutput = false
+    private var lastOutputAt: Date?
+
+    /// True once the child shell has written anything back. Necessary
+    /// but NOT sufficient for programmatic input: zsh emits bytes
+    /// (title escapes, profile output) well before its line editor is
+    /// up, and zle's init runs tcsetattr with TCSAFLUSH, which DISCARDS
+    /// anything typed in between. Use `isQuiescent(for:)` to know when
+    /// typing is safe.
+    var hasProducedOutput: Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return producedOutput
+    }
+
+    /// True when the shell has produced output and then gone silent
+    /// for at least `interval`. Startup output arrives in bursts and
+    /// the prompt is usually the last of them — but a heavyweight rc
+    /// file can also go silent for seconds mid-startup, so this is a
+    /// "probably ready" signal, not a guarantee. Callers that must not
+    /// lose input should verify the echo (see `lastOutputTimestamp`)
+    /// and resend.
+    func isQuiescent(for interval: TimeInterval) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        guard producedOutput, let last = lastOutputAt else { return false }
+        return Date().timeIntervalSince(last) >= interval
+    }
+
+    /// When the shell last wrote anything. A live line editor echoes
+    /// typed input, so output newer than a `send` proves the shell
+    /// actually received it (rather than zle's startup tcsetattr
+    /// flushing it from the input queue).
+    var lastOutputTimestamp: Date? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return lastOutputAt
+    }
 
     private let ioQueue = DispatchQueue(label: "com.clayspace.pty.io", qos: .userInitiated)
     private let cwd: String?
@@ -192,6 +227,12 @@ final class PTYShellSession: @unchecked Sendable {
                 Darwin.read(fd, ptr.baseAddress, ptr.count)
             }
             if n > 0 {
+                if let self {
+                    self.stateLock.lock()
+                    self.producedOutput = true
+                    self.lastOutputAt = Date()
+                    self.stateLock.unlock()
+                }
                 session.receive(Data(bytes: buffer, count: n))
                 // Extract attention signals from this chunk: a plain BEL
                 // (`\a`, 0x07) maps to a generic ping; an iTerm2-style

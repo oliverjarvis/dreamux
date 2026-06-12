@@ -1,0 +1,8 @@
+[[runners]]
+name = "fixedport-server"
+cwd = "{{CWD}}"
+# Path-anchored start/stop so the pkill can only ever hit this
+# sandbox's instance — see portenv-server's snippet for the rationale.
+start = 'python3 "$PWD/server.py"'
+stop = 'pkill -f "$PWD/server.py"'
+port = 4700

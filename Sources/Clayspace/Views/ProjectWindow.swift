@@ -60,6 +60,13 @@ private struct ProjectWindowContents: View {
         .navigationTitle(project.name)
         .navigationSubtitle(project.rootPath.path)
         .onAppear {
+            // e2e only (no-op otherwise): expose this window's live
+            // stores to the automation server, keyed by project id.
+            E2ERegistry.shared.registerWindowStores(
+                projectID: project.id,
+                workspaceStore: store,
+                repoStore: repoStore
+            )
             repoStore.refresh()
             Task {
                 // Reconstruct the feature list from the worktrees
@@ -67,6 +74,9 @@ private struct ProjectWindowContents: View {
                 // same set of work items the user closed with.
                 await store.reloadFeatures(in: project, repoStore: repoStore)
             }
+        }
+        .onDisappear {
+            E2ERegistry.shared.unregister(projectID: project.id)
         }
         .focusedSceneValue(\.activeStore, store)
         .focusedSceneValue(\.activeProject, project)

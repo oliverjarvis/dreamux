@@ -17,15 +17,21 @@ struct ProjectsRail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Projects")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 14)
+            HomeRailRow { openWindow(id: "home") }
+                .padding(.horizontal, 6)
+                .padding(.top, 10)
                 .padding(.bottom, 6)
 
+            Text("Projects")
+                .font(.system(size: 11, weight: .semibold))
+                .kerning(0.8)
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
+
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 2) {
+                VStack(spacing: 3) {
                     ForEach(projects.projects) { project in
                         ProjectRow(
                             project: project,
@@ -33,7 +39,7 @@ struct ProjectsRail: View {
                             onClick: { onSelect(project.id) },
                             onOpenInNewWindow: { openInNewWindow(project.id) }
                         )
-                        .frame(height: 28)
+                        .frame(height: 34)
                     }
                 }
                 .padding(.horizontal, 6)
@@ -64,6 +70,41 @@ struct ProjectsRail: View {
                 NSApp.keyWindow?.orderFront(nil)
             }
         }
+    }
+}
+
+// MARK: - Home row
+
+/// A "Home" entry pinned to the top of the rail, styled like a project
+/// row so it reads as a sibling navigation target rather than a button
+/// floating in chrome.
+private struct HomeRailRow: View {
+    let onClick: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onClick) {
+            HStack(spacing: 10) {
+                Image(systemName: "house.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 16, height: 16)
+                Text("Home")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(isHovered ? 0.08 : 0.0))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help("Show Home (⇧⌘0)")
     }
 }
 
@@ -167,26 +208,28 @@ final class ProjectRowView: NSView, NSDraggingSource {
         guard let project else { return }
         let tint = NSColor.controlAccentColor
 
-        // Row background
-        let rowRect = bounds.insetBy(dx: 2, dy: 1)
-        let rowPath = NSBezierPath(roundedRect: rowRect, xRadius: 6, yRadius: 6)
+        // Row background. The active row gets a subtle top-lit gradient so
+        // it reads as a raised "pill" instead of a flat paint swatch.
+        let rowRect = bounds
+        let rowPath = NSBezierPath(roundedRect: rowRect, xRadius: 7, yRadius: 7)
         if isActive {
-            tint.withAlphaComponent(0.92).setFill()
-            rowPath.fill()
+            let top = tint.blended(withFraction: 0.12, of: .white) ?? tint
+            let bottom = tint.blended(withFraction: 0.10, of: .black) ?? tint
+            NSGradient(starting: top, ending: bottom)?.draw(in: rowPath, angle: 90)
         } else if isHovered {
             NSColor.labelColor.withAlphaComponent(0.08).setFill()
             rowPath.fill()
         }
 
         // Folder icon (left)
-        let iconSize: CGFloat = 14
+        let iconSize: CGFloat = 16
         let iconRect = NSRect(
             x: 10,
             y: (bounds.height - iconSize) / 2,
             width: iconSize,
             height: iconSize
         )
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
             .applying(.init(paletteColors: [isActive ? .white : tint]))
         if let icon = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)?
             .withSymbolConfiguration(symbolConfig) {
@@ -195,7 +238,7 @@ final class ProjectRowView: NSView, NSDraggingSource {
 
         // Project name (right of icon)
         let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: isActive ? .semibold : .regular),
+            .font: NSFont.systemFont(ofSize: 14, weight: isActive ? .semibold : .regular),
             .foregroundColor: isActive ? NSColor.white : NSColor.labelColor,
         ]
         let paragraph = NSMutableParagraphStyle()
@@ -205,9 +248,9 @@ final class ProjectRowView: NSView, NSDraggingSource {
         let name = NSAttributedString(string: project.name, attributes: attrs)
         let textHeight = name.size().height
         let textRect = NSRect(
-            x: iconRect.maxX + 8,
+            x: iconRect.maxX + 10,
             y: (bounds.height - textHeight) / 2,
-            width: bounds.width - iconRect.maxX - 16,
+            width: bounds.width - iconRect.maxX - 20,
             height: textHeight
         )
         name.draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])

@@ -1,0 +1,12 @@
+# Single- vs double-quoted values, plus '=' and '#' inside quotes —
+# all must survive verbatim with only the outer quotes stripped.
+
+[[runners]]
+name = 'single'
+cwd = 'repos/single/main'
+start = "FOO=bar PORT=4620 npm start"
+stop = "pkill -f 'npm #dev'"
+
+[[runners]]
+name = "double"
+start = 'echo a=b # not a comment'

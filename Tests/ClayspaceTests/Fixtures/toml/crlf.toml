@@ -1,0 +1,5 @@
+# CRLF endings, whitespace padding, and no trailing newline.
+  [[runners]]  
+   name   =   "crlf"   
+	start	=	"echo crlf"
+  port = 4640

@@ -3,6 +3,7 @@ import SwiftUI
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
+    @Bindable var runners: RunnerManager
     @Binding var sidebarMode: SidebarMode
 
     @State private var showAddFeature = false
@@ -12,11 +13,12 @@ struct WorkspaceSidebar: View {
     @State private var pendingClose: Workspace?
     @State private var pendingMerge: Workspace?
     @State private var repositoriesExpanded = false
+    @State private var switchNotice: SwitchNotice?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
-                runTile
+                signalsTile
                 featuresSection
                 Divider()
                 repositoriesSection
@@ -50,6 +52,12 @@ struct WorkspaceSidebar: View {
                 onOpenConflictTab: { url, title in
                     openConflictTab(workspace: workspace, url: url, title: title)
                 },
+                onRepoCleanedUp: { repo in
+                    stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
+                },
+                onAllCleanedUp: {
+                    finalizeFeatureCleanup(workspace)
+                },
                 onDismiss: { pendingMerge = nil }
             )
         }
@@ -62,16 +70,13 @@ struct WorkspaceSidebar: View {
             presenting: pendingClose
         ) { workspace in
             Button("Close & Remove Worktrees", role: .destructive) {
-                closeFeature(workspace, removeWorktrees: true)
-            }
-            Button("Close (Keep Worktrees)") {
-                closeFeature(workspace, removeWorktrees: false)
+                closeFeature(workspace)
             }
             Button("Cancel", role: .cancel) {}
         } message: { workspace in
             Text(workspace.linkedRepoIDs.isEmpty
                  ? "Close this feature and stop its shells."
-                 : "Removing worktrees will run `git worktree remove` and `git branch -D \(workspace.name)` in each linked repo. Pick \"Keep Worktrees\" to leave the on-disk worktrees in place.")
+                 : "This will run `git worktree remove` and `git branch -D \(workspace.name)` in each linked repo, then drop the feature from the sidebar.")
         }
         .alert(
             "Couldn't apply change",
@@ -85,56 +90,68 @@ struct WorkspaceSidebar: View {
         } message: { error in
             Text(error)
         }
-    }
-
-    // MARK: - Run / Signals
-
-    private var runTile: some View {
-        VStack(spacing: 4) {
-            modeTile(
-                mode: .run,
-                title: "Run",
-                symbol: "play.fill",
-                tint: .green,
-                hint: "Configure how to start and stop this project"
-            )
-            modeTile(
-                mode: .signals,
-                title: "Signals",
-                symbol: "waveform.path.ecg",
-                tint: .purple,
-                hint: "View log streams from running services"
-            )
+        .onAppear { consumePendingMergeIfAny() }
+        .onChange(of: e2eBridge?.pendingMergeWorkspaceID) { _, _ in
+            consumePendingMergeIfAny()
         }
     }
 
+    /// Bridge for this project window — `nil` when the e2e harness is
+    /// inactive, making the merge-sheet consumption above a no-op.
+    private var e2eBridge: E2EBridge? {
+        E2ERegistry.shared.bridge(forProject: repoStore.project.id)
+    }
+
+    /// The automation server's `openMergeSheet` command parks the
+    /// target workspace id on the bridge; this view owns the sheet's
+    /// presentation state, so it adopts (and clears) the request here —
+    /// the `runners.pendingIsolation` pattern again.
+    private func consumePendingMergeIfAny() {
+        guard let bridge = e2eBridge, let id = bridge.pendingMergeWorkspaceID else { return }
+        bridge.pendingMergeWorkspaceID = nil
+        guard let workspace = store.workspaces.first(where: { $0.id == id }) else { return }
+        pendingMerge = workspace
+    }
+
+    // MARK: - Signals tile
+
+    private var signalsTile: some View {
+        modeTile(
+            isSelected: sidebarMode == .signals,
+            title: "Signals",
+            symbol: "waveform.path.ecg",
+            tint: .purple,
+            hint: "View log streams from running services",
+            onTap: { sidebarMode = .signals }
+        )
+    }
+
     private func modeTile(
-        mode: SidebarMode,
+        isSelected: Bool,
         title: String,
         symbol: String,
         tint: Color,
-        hint: String
+        hint: String,
+        onTap: @escaping () -> Void
     ) -> some View {
-        Button {
-            sidebarMode = mode
-        } label: {
+        Button(action: onTap) {
             HStack(spacing: 10) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(tint.opacity(sidebarMode == mode ? 0.95 : 0.18))
+                        .fill(tint.opacity(isSelected ? 0.95 : 0.18))
                         .overlay(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(tint.opacity(sidebarMode == mode ? 0 : 0.28), lineWidth: 1)
+                                .strokeBorder(tint.opacity(isSelected ? 0 : 0.28), lineWidth: 1)
                         )
                     Image(systemName: symbol)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(sidebarMode == mode ? Color.white : tint)
+                        .foregroundStyle(isSelected ? Color.white : tint)
                 }
                 .frame(width: 28, height: 28)
 
                 Text(title)
                     .font(.callout.weight(.medium))
-                    .foregroundStyle(sidebarMode == mode ? .primary : .secondary)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 10)
@@ -142,7 +159,7 @@ struct WorkspaceSidebar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(sidebarMode == mode ? Color.primary.opacity(0.10) : Color.clear)
+                    .fill(isSelected ? Color.primary.opacity(0.10) : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -152,6 +169,34 @@ struct WorkspaceSidebar: View {
 
     // MARK: - Features
 
+    /// A workspace row is "active" when the user is either viewing its
+    /// terminal pane or its scoped Run page — both should highlight the
+    /// row so the user always sees which feature the right-hand pane is
+    /// bound to.
+    private func isWorkspaceActive(_ workspace: Workspace) -> Bool {
+        if workspace.id != store.activeID { return false }
+        switch sidebarMode {
+        case .workspace: return true
+        case .run(let id): return id == workspace.id
+        case .signals: return false
+        }
+    }
+
+    /// Open the workspace's running services — the row's open button.
+    /// nil runnerName means "everything that isn't headless" (the
+    /// button's click); a specific name comes from its press-and-hold
+    /// menu. URL targets land as in-app tabs in this workspace, so
+    /// repeated clicks re-select rather than stack.
+    private func openServices(for workspace: Workspace, runnerName: String?) {
+        let openable = runners.openableRunners(for: workspace)
+        let targets = runnerName == nil
+            ? openable
+            : openable.filter { $0.name == runnerName }
+        for runner in targets {
+            runners.openNow(runner, on: workspace.name)
+        }
+    }
+
     private var featuresSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Work Items / Features")
@@ -159,6 +204,11 @@ struct WorkspaceSidebar: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 2)
+
+            if let notice = switchNotice {
+                switchNoticeBanner(notice)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             if store.workspaces.isEmpty, repoStore.repositories.isEmpty {
                 Text("Add a repository, then create your first feature.")
@@ -171,9 +221,11 @@ struct WorkspaceSidebar: View {
                 ForEach(store.workspaces) { workspace in
                     WorkspaceButton(
                         workspace: workspace,
-                        isActive: workspace.id == store.activeID && sidebarMode == .workspace,
+                        isActive: isWorkspaceActive(workspace),
                         hasUnread: store.hasUnread(for: workspace),
                         lastActivityMessage: store.lastActivityMessage(for: workspace),
+                        isRunning: !runners.runningRunners(onBranch: workspace.name).isEmpty,
+                        openableRunnerNames: runners.openableRunners(for: workspace).map(\.name),
                         onSelect: {
                             // Picking a Work Item flips back to the
                             // terminal view, otherwise the activation
@@ -181,6 +233,15 @@ struct WorkspaceSidebar: View {
                             // stayed on screen.
                             sidebarMode = .workspace
                             store.activate(workspace.id)
+                        },
+                        onConfigure: {
+                            store.activate(workspace.id)
+                            sidebarMode = .run(workspaceID: workspace.id)
+                        },
+                        onStart: { startRunnersForWorkspace(workspace) },
+                        onStopRunning: { stopAllRunning(on: workspace) },
+                        onOpen: { runnerName in
+                            openServices(for: workspace, runnerName: runnerName)
                         },
                         onClose: { pendingClose = workspace },
                         onRename: { store.setName($0, for: workspace.id) },
@@ -393,17 +454,167 @@ struct WorkspaceSidebar: View {
         session.openTab(at: url.path, title: title)
     }
 
-    private func closeFeature(_ workspace: Workspace, removeWorktrees: Bool) {
+    private func closeFeature(_ workspace: Workspace) {
         let project = repoStore.project
         let linkedRepos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
+        // Stop any runner that's executing on this feature's worktree —
+        // its cwd is about to disappear from under it.
+        for repo in linkedRepos {
+            stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
+        }
         store.remove(workspace)
-        guard removeWorktrees, !linkedRepos.isEmpty else { return }
+        guard !linkedRepos.isEmpty else { return }
         Task {
             await FeatureProvisioner.teardown(
                 featureName: workspace.name,
                 in: project,
                 across: linkedRepos
             )
+        }
+    }
+
+    /// Start every runner this workspace is associated with. The
+    /// decision logic lives in `RunnerManager.startPlan(for:)` (shared
+    /// with unit tests and the e2e automation server); this view only
+    /// renders the outcomes. Play never asks questions: flexible-port
+    /// runners come up alongside other worktrees, fixed-port runners
+    /// switch. When a switch displaced another worktree's instance, a
+    /// transient notice says so and offers the "run both" upgrade
+    /// (Claude rewrites the port to be env-driven).
+    private func startRunnersForWorkspace(_ workspace: Workspace) {
+        switch runners.startPlan(for: workspace) {
+        case .openRunPane:
+            store.activate(workspace.id)
+            sidebarMode = .run(workspaceID: workspace.id)
+        case .start(let toStart, let displacing):
+            runners.executeStart(toStart)
+            if let first = displacing.first {
+                showSwitchNotice(
+                    workspace: workspace,
+                    runner: first.runner,
+                    fromBranches: displacing
+                        .filter { $0.runner.name == first.runner.name }
+                        .map(\.fromBranch)
+                )
+            }
+        }
+    }
+
+    /// Surface "switched <runner> off <branches>" with a one-click path
+    /// to port isolation. Auto-dismisses; each new switch replaces the
+    /// previous notice (only the latest is actionable anyway).
+    private func showSwitchNotice(
+        workspace: Workspace,
+        runner: ParsedRunner,
+        fromBranches: [String]
+    ) {
+        let notice = SwitchNotice(
+            workspaceID: workspace.id,
+            runnerName: runner.name,
+            runner: runner,
+            fromBranches: fromBranches
+        )
+        withAnimation(.snappy(duration: 0.18)) { switchNotice = notice }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(12))
+            if switchNotice?.id == notice.id {
+                withAnimation(.snappy(duration: 0.18)) { switchNotice = nil }
+            }
+        }
+    }
+
+    /// The transient banner itself: which worktree lost the port and
+    /// why, plus "Run both" → the isolate flow (Claude makes the port
+    /// env-driven so every worktree can run simultaneously from then
+    /// on). Informational, never blocking — the switch already
+    /// happened.
+    private func switchNoticeBanner(_ notice: SwitchNotice) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "arrow.triangle.swap")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Text("Switched \(notice.runnerName) off \(notice.fromBranches.joined(separator: ", ")) — it has one fixed port.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) { switchNotice = nil }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+            }
+            Button {
+                runners.pendingIsolation = notice.runner
+                store.activate(notice.workspaceID)
+                sidebarMode = .run(workspaceID: notice.workspaceID)
+                withAnimation(.snappy(duration: 0.18)) { switchNotice = nil }
+            } label: {
+                Label("Run both — give each worktree its own port", systemImage: "wand.and.stars")
+                    .font(.caption2.weight(.semibold))
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+            .tint(.orange)
+            .help("Claude rewrites \(notice.runnerName) to read its port from an env var; after that, every worktree runs side by side.")
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.orange.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+        )
+    }
+
+    /// Stop every runner instance currently alive on this workspace's
+    /// worktree. Per-instance so concurrent branches keep running.
+    private func stopAllRunning(on workspace: Workspace) {
+        for runner in runners.runners {
+            guard runners.status(for: runner, on: workspace.name)?.isRunning == true
+            else { continue }
+            runners.stop(runner, on: workspace.name)
+        }
+    }
+
+    /// Stop and clear any runner whose currently-selected worktree is
+    /// the one we're about to remove for `repo`. Matches by both the
+    /// runner's repo (derived from its cwd) and the branch we're about
+    /// to delete — the only safe overlap.
+    private func stopRunnersTiedToFeature(repo: Repository, branch: String) {
+        for runner in runners.runners {
+            guard runners.repoName(for: runner) == repo.name else { continue }
+            if runners.status(for: runner, on: branch)?.isRunning == true {
+                runners.stop(runner, on: branch)
+            }
+            // Clear the override even if the runner wasn't running —
+            // otherwise the next Start would point at a deleted folder.
+            runners.setActiveBranch(nil, for: runner)
+        }
+    }
+
+    /// Last-step cleanup once every linked repo has reached
+    /// `.cleanedUp` in the merge sheet: drop the workspace from the
+    /// sidebar, remove the now-empty `features/<name>/` aggregation
+    /// directory, and dismiss the sheet. Deferred to the next runloop
+    /// so the sheet's state-update doesn't fight with the dismissal.
+    private func finalizeFeatureCleanup(_ workspace: Workspace) {
+        let featureDir = FeatureProvisioner.featureDirectory(
+            in: repoStore.project,
+            name: workspace.name
+        )
+        DispatchQueue.main.async {
+            store.remove(workspace)
+            try? FileManager.default.removeItem(at: featureDir)
+            pendingMerge = nil
         }
     }
 }
@@ -415,7 +626,21 @@ private struct WorkspaceButton: View {
     let isActive: Bool
     let hasUnread: Bool
     let lastActivityMessage: String?
+    /// At least one runner is currently alive on this workspace's
+    /// worktree. Flips the trailing-edge play button into a stop
+    /// button (which calls onStopRunning instead of onRun).
+    let isRunning: Bool
+    /// Non-headless services (open target or port) associated with
+    /// this workspace. Non-empty + running → the open button appears
+    /// where the gear used to live.
+    let openableRunnerNames: [String]
     let onSelect: () -> Void
+    let onConfigure: () -> Void
+    let onStart: () -> Void
+    let onStopRunning: () -> Void
+    /// nil = open every non-headless service; a name = just that one
+    /// (picked from the open button's press-and-hold menu).
+    let onOpen: (String?) -> Void
     let onClose: () -> Void
     let onRename: (String) -> Void
     let onPickSymbol: (String) -> Void
@@ -426,95 +651,191 @@ private struct WorkspaceButton: View {
     @State private var isPickerPresented = false
 
     var body: some View {
-        Button(action: onSelect) {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(workspace.tint.opacity(isActive ? 0.95 : (isHovered ? 0.32 : 0.18)))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(workspace.tint.opacity(isActive ? 0 : 0.28), lineWidth: 1)
-                        )
-                    Image(systemName: workspace.symbol)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(isActive ? Color.white : workspace.tint)
+        ZStack(alignment: .trailing) {
+            Button(action: onSelect) {
+                rowContents
+            }
+            .buttonStyle(.plain)
+            .help(workspace.workingDirectory ?? workspace.name)
+            .contextMenu {
+                Button("Run Settings…", action: onConfigure)
+                Button("Customize…") { isPickerPresented = true }
+                if !workspace.linkedRepoIDs.isEmpty, let onMerge {
+                    Button("Merge…", action: onMerge)
                 }
-                .frame(width: 28, height: 28)
-                .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 9, height: 9)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
-                        )
-                        .offset(x: 3, y: -3)
-                        .opacity(hasUnread ? 1 : 0)
-                        .animation(.snappy(duration: 0.18), value: hasUnread)
-                        .accessibilityHidden(true)
-                }
+                Divider()
+                Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
+            }
+            .sheet(isPresented: $isPickerPresented) {
+                CustomizeWorkspaceSheet(
+                    initialName: workspace.name,
+                    selectedSymbol: workspace.symbol,
+                    selectedTint: workspace.tint,
+                    onRename: onRename,
+                    onPickSymbol: onPickSymbol,
+                    onPickTint: onPickTint,
+                    onDismiss: { isPickerPresented = false }
+                )
+            }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(workspace.name)
-                        .font(.callout.weight(.medium))
+            // Trailing-edge run controls. Live outside the row's Button
+            // so clicks don't also fire onSelect (which would flip
+            // sidebarMode back to .workspace and undo any open Run pane).
+            HStack(spacing: 4) {
+                if isRunning, !openableRunnerNames.isEmpty {
+                    openButton
+                }
+                playStopButton
+            }
+            .padding(.trailing, 8)
+        }
+        // Hover is tracked on the whole ZStack, not the inner row
+        // Button: the gear/play controls are overlaid siblings, so a
+        // button-scoped tracking region reports an exit the moment the
+        // pointer reaches them — and since their opacity is driven by
+        // this same flag, the controls flickered at the boundary.
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+    }
+
+    /// Open button — lives where the gear used to. Click opens every
+    /// non-headless service of this worktree (in-app tabs for URLs);
+    /// press-and-hold lists the services to open just one. Only shown
+    /// while something is running, since opening a stopped service is
+    /// a connection-refused tab.
+    private var openButton: some View {
+        Menu {
+            ForEach(openableRunnerNames, id: \.self) { name in
+                Button("Open \(name)") { onOpen(name) }
+            }
+        } label: {
+            Image(systemName: "safari")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.primary.opacity(0.10)))
+        } primaryAction: {
+            onOpen(nil)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Open \(workspace.name)'s services (hold to pick one)")
+        .opacity(isHovered || isRunning ? 1 : 0.45)
+    }
+
+    /// Play/stop button → the verb. Starts every runner this workspace
+    /// is associated with, then morphs to a stop button to halt them.
+    /// Press-and-hold reveals the lower-frequency Run Settings entry
+    /// (the pane the old gear button opened — also in the row's
+    /// right-click menu).
+    private var playStopButton: some View {
+        Menu {
+            Button("Run Settings…", action: onConfigure)
+        } label: {
+            Image(systemName: isRunning ? "stop.fill" : "play.fill")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.green))
+        } primaryAction: {
+            isRunning ? onStopRunning() : onStart()
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(isRunning ? "Stop running services on \(workspace.name) (hold for Run Settings)"
+                        : "Start \(workspace.name) (hold for Run Settings)")
+        .opacity(isHovered || isRunning ? 1 : 0.55)
+    }
+
+    private var rowContents: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(workspace.tint.opacity(isActive ? 0.95 : (isHovered ? 0.32 : 0.18)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(workspace.tint.opacity(isActive ? 0 : 0.28), lineWidth: 1)
+                    )
+                Image(systemName: workspace.symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isActive ? Color.white : workspace.tint)
+            }
+            .frame(width: 28, height: 28)
+            .overlay(alignment: .topTrailing) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 9, height: 9)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
+                    )
+                    .offset(x: 3, y: -3)
+                    .opacity(hasUnread ? 1 : 0)
+                    .animation(.snappy(duration: 0.18), value: hasUnread)
+                    .accessibilityHidden(true)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                // Live-runner indicator — a green dot in the
+                // opposite corner from the unread badge so they
+                // never overlap.
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 9, height: 9)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5)
+                    )
+                    .offset(x: 3, y: 3)
+                    .opacity(isRunning ? 1 : 0)
+                    .animation(.snappy(duration: 0.18), value: isRunning)
+                    .accessibilityHidden(true)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(workspace.name)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(isActive ? .primary : .secondary)
+                if !workspace.linkedRepoIDs.isEmpty {
+                    repoChips
+                }
+                if let lastActivityMessage, !lastActivityMessage.isEmpty {
+                    Text(lastActivityMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .foregroundStyle(isActive ? .primary : .secondary)
-                    if !workspace.linkedRepoIDs.isEmpty {
-                        repoChips
-                    }
-                    if let lastActivityMessage, !lastActivityMessage.isEmpty {
-                        Text(lastActivityMessage)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(
-                        isActive
-                            ? Color.primary.opacity(0.10)
-                            : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
-                    )
-            )
-            .overlay(alignment: .leading) {
-                Capsule()
-                    .fill(.primary)
-                    .frame(width: 3, height: isActive ? 22 : 0)
-                    .offset(x: -8)
-                    .animation(.snappy(duration: 0.18), value: isActive)
-            }
-            .contentShape(Rectangle())
+
+            // Leave room on the trailing edge for the gear + play/stop
+            // pair (drawn by the parent ZStack so they sit on top of
+            // this row's selectable area).
+            Spacer().frame(width: 52)
         }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help(workspace.workingDirectory ?? workspace.name)
-        .contextMenu {
-            Button("Customize…") { isPickerPresented = true }
-            if !workspace.linkedRepoIDs.isEmpty, let onMerge {
-                Button("Merge…", action: onMerge)
-            }
-            Divider()
-            Button("Close \"\(workspace.name)\"", role: .destructive, action: onClose)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    isActive
+                        ? Color.primary.opacity(0.10)
+                        : (isHovered ? Color.primary.opacity(0.05) : Color.clear)
+                )
+        )
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(.primary)
+                .frame(width: 3, height: isActive ? 22 : 0)
+                .offset(x: -8)
+                .animation(.snappy(duration: 0.18), value: isActive)
         }
-        .sheet(isPresented: $isPickerPresented) {
-            CustomizeWorkspaceSheet(
-                initialName: workspace.name,
-                selectedSymbol: workspace.symbol,
-                selectedTint: workspace.tint,
-                onRename: onRename,
-                onPickSymbol: onPickSymbol,
-                onPickTint: onPickTint,
-                onDismiss: { isPickerPresented = false }
-            )
-        }
+        .contentShape(Rectangle())
     }
 
     private var repoChips: some View {
@@ -536,6 +857,25 @@ private struct WorkspaceButton: View {
             }
         }
     }
+}
+
+// MARK: - Switch notice
+
+/// State behind the transient "switched worktrees" banner. Play on a
+/// worktree never blocks on a dialog — a fixed-port runner that was
+/// live elsewhere is simply switched over, and this notice tells the
+/// user what happened plus offers the upgrade path: Isolate with
+/// Claude, so every worktree gets its own port and future plays run
+/// side by side instead of switching.
+private struct SwitchNotice: Identifiable, Equatable {
+    let id = UUID()
+    /// Workspace whose Play caused the switch — the isolate flow's Run
+    /// pane is scoped to it.
+    let workspaceID: UUID
+    let runnerName: String
+    let runner: ParsedRunner
+    /// Worktrees whose instances were stopped to free the port.
+    let fromBranches: [String]
 }
 
 // MARK: - Repo row (passive, in the Repositories footer)

@@ -22,6 +22,27 @@ enum ClaudeCodeIntegration {
         shimDirectory?.appendingPathComponent("clayspace-hook").path
             .nonEmptyIfExists
     }
+
+    /// Shell snippet that invokes the Claude CLI. Normally the bare
+    /// word `claude` (resolved through the spawned shell's PATH, where
+    /// our shim sits first). The e2e harness sets
+    /// `CLAYSPACE_CLAUDE_BIN` to a deterministic fake so Detect /
+    /// Isolate / Diagnose flows don't depend on the user's PATH or
+    /// zshrc; the override is shell-quoted so absolute paths with
+    /// spaces survive being pasted into a terminal.
+    static var claudeInvocation: String {
+        if let override = ProcessInfo.processInfo.environment["CLAYSPACE_CLAUDE_BIN"],
+           !override.isEmpty {
+            return shellQuote(override)
+        }
+        return "claude"
+    }
+
+    /// Single-quote for safe shell pasting, escaping embedded single
+    /// quotes the standard `'\''` way.
+    private static func shellQuote(_ text: String) -> String {
+        "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
 }
 
 private extension String {

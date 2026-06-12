@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""Fake `claude` CLI for Clayspace e2e tests.
+
+The app's Run pane shells out to `claude '<prompt>'` for three flows
+(see Sources/Clayspace/Views/RunSetupView.swift). This shim impersonates
+the real CLI deterministically — no network, no LLM — by recognizing
+each prompt and performing the minimal file edits the real agent would:
+
+  detect    prompt contains "Inspect every repo"
+            -> concatenate each repo's clayspace-runner.snippet.toml
+               into ./.clayspace/run.toml; print "run.toml ready"
+  isolate   prompt contains 'the runner named "<name>" currently binds
+            a fixed port'
+            -> rewrite the CLAYSPACE-FIXTURE-PORT marker line in every
+               branch worktree of repos/<name>/ to read the port from
+               an env var; append port_env to the matching [[runners]]
+               entry; print "isolated <name>"
+  diagnose  prompt contains "Figure out why and fix it"
+            -> print "diagnosed <runner>" (no edits)
+
+Anything else exits 1 so a drifted app prompt fails tests loudly
+instead of silently doing nothing.
+
+The cwd is assumed to be the project root (that's where the Run pane's
+terminal session starts). See Tests/Fixtures/README.md for the
+marker-line contract shared with sample-apps/fixedport-server.
+"""
+import os
+import re
+import sys
+
+MARKER = "CLAYSPACE-FIXTURE-PORT"
+MARKER_RE = re.compile(r'^(\s*)PORT = (\d+)(\s*)# CLAYSPACE-FIXTURE-PORT\s*$')
+
+# Flags of the real CLI that take a separate value argument. Anything
+# else starting with "-" is treated as a boolean flag.
+VALUE_FLAGS = {
+    "--settings", "--model", "--mcp-config", "--permission-mode",
+    "--output-format", "--append-system-prompt", "--add-dir",
+    "--session-id", "--resume",
+}
+
+
+def parse_prompt(argv):
+    """Return the last positional argument, skipping flags (and the
+    value of flags known to take one)."""
+    prompt = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg.startswith("-"):
+            if arg in VALUE_FLAGS and i + 1 < len(argv):
+                i += 1
+        else:
+            prompt = arg
+        i += 1
+    return prompt
+
+
+def visible_dirs(path):
+    try:
+        names = sorted(os.listdir(path))
+    except OSError:
+        return []
+    return [
+        n for n in names
+        if not n.startswith(".") and os.path.isdir(os.path.join(path, n))
+    ]
+
+
+def default_branch_folder(repo_dir):
+    """First non-hidden directory that isn't .bare — mirrors how the
+    detect prompt describes the default-branch worktree."""
+    for name in visible_dirs(repo_dir):
+        if name != ".bare":
+            return name
+    return None
+
+
+def do_detect():
+    snippets = []
+    for repo in visible_dirs("repos"):
+        repo_dir = os.path.join("repos", repo)
+        branch = default_branch_folder(repo_dir)
+        if branch is None:
+            continue
+        snippet_path = os.path.join(repo_dir, branch, "clayspace-runner.snippet.toml")
+        if not os.path.isfile(snippet_path):
+            continue
+        with open(snippet_path, "r", encoding="utf-8") as f:
+            snippet = f.read()
+        snippet = snippet.replace("{{CWD}}", f"repos/{repo}/{branch}")
+        snippets.append(snippet.strip() + "\n")
+
+    os.makedirs(".clayspace", exist_ok=True)
+    with open(os.path.join(".clayspace", "run.toml"), "w", encoding="utf-8") as f:
+        f.write("\n".join(snippets))
+    print("run.toml ready")
+    return 0
+
+
+def env_var_for(runner_name):
+    """Mirror RunSetupView.envVarSuggestion: FIXEDPORT_SERVER_PORT for
+    "fixedport-server"."""
+    return runner_name.upper().replace("-", "_").replace(" ", "_") + "_PORT"
+
+
+def rewrite_marker_lines(worktree, env_var):
+    """Rewrite every marker line in .py files under `worktree` to read
+    the port from `env_var`, keeping the original port as the default.
+    Ensures `import os` exists in any file we touch."""
+    changed = 0
+    for dirpath, dirnames, filenames in os.walk(worktree):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for filename in sorted(filenames):
+            if not filename.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, filename)
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines(keepends=True)
+
+            touched = False
+            for idx, line in enumerate(lines):
+                m = MARKER_RE.match(line.rstrip("\n"))
+                if not m:
+                    continue
+                indent, port = m.group(1), m.group(2)
+                lines[idx] = (
+                    f'{indent}PORT = int(os.environ.get("{env_var}", "{port}"))'
+                    f"  # {MARKER}\n"
+                )
+                touched = True
+
+            if not touched:
+                continue
+            if not any(re.match(r"^import os\b", l) for l in lines):
+                insert_at = 0
+                for idx, line in enumerate(lines):
+                    if re.match(r"^(import|from)\s", line):
+                        insert_at = idx + 1
+                    elif insert_at == 0 and line.startswith("#!"):
+                        insert_at = 1
+                lines.insert(insert_at, "import os\n")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(lines))
+            changed += 1
+    return changed
+
+
+def append_port_env(run_toml_path, runner_name, env_var):
+    """Add `port_env = "<env_var>"` at the end of the [[runners]] block
+    whose name matches. No-op if the block already has a port_env."""
+    with open(run_toml_path, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    # Index the start of each [[runners]] block.
+    starts = [i for i, l in enumerate(lines) if l.strip() == "[[runners]]"]
+    for n, start in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(lines)
+        block = lines[start:end]
+        name_match = any(
+            re.match(r'^\s*name\s*=\s*["\']%s["\']\s*$' % re.escape(runner_name), l)
+            for l in block
+        )
+        if not name_match:
+            continue
+        if any(re.match(r"^\s*port_env\s*=", l) for l in block):
+            return True
+        # Insert after the last non-empty line of the block so trailing
+        # blank separators stay where they were.
+        insert_at = start
+        for i in range(start, end):
+            if lines[i].strip():
+                insert_at = i + 1
+        lines.insert(insert_at, f'port_env = "{env_var}"')
+        with open(run_toml_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        return True
+    return False
+
+
+def do_isolate(runner_name):
+    env_var = env_var_for(runner_name)
+    repo_dir = os.path.join("repos", runner_name)
+    if not os.path.isdir(repo_dir):
+        print(f"fake-claude: no repo at {repo_dir}", file=sys.stderr)
+        return 1
+
+    rewritten = 0
+    for branch in visible_dirs(repo_dir):
+        if branch == ".bare":
+            continue
+        rewritten += rewrite_marker_lines(os.path.join(repo_dir, branch), env_var)
+    if rewritten == 0:
+        print("fake-claude: no marker lines found to rewrite", file=sys.stderr)
+        return 1
+
+    run_toml = os.path.join(".clayspace", "run.toml")
+    if not os.path.isfile(run_toml) or not append_port_env(run_toml, runner_name, env_var):
+        print(f"fake-claude: no [[runners]] entry named {runner_name} in {run_toml}",
+              file=sys.stderr)
+        return 1
+
+    print(f"isolated {runner_name}")
+    return 0
+
+
+def do_diagnose(prompt):
+    m = re.search(r'The runner "([^"]+)"', prompt)
+    if not m:
+        m = re.search(r"diagnosed (\S+)", prompt)
+    runner = m.group(1) if m else "unknown"
+    print(f"diagnosed {runner}")
+    return 0
+
+
+def main():
+    prompt = parse_prompt(sys.argv[1:])
+    if prompt is None:
+        print("fake-claude: no prompt given", file=sys.stderr)
+        return 1
+
+    if "Inspect every repo" in prompt:
+        return do_detect()
+
+    isolate = re.search(
+        r'the runner named "([^"]+)" currently binds a fixed port', prompt
+    )
+    if isolate:
+        return do_isolate(isolate.group(1))
+
+    if "Figure out why and fix it" in prompt:
+        return do_diagnose(prompt)
+
+    print("fake-claude: unrecognized prompt", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

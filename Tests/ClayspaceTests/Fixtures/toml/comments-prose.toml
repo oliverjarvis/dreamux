@@ -1,0 +1,12 @@
+# Clayspace runner config
+Here are the runners I detected in this project.
+
+[[runners]]
+# the web frontend
+name = "web"
+
+start = "npm run dev"
+Note that ports may vary on CI.
+remember: env = production may behave differently
+cwd = "repos/web/main"
+port = 4610

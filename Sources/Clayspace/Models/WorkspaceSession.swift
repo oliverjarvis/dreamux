@@ -12,6 +12,9 @@ final class WorkspaceSession {
     let controller: BonsplitController
 
     private var tabSessions: [TabID: TabSession] = [:]
+    /// In-app browser tabs, keyed by the same Bonsplit tab ids as the
+    /// terminals — a tab id appears in exactly one of the two maps.
+    private var webTabSessions: [TabID: WebTabSession] = [:]
     private var titleObservers: [TabID: TitleObserver] = [:]
     private var didBootstrap = false
 
@@ -71,6 +74,15 @@ final class WorkspaceSession {
         tabSessions[tabId]
     }
 
+    func webTabSession(for tabId: TabID) -> WebTabSession? {
+        webTabSessions[tabId]
+    }
+
+    /// URLs of every in-app browser tab, for the e2e state dump.
+    var webTabURLs: [URL] {
+        webTabSessions.values.map(\.url)
+    }
+
     // MARK: - Commands
 
     func createTab() {
@@ -109,7 +121,16 @@ final class WorkspaceSession {
     // MARK: - Delegate handling (called from main actor)
 
     private func handleDidCreateTab(_ tab: Tab) {
-        guard tabSessions[tab.id] == nil else { return }
+        guard tabSessions[tab.id] == nil, webTabSessions[tab.id] == nil else { return }
+
+        // Web tab: the pending URL (set by openWebTab just before
+        // createTab) claims this tab id instead of spawning a shell.
+        if let url = nextTabWebURL {
+            nextTabWebURL = nil
+            webTabSessions[tab.id] = WebTabSession(url: url)
+            return
+        }
+
         let cwd = nextTabCwdOverride ?? workspace.workingDirectory
         nextTabCwdOverride = nil
         let session = TabSession(
@@ -131,6 +152,7 @@ final class WorkspaceSession {
     private func handleDidCloseTab(_ tabId: TabID) {
         tabSessions[tabId]?.stop()
         tabSessions.removeValue(forKey: tabId)
+        webTabSessions.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
     }
 
@@ -177,6 +199,24 @@ final class WorkspaceSession {
         // The didCreateTab delegate fires synchronously inside
         // createTab and consumes the override; just in case, clear here.
         nextTabCwdOverride = nil
+    }
+
+    /// URL claimed by the next created tab — the web analog of
+    /// `nextTabCwdOverride`, read once in `handleDidCreateTab`.
+    private var nextTabWebURL: URL?
+
+    /// Open (or re-select) an in-app browser tab for `url`. Dedup is by
+    /// URL: a runner's play fires its open every start, and the second
+    /// play should bring the existing preview forward, not stack
+    /// another copy of the same page.
+    func openWebTab(url: URL, title: String) {
+        if let existing = webTabSessions.first(where: { $0.value.url == url }) {
+            controller.selectTab(existing.key)
+            return
+        }
+        nextTabWebURL = url
+        controller.createTab(title: title, icon: "globe")
+        nextTabWebURL = nil
     }
 
     /// Called by the store when this workspace becomes the visible one.

@@ -93,4 +93,20 @@ final class TabSession: Identifiable {
     func send(_ text: String) {
         shell.send(text)
     }
+
+    /// True when the shell has produced output and then stayed silent
+    /// for `interval` — i.e. its prompt is drawn and the line editor is
+    /// waiting. Programmatic senders must wait for this: zsh's startup
+    /// flushes the PTY input queue (tcsetattr TCSAFLUSH), so text sent
+    /// into a still-booting shell is silently discarded, and early
+    /// output (title escapes, profile noise) makes "any output" an
+    /// unsafe readiness signal.
+    func isShellQuiescent(for interval: TimeInterval) -> Bool {
+        shell.isQuiescent(for: interval)
+    }
+
+    /// When the shell last produced output — used by senders to verify
+    /// their text was echoed (received) and not flushed by a
+    /// still-initializing line editor.
+    var lastShellOutputAt: Date? { shell.lastOutputTimestamp }
 }

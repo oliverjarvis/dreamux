@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @Bindable var store: ProjectStore
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
 
     @State private var showCreate = false
     @State private var newProjectName = ""
@@ -24,6 +25,17 @@ struct HomeView: View {
         }
         .frame(minWidth: 560, minHeight: 420)
         .onAppear { store.refresh() }
+        .task {
+            // e2e harness convenience: jump straight into the named
+            // project's window so drivers don't have to script the
+            // project grid. No-op on normal launches (env var unset)
+            // and when the name doesn't match a discovered project.
+            guard let name = E2EMode.autoOpenProjectName else { return }
+            store.refresh()
+            if let project = store.projects.first(where: { $0.name == name }) {
+                openProject(project.id)
+            }
+        }
         .sheet(isPresented: $showCreate, onDismiss: resetCreateState) {
             CreateProjectSheet(
                 name: $newProjectName,
@@ -135,7 +147,7 @@ struct HomeView: View {
                     ForEach(store.projects) { project in
                         ProjectCard(
                             project: project,
-                            onOpen: { openWindow(value: project.id) },
+                            onOpen: { openProject(project.id) },
                             onDelete: { pendingDelete = project }
                         )
                     }
@@ -189,12 +201,17 @@ struct HomeView: View {
 
                 showCreate = false
                 isCreating = false
-                openWindow(value: project.id)
+                openProject(project.id)
             } catch {
                 createError = error.localizedDescription
                 isCreating = false
             }
         }
+    }
+
+    private func openProject(_ id: UUID) {
+        openWindow(value: id)
+        dismissWindow(id: "home")
     }
 
     private func pendingRepoIntent(forProjectName projectName: String) -> AddRepoIntent? {

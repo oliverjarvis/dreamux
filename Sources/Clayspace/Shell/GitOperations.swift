@@ -151,41 +151,121 @@ enum GitOperations {
         }
     }
 
-    static func runGit(_ args: [String], in cwd: URL) async throws -> String {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-                process.arguments = ["git"] + args
-                process.currentDirectoryURL = cwd
+    /// Run a git command. Always non-interactive — we bake in flags and
+    /// env vars that prevent git from popping a tty prompt or sitting on
+    /// a GPG passphrase that no terminal can answer. Optionally
+    /// streams every output line as it arrives via `onLine`; the
+    /// merge sheet uses that to render live progress under each row.
+    /// Task cancellation (Swift structured concurrency) sends SIGTERM
+    /// to the child so a "Cancel" click actually unblocks the user.
+    static func runGit(
+        _ args: [String],
+        in cwd: URL,
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) async throws -> String {
+        let processBox = ProcessBox()
 
-                let outPipe = Pipe()
-                let errPipe = Pipe()
-                process.standardOutput = outPipe
-                process.standardError = errPipe
+        return try await withTaskCancellationHandler(
+            operation: {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let process = Process()
+                        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+                        // Non-interactive defaults applied to every git
+                        // invocation: GPG signing off (yubikey/passphrase
+                        // prompts hang headless), editor disabled (so any
+                        // accidental commit without -m fails fast instead
+                        // of waiting on $EDITOR), and credential helpers
+                        // told to give up rather than prompt.
+                        process.arguments = [
+                            "git",
+                            "-c", "commit.gpgsign=false",
+                            "-c", "tag.gpgsign=false",
+                            "-c", "core.editor=true",
+                        ] + args
+                        process.currentDirectoryURL = cwd
 
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(throwing: error)
-                    return
+                        var env = ProcessInfo.processInfo.environment
+                        env["GIT_TERMINAL_PROMPT"] = "0"
+                        env["GIT_ASKPASS"] = "echo"
+                        env["SSH_ASKPASS"] = "echo"
+                        process.environment = env
+
+                        let outPipe = Pipe()
+                        let errPipe = Pipe()
+                        process.standardOutput = outPipe
+                        process.standardError = errPipe
+
+                        let accumulator = OutputAccumulator()
+                        // Drain handlers are installed unconditionally, even
+                        // with no `onLine` consumer: nothing else reads the
+                        // pipes until after waitUntilExit(), so a git command
+                        // producing more than the kernel pipe buffer (~64KB —
+                        // e.g. a merge diffstat or a commit touching hundreds
+                        // of files) would block writing while we block
+                        // waiting, deadlocking both processes forever.
+                        outPipe.fileHandleForReading.readabilityHandler = { handle in
+                            let data = handle.availableData
+                            if data.isEmpty {
+                                handle.readabilityHandler = nil
+                                return
+                            }
+                            accumulator.processStdout(data, onLine: onLine)
+                        }
+                        errPipe.fileHandleForReading.readabilityHandler = { handle in
+                            let data = handle.availableData
+                            if data.isEmpty {
+                                handle.readabilityHandler = nil
+                                return
+                            }
+                            accumulator.processStderr(data, onLine: onLine)
+                        }
+
+                        processBox.set(process)
+                        do {
+                            try process.run()
+                        } catch {
+                            continuation.resume(throwing: error)
+                            return
+                        }
+                        process.waitUntilExit()
+
+                        outPipe.fileHandleForReading.readabilityHandler = nil
+                        errPipe.fileHandleForReading.readabilityHandler = nil
+
+                        // Drain any bytes that landed after the last
+                        // readability callback fired — important on fast
+                        // commands that finish in a single chunk.
+                        let tailOut = outPipe.fileHandleForReading.readDataToEndOfFile()
+                        let tailErr = errPipe.fileHandleForReading.readDataToEndOfFile()
+                        if !tailOut.isEmpty {
+                            accumulator.processStdout(tailOut, onLine: onLine)
+                        }
+                        if !tailErr.isEmpty {
+                            accumulator.processStderr(tailErr, onLine: onLine)
+                        }
+                        accumulator.flushPartial(onLine: onLine)
+
+                        let outStr = accumulator.allStdout
+                        let errStr = accumulator.allStderr
+
+                        if process.terminationStatus != 0 {
+                            continuation.resume(
+                                throwing: GitError.commandFailed(
+                                    args: args,
+                                    stderr: errStr.isEmpty ? outStr : errStr
+                                )
+                            )
+                        } else {
+                            continuation.resume(returning: outStr)
+                        }
+                    }
                 }
-                process.waitUntilExit()
-
-                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                let outStr = String(data: outData, encoding: .utf8) ?? ""
-                let errStr = String(data: errData, encoding: .utf8) ?? ""
-
-                if process.terminationStatus != 0 {
-                    continuation.resume(
-                        throwing: GitError.commandFailed(args: args, stderr: errStr.isEmpty ? outStr : errStr)
-                    )
-                } else {
-                    continuation.resume(returning: outStr)
-                }
+            },
+            onCancel: {
+                processBox.terminate()
             }
-        }
+        )
     }
 
     // MARK: - Worktrees
@@ -221,6 +301,57 @@ enum GitOperations {
         _ = try? await runGit(["branch", "-D", branch], in: repoRootURL)
     }
 
+    // MARK: - Remotes
+
+    /// URL of the `origin` remote, or nil when the repo has none (e.g.
+    /// repos created via `initBare`). Drives whether the merge sheet
+    /// offers the "Create PR" path at all.
+    static func remoteURL(in repoRootURL: URL) async -> String? {
+        guard let output = try? await runGit(
+            ["remote", "get-url", "origin"],
+            in: repoRootURL
+        ) else { return nil }
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Push a branch to `origin`, creating/updating the remote branch
+    /// and setting upstream. Auth prompts are disabled by `runGit`'s
+    /// non-interactive env, so a missing credential fails fast with a
+    /// surfaced error instead of hanging the sheet.
+    static func push(
+        branch: String,
+        in repoRootURL: URL,
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) async throws {
+        _ = try await runGit(
+            ["push", "--set-upstream", "origin", branch],
+            in: repoRootURL,
+            onLine: onLine
+        )
+    }
+
+    /// Fetch `origin` and fast-forward the local default branch from
+    /// `origin/<branch>` inside its worktree. Used after a PR merges
+    /// remotely so local main reflects the merged state before the
+    /// feature worktree is cleaned up. Best-effort by design: a
+    /// diverged local main is the user's situation to resolve, not a
+    /// reason to block cleanup. ff-only (never a real merge) because a
+    /// PR merged via squash/rebase produces remote commits unrelated to
+    /// the local feature tip — merging those would invent conflicts.
+    static func fastForwardFromOrigin(
+        branch: String,
+        in baseWorktreeURL: URL,
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) async {
+        _ = try? await runGit(["fetch", "origin", branch], in: baseWorktreeURL, onLine: onLine)
+        _ = try? await runGit(
+            ["merge", "--ff-only", "origin/\(branch)"],
+            in: baseWorktreeURL,
+            onLine: onLine
+        )
+    }
+
     // MARK: - Merge
 
     enum MergeOutcome: Equatable {
@@ -237,13 +368,15 @@ enum GitOperations {
     static func mergeBranch(
         feature: String,
         into baseBranch: String,
-        in baseWorktreeURL: URL
+        in baseWorktreeURL: URL,
+        onLine: (@Sendable (String) -> Void)? = nil
     ) async throws -> MergeOutcome {
         let message = "Merge branch '\(feature)' into \(baseBranch)"
         do {
             let output = try await runGit(
                 ["merge", "--no-ff", "--no-edit", "-m", message, feature],
-                in: baseWorktreeURL
+                in: baseWorktreeURL,
+                onLine: onLine
             )
             if output.lowercased().contains("already up to date") {
                 return .alreadyUpToDate
@@ -272,6 +405,45 @@ enum GitOperations {
     /// state. Best-effort.
     static func abortMerge(in worktreeURL: URL) async {
         _ = try? await runGit(["merge", "--abort"], in: worktreeURL)
+    }
+
+    /// Number of commits on `feature` that aren't on `base`. Used by the
+    /// merge sheet to detect "nothing to merge" up-front rather than
+    /// running `git merge` and parsing its "Already up to date" output.
+    static func commitsAhead(
+        of base: String,
+        feature: String,
+        in repoURL: URL
+    ) async -> Int {
+        let output = (try? await runGit(
+            ["rev-list", "--count", "\(base)..\(feature)"],
+            in: repoURL
+        )) ?? "0"
+        return Int(output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    }
+
+    /// True when `git status --porcelain` is non-empty in the given
+    /// worktree — i.e. there are untracked or modified files.
+    static func hasUncommittedChanges(in worktreeURL: URL) async -> Bool {
+        let output = (try? await runGit(
+            ["status", "--porcelain"],
+            in: worktreeURL
+        )) ?? ""
+        return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Stage every modified/untracked path and create a commit with
+    /// the given message. Honours `.gitignore` the same way `git add -A`
+    /// does — gitignored files stay out. Throws if either step fails so
+    /// the caller can surface the error (typically missing user.name or
+    /// a failing pre-commit hook).
+    static func commitAll(
+        message: String,
+        in worktreeURL: URL,
+        onLine: (@Sendable (String) -> Void)? = nil
+    ) async throws {
+        _ = try await runGit(["add", "-A"], in: worktreeURL, onLine: onLine)
+        _ = try await runGit(["commit", "-m", message], in: worktreeURL, onLine: onLine)
     }
 
     enum MergeProbe {
@@ -329,5 +501,88 @@ enum GitOperations {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
         let scrubbed = name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
         return String(scrubbed).trimmingCharacters(in: CharacterSet(charactersIn: "-_."))
+    }
+}
+
+// MARK: - Streaming helpers
+
+/// Thread-safe holder for a running `Process` so the task-cancellation
+/// callback can reach in and SIGTERM the child. `weak` would also work
+/// (Process is a class) but we keep a strong reference until termination
+/// to avoid races with deallocation while the cancel handler is fired.
+private final class ProcessBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+
+    func set(_ p: Process) {
+        lock.lock(); defer { lock.unlock() }
+        process = p
+    }
+
+    func terminate() {
+        lock.lock()
+        let p = process
+        lock.unlock()
+        guard let p, p.isRunning else { return }
+        p.terminate()
+    }
+}
+
+/// Buffers stdout/stderr chunks from a child process and emits one
+/// callback per complete line. Also records the full output streams so
+/// the parent can still return the canonical stdout to the caller (and
+/// fold stderr into error messages). All callbacks run on whatever
+/// dispatch queue the Pipe's readability handler fires on — the caller
+/// is responsible for hopping back to the main actor if needed.
+private final class OutputAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var allStdout = ""
+    private(set) var allStderr = ""
+    private var stdoutBuffer = ""
+    private var stderrBuffer = ""
+
+    func processStdout(_ data: Data, onLine: (@Sendable (String) -> Void)?) {
+        guard let str = String(data: data, encoding: .utf8) else { return }
+        lock.lock()
+        allStdout += str
+        stdoutBuffer += str
+        let lines = extractLines(from: &stdoutBuffer)
+        lock.unlock()
+        if let onLine {
+            for line in lines { onLine(line) }
+        }
+    }
+
+    func processStderr(_ data: Data, onLine: (@Sendable (String) -> Void)?) {
+        guard let str = String(data: data, encoding: .utf8) else { return }
+        lock.lock()
+        allStderr += str
+        stderrBuffer += str
+        let lines = extractLines(from: &stderrBuffer)
+        lock.unlock()
+        if let onLine {
+            for line in lines { onLine(line) }
+        }
+    }
+
+    func flushPartial(onLine: (@Sendable (String) -> Void)?) {
+        lock.lock()
+        let tail = (stdoutBuffer + stderrBuffer)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        stdoutBuffer = ""
+        stderrBuffer = ""
+        lock.unlock()
+        if !tail.isEmpty, let onLine { onLine(tail) }
+    }
+
+    private func extractLines(from buffer: inout String) -> [String] {
+        var lines: [String] = []
+        while let idx = buffer.firstIndex(of: "\n") {
+            let raw = String(buffer[..<idx])
+            buffer.removeSubrange(buffer.startIndex...idx)
+            let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
+            if !trimmed.isEmpty { lines.append(trimmed) }
+        }
+        return lines
     }
 }

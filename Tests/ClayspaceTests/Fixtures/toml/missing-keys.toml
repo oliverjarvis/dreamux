@@ -1,0 +1,22 @@
+# Optional keys may be absent; required keys (name, start) may not.
+# Blocks missing a required key are dropped, neighbours survive.
+
+[[runners]]
+name = "no-extras"
+start = "make run"
+
+[[runners]]
+cwd = "repos/anon/main"
+start = "npm start"
+
+[[runners]]
+name = "no-start"
+cwd = "repos/no-start/main"
+
+[[runners]]
+name = ""
+start = "echo empty name"
+
+[[runners]]
+name = "survivor"
+start = "echo ok"

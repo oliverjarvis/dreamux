@@ -1,0 +1,14 @@
+# Ports that Int() can't digest: the port comes back nil but the
+# runner itself must still parse. Note the second block pins a real
+# quirk — the parser never strips trailing comments, so an inline
+# comment after the number also nils the port.
+
+[[runners]]
+name = "bad-port"
+start = "echo hi"
+port = not-a-number
+
+[[runners]]
+name = "comment-port"
+start = "echo hi"
+port = 4650 # inline comment defeats Int()

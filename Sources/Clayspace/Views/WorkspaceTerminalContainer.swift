@@ -1,6 +1,7 @@
 import SwiftUI
 import Bonsplit
 import GhosttyTerminal
+import WebKit
 
 /// Holds every workspace's tab/split layout in a single ZStack so each
 /// workspace's BonsplitController, NSViews, and PTYs stay alive when the
@@ -53,10 +54,69 @@ private struct TabContentView: View {
         if let tabSession = session.tabSession(for: tabId) {
             TerminalSurfaceView(context: tabSession.viewState)
                 .onAppear { tabSession.startIfNeeded() }
+        } else if let webTab = session.webTabSession(for: tabId) {
+            WebTabView(session: webTab)
         } else {
             Color.clear
         }
     }
+}
+
+/// An in-app browser tab: slim chrome (URL, reload, escape hatch to the
+/// external browser) over a WKWebView. Hosts the `open` target of a
+/// running worktree so the app-under-development lives next to the
+/// terminals working on it.
+private struct WebTabView: View {
+    let session: WebTabSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "globe")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(session.url.absoluteString)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                Spacer()
+                Button {
+                    session.reload()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Reload")
+                Button {
+                    session.openExternally()
+                } label: {
+                    Image(systemName: "safari")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Open in external browser")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.bar)
+
+            Divider()
+
+            WebViewRepresentable(webView: session.webView)
+        }
+    }
+}
+
+private struct WebViewRepresentable: NSViewRepresentable {
+    let webView: WKWebView
+
+    func makeNSView(context: Context) -> WKWebView { webView }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
 private struct EmptyPaneView: View {

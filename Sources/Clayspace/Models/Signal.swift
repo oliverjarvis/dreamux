@@ -97,6 +97,18 @@ final class SignalStore {
         entries.removeAll(keepingCapacity: true)
     }
 
+    /// Most-recent entries for a given source, oldest-first. Used by the
+    /// Run pane to show a small failure tail directly on a runner row
+    /// and to feed Claude when the user clicks Diagnose.
+    func recentEntries(forSource source: String, limit: Int) -> [SignalEntry] {
+        var results: [SignalEntry] = []
+        for entry in entries.reversed() where entry.source == source {
+            results.append(entry)
+            if results.count >= limit { break }
+        }
+        return results.reversed()
+    }
+
     /// Heuristic level detection. Looks for the level token at the start
     /// of the line or in square brackets, in either case-insensitive form.
     /// Anything we can't classify gets `.info` — better than dropping the

@@ -1,0 +1,10 @@
+# Post-isolate shape: same runner, but with port_env appended so the
+# manager can hand each branch worktree its own port.
+
+[[runners]]
+name = "portenv-server"
+cwd = "repos/portenv-server/main"
+start = "python3 server.py"
+stop = "pkill -f 'python3 server.py'"
+port = 4600
+port_env = "PORTENV_SERVER_PORT"

@@ -1,0 +1,10 @@
+# Same key twice in one block. Real TOML rejects this; our parser
+# just overwrites, so the LAST occurrence wins.
+
+[[runners]]
+name = "first"
+name = "second"
+start = "echo one"
+start = "echo two"
+port = 4630
+port = 4631

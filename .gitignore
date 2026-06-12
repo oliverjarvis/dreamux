@@ -5,3 +5,5 @@ Clayspace.app/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 .DS_Store
+artifacts/
+.superpowers/

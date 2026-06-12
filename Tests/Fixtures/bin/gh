@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""fake gh — Clayspace's test stand-in for the GitHub CLI.
+
+Pointed at via CLAYSPACE_GH_BIN so PublishFlow tests and the e2e
+harness can exercise the push-feature-as-PR path against an on-disk
+bare repo acting as "origin", with no network and no GitHub account.
+
+Supported invocations (the only ones GhOperations makes):
+
+    gh --version
+    gh pr create --head <branch> --base <base> --title <t> --body <b>
+    gh pr view <branch> --json state,url
+
+PR records are JSON files stored INSIDE the remote bare repo under
+fake-prs/<branch>.json (git ignores stray directories in a bare repo).
+The PR's state is not stored — it's derived from the remote's actual
+refs: the PR is MERGED when the recorded head sha is an ancestor of
+the base branch on the remote. Tests simulate "merge the PR on
+GitHub" with a plain `git -C <remote> update-ref refs/heads/<base>
+<head-sha>`, and this shim notices without any bookkeeping.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+
+def fail(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def git(args, cwd=None):
+    result = subprocess.run(
+        ["git"] + args, cwd=cwd, capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def remote_path():
+    """The origin remote of the repo we're invoked inside — must be a
+    local path (the tests' bare repo). A real URL means a test is
+    accidentally pointed at the network: refuse loudly."""
+    origin = git(["remote", "get-url", "origin"])
+    if not origin:
+        fail("fake-gh: no origin remote in " + os.getcwd())
+    if "://" in origin and not origin.startswith("file://"):
+        fail("fake-gh: refusing non-local remote " + origin)
+    path = origin[len("file://"):] if origin.startswith("file://") else origin
+    if not os.path.isdir(path):
+        fail("fake-gh: origin path does not exist: " + path)
+    return os.path.realpath(path)
+
+
+def pr_record_path(remote, branch):
+    return os.path.join(remote, "fake-prs", branch + ".json")
+
+
+def pr_create(opts):
+    branch, base = opts["--head"], opts["--base"]
+    remote = remote_path()
+    head_sha = git(["rev-parse", "--verify", "refs/heads/" + branch], cwd=remote)
+    if not head_sha:
+        fail("fake-gh: branch %s was never pushed to origin" % branch)
+
+    record = pr_record_path(remote, branch)
+    if os.path.exists(record):
+        # Mirror real gh's wording — GhOperations matches on
+        # "already exists" to recover the existing PR's URL.
+        fail("a pull request for branch %r already exists" % branch)
+
+    os.makedirs(os.path.dirname(record), exist_ok=True)
+    number = len(os.listdir(os.path.dirname(record))) + 1
+    url = "https://fake-gh.example/%s/pull/%d" % (
+        os.path.basename(remote).removesuffix(".git"), number)
+    with open(record, "w") as f:
+        json.dump({"number": number, "url": url, "base": base,
+                   "head": branch, "headSha": head_sha}, f)
+    print(url)
+
+
+def pr_view(branch):
+    remote = remote_path()
+    record = pr_record_path(remote, branch)
+    if not os.path.exists(record):
+        fail("no pull requests found for branch %r" % branch)
+    with open(record) as f:
+        pr = json.load(f)
+
+    merged = git(["merge-base", "--is-ancestor", pr["headSha"],
+                  "refs/heads/" + pr["base"]], cwd=remote) is not None
+    print(json.dumps({"state": "MERGED" if merged else "OPEN",
+                      "url": pr["url"]}))
+
+
+def parse_opts(args):
+    """Flag/value pairs from argv — only the flags GhOperations sends."""
+    opts, positional, i = {}, [], 0
+    while i < len(args):
+        if args[i].startswith("--"):
+            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+                opts[args[i]] = args[i + 1]
+                i += 2
+            else:
+                opts[args[i]] = ""
+                i += 1
+        else:
+            positional.append(args[i])
+            i += 1
+    return opts, positional
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        fail("fake-gh: no arguments")
+    if args[0] == "--version":
+        print("fake-gh 1.0.0 (Clayspace test fixture)")
+        return
+    if args[0] == "pr" and len(args) >= 2:
+        opts, positional = parse_opts(args[2:])
+        if args[1] == "create":
+            pr_create(opts)
+            return
+        if args[1] == "view" and positional:
+            pr_view(positional[0])
+            return
+    fail("fake-gh: unsupported invocation: " + " ".join(args))
+
+
+if __name__ == "__main__":
+    main()

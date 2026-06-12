@@ -1,0 +1,10 @@
+# Keys the parser doesn't know about must be ignored, not fatal —
+# Claude occasionally embellishes the file with extras.
+
+[[runners]]
+name = "extras"
+start = "echo run"
+description = "totally ignored"
+env = "NODE_ENV=production"
+restart_policy = "always"
+port = 4660
