@@ -1,14 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// A single entry in the project sidebar's native selection: the Home
-/// landing page or one specific project. Both share the `List`'s selection
-/// so exactly one row highlights at a time.
-private enum SidebarItem: Hashable {
-    case home
-    case project(UUID)
-}
-
 /// Outermost project-switcher sidebar, rendered as a native macOS source
 /// list — it's the sidebar column of the project window's
 /// NavigationSplitView, so it inherits the system vibrancy, the titlebar
@@ -22,28 +14,19 @@ private enum SidebarItem: Hashable {
 struct ProjectsRail: View {
     let projects: ProjectStore
     let currentProjectID: UUID
-    @Binding var showingHome: Bool
-    let onSelect: (UUID) -> Void
+    let onSelect: (UUID?) -> Void
 
     @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismissWindow) private var dismissWindow
     @State private var showCreate = false
     @State private var pendingDelete: Project?
     @State private var deleteError: String?
 
     var body: some View {
         List(selection: selectionBinding) {
-            // Home is an in-window destination: selecting it swaps the
-            // detail pane to the Home landing page (handled in ContentView)
-            // rather than opening a separate window.
-            Label("Home", systemImage: "house")
-                .tag(SidebarItem.home)
-                .help("Show Home")
-
             Section("Projects") {
                 ForEach(projects.projects) { project in
                     Label(project.name, systemImage: "folder")
-                        .tag(SidebarItem.project(project.id))
+                        .tag(project.id)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .help(project.rootPath.path)
@@ -101,26 +84,14 @@ struct ProjectsRail: View {
         }
     }
 
-    /// Two-way bridge between the native List selection and the window's
-    /// state. The getter reflects whether Home or a project is showing; the
-    /// setter routes the pick: Home flips the detail to the landing page in
-    /// place, a *different* project goes through `onSelect` (which rewrites
-    /// the WindowGroup binding and rebuilds the window), and re-picking the
-    /// current project from Home just dismisses Home — no rebuild, so its
-    /// terminals stay live.
-    private var selectionBinding: Binding<SidebarItem?> {
+    /// Bridges the native list selection to the window's current project.
+    /// Picking a *different* project routes through `onSelect`, which
+    /// rewrites the WindowGroup binding and rebuilds the window.
+    private var selectionBinding: Binding<UUID?> {
         Binding(
-            get: { showingHome ? .home : .project(currentProjectID) },
+            get: { currentProjectID },
             set: { newValue in
-                switch newValue {
-                case .home:
-                    showingHome = true
-                case .project(let id):
-                    showingHome = false
-                    if id != currentProjectID { onSelect(id) }
-                case .none:
-                    break
-                }
+                if let id = newValue, id != currentProjectID { onSelect(id) }
             }
         )
     }
@@ -161,8 +132,10 @@ struct ProjectsRail: View {
         if let fallback = projects.projects.first {
             onSelect(fallback.id)
         } else {
-            openWindow(id: "home")
-            dismissWindow(id: "project", value: project.id)
+            // No projects left — clear this window so the launch gate
+            // re-resolves to the Welcome screen. A project window can't
+            // exist without a project.
+            onSelect(nil)
         }
     }
 

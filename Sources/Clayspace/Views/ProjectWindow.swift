@@ -10,7 +10,7 @@ import SwiftUI
 /// changes (via the `.id` modifier on the inner contents view).
 struct ProjectWindow: View {
     let project: Project
-    let onSwitchProject: (UUID) -> Void
+    let onSwitchProject: (UUID?) -> Void
 
     @Environment(ProjectStore.self) private var projectStore
 
@@ -30,7 +30,7 @@ struct ProjectWindow: View {
 private struct ProjectWindowContents: View {
     let project: Project
     let projects: ProjectStore
-    let onSwitchProject: (UUID) -> Void
+    let onSwitchProject: (UUID?) -> Void
 
     @State private var store: WorkspaceStore
     @State private var repoStore: RepoStore
@@ -38,7 +38,7 @@ private struct ProjectWindowContents: View {
     init(
         project: Project,
         projects: ProjectStore,
-        onSwitchProject: @escaping (UUID) -> Void
+        onSwitchProject: @escaping (UUID?) -> Void
     ) {
         self.project = project
         self.projects = projects
@@ -57,14 +57,10 @@ private struct ProjectWindowContents: View {
             currentProjectID: project.id,
             onSwitchProject: onSwitchProject
         )
-        // Title/subtitle live in ContentView now so they can track the
-        // in-window Home destination (the sidebar can show Home in place
-        // of the project's workspace).
         .onAppear {
             // Remember where the user was so the next launch can land
             // here instead of the Home grid.
             LastOpenedProject.record(project.id)
-            HomeView.disarmLaunchRedirect()
             // e2e only (no-op otherwise): expose this window's live
             // stores to the automation server, keyed by project id.
             E2ERegistry.shared.registerWindowStores(

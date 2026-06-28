@@ -16,12 +16,8 @@ struct ContentView: View {
     @Bindable var repoStore: RepoStore
     let projects: ProjectStore
     let currentProjectID: UUID
-    let onSwitchProject: (UUID) -> Void
+    let onSwitchProject: (UUID?) -> Void
 
-    /// When true, the detail pane shows the Home landing page in place of
-    /// the active feature's terminal. The detail stays mounted (just
-    /// hidden) underneath so terminals, PTYs, and runners keep running.
-    @State private var showingHome = false
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var runConfig: RunConfigStore
@@ -33,7 +29,7 @@ struct ContentView: View {
         repoStore: RepoStore,
         projects: ProjectStore,
         currentProjectID: UUID,
-        onSwitchProject: @escaping (UUID) -> Void
+        onSwitchProject: @escaping (UUID?) -> Void
     ) {
         self.store = store
         self.repoStore = repoStore
@@ -75,7 +71,6 @@ struct ContentView: View {
             ProjectsRail(
                 projects: projects,
                 currentProjectID: currentProjectID,
-                showingHome: $showingHome,
                 onSelect: onSwitchProject
             )
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
@@ -88,10 +83,10 @@ struct ContentView: View {
             )
             .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 380)
         } detail: {
-            detailColumn
+            mainPane
         }
-        .navigationTitle(showingHome ? "Home" : (currentProject?.name ?? ""))
-        .navigationSubtitle(showingHome ? "" : (currentProject?.rootPath.path ?? ""))
+        .navigationTitle(currentProject?.name ?? "")
+        .navigationSubtitle(currentProject?.rootPath.path ?? "")
         .onAppear {
             // e2e only (no-op otherwise): hand the run-layer stores to the
             // automation server and sync the bridge with this window's
@@ -110,42 +105,6 @@ struct ContentView: View {
         }
         .onChange(of: sidebarMode) { _, newValue in
             e2eBridge?.currentSidebarMode = newValue
-            // Touching the Work Items column (a feature, Signals, or a Run
-            // page) is a deliberate move back into the project, so it
-            // dismisses Home.
-            showingHome = false
-        }
-        .onChange(of: store.activeID) { _, _ in
-            // Selecting a different feature while Home is up returns to it.
-            showingHome = false
-        }
-    }
-
-    @ViewBuilder
-    private var detailColumn: some View {
-        ZStack {
-            // Kept mounted (hidden via opacity, not removed) so a trip to
-            // Home and back doesn't tear down the active feature's
-            // terminals or re-init the runners — the same keep-alive trick
-            // WorkspaceTerminalContainer uses for inactive workspaces.
-            mainPane
-                .opacity(showingHome ? 0 : 1)
-                .allowsHitTesting(!showingHome)
-
-            if showingHome {
-                HomeView(
-                    store: projects,
-                    onOpenProject: { id in
-                        // Re-picking this window's own project just leaves
-                        // Home; a different one switches the window to it.
-                        if id == currentProjectID {
-                            showingHome = false
-                        } else {
-                            onSwitchProject(id)
-                        }
-                    }
-                )
-            }
         }
     }
 
