@@ -57,8 +57,9 @@ private struct ProjectWindowContents: View {
             currentProjectID: project.id,
             onSwitchProject: onSwitchProject
         )
-        .navigationTitle(project.name)
-        .navigationSubtitle(project.rootPath.path)
+        // Title/subtitle live in ContentView now so they can track the
+        // in-window Home destination (the sidebar can show Home in place
+        // of the project's workspace).
         .onAppear {
             // Remember where the user was so the next launch can land
             // here instead of the Home grid.

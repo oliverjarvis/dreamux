@@ -1,14 +1,28 @@
 import SwiftUI
 import AppKit
 
-/// Outermost project-switcher sidebar. Lists every project in the user's
-/// ProjectStore and lets the user:
+/// A single entry in the project sidebar's native selection: the Home
+/// landing page or one specific project. Both share the `List`'s selection
+/// so exactly one row highlights at a time.
+private enum SidebarItem: Hashable {
+    case home
+    case project(UUID)
+}
+
+/// Outermost project-switcher sidebar, rendered as a native macOS source
+/// list — it's the sidebar column of the project window's
+/// NavigationSplitView, so it inherits the system vibrancy, the titlebar
+/// collapse toggle, and the standard selection highlight for free.
+///
+/// It lists every project in the user's ProjectStore and lets the user:
 ///   • click a row to swap the current window to that project,
-///   • drag a row out of the window to spawn a new window for it,
-///   • right-click a row for the same "Open in New Window" action.
+///   • right-click a row for "Open in New Window", "Show in Finder", and
+///     "Move to Trash…",
+///   • hit "New Project", pinned to the bottom, to create one.
 struct ProjectsRail: View {
     let projects: ProjectStore
     let currentProjectID: UUID
+    @Binding var showingHome: Bool
     let onSelect: (UUID) -> Void
 
     @Environment(\.openWindow) private var openWindow
@@ -17,49 +31,41 @@ struct ProjectsRail: View {
     @State private var pendingDelete: Project?
     @State private var deleteError: String?
 
-    static let width: CGFloat = 180
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HomeRailRow { openWindow(id: "home") }
-                .padding(.horizontal, 6)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
+        List(selection: selectionBinding) {
+            // Home is an in-window destination: selecting it swaps the
+            // detail pane to the Home landing page (handled in ContentView)
+            // rather than opening a separate window.
+            Label("Home", systemImage: "house")
+                .tag(SidebarItem.home)
+                .help("Show Home")
 
-            Text("Projects")
-                .font(.system(size: 11, weight: .semibold))
-                .kerning(0.8)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 3) {
-                    ForEach(projects.projects) { project in
-                        ProjectRow(
-                            project: project,
-                            isActive: project.id == currentProjectID,
-                            onClick: { onSelect(project.id) },
-                            onOpenInNewWindow: { openInNewWindow(project.id) },
-                            onDelete: { pendingDelete = project }
-                        )
-                        .frame(height: 34)
-                    }
+            Section("Projects") {
+                ForEach(projects.projects) { project in
+                    Label(project.name, systemImage: "folder")
+                        .tag(SidebarItem.project(project.id))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(project.rootPath.path)
+                        .contextMenu {
+                            Button("Open in New Window") {
+                                openInNewWindow(project.id)
+                            }
+                            Button("Show in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
+                            }
+                            Divider()
+                            Button("Move to Trash…", role: .destructive) {
+                                pendingDelete = project
+                            }
+                        }
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 10)
             }
-
-            Divider()
-                .padding(.horizontal, 10)
-
-            NewProjectRailRow { showCreate = true }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 6)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(.regularMaterial)
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            newProjectBar
+        }
         .onAppear { projects.refresh() }
         .sheet(isPresented: $showCreate) {
             CreateProjectSheet(store: projects) { project in
@@ -93,6 +99,49 @@ struct ProjectsRail: View {
         } message: { error in
             Text(error)
         }
+    }
+
+    /// Two-way bridge between the native List selection and the window's
+    /// state. The getter reflects whether Home or a project is showing; the
+    /// setter routes the pick: Home flips the detail to the landing page in
+    /// place, a *different* project goes through `onSelect` (which rewrites
+    /// the WindowGroup binding and rebuilds the window), and re-picking the
+    /// current project from Home just dismisses Home — no rebuild, so its
+    /// terminals stay live.
+    private var selectionBinding: Binding<SidebarItem?> {
+        Binding(
+            get: { showingHome ? .home : .project(currentProjectID) },
+            set: { newValue in
+                switch newValue {
+                case .home:
+                    showingHome = true
+                case .project(let id):
+                    showingHome = false
+                    if id != currentProjectID { onSelect(id) }
+                case .none:
+                    break
+                }
+            }
+        )
+    }
+
+    /// "＋ New Project" pinned beneath the list as a native bottom bar.
+    private var newProjectBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            Button {
+                showCreate = true
+            } label: {
+                Label("New Project", systemImage: "plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+            .help("Create a new project")
+        }
+        .background(.bar)
     }
 
     /// Delete and, when the row was the project this window is showing,
@@ -135,353 +184,6 @@ struct ProjectsRail: View {
             } else {
                 NSApp.keyWindow?.orderFront(nil)
             }
-        }
-    }
-}
-
-// MARK: - Home row
-
-/// A "Home" entry pinned to the top of the rail, styled like a project
-/// row so it reads as a sibling navigation target rather than a button
-/// floating in chrome.
-private struct HomeRailRow: View {
-    let onClick: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: onClick) {
-            HStack(spacing: 10) {
-                Image(systemName: "house.fill")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 16, height: 16)
-                Text("Home")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(isHovered ? 0.08 : 0.0))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help("Show Home (⇧⌘0)")
-    }
-}
-
-// MARK: - New Project row
-
-/// "＋ New Project" pinned under the list, styled like HomeRailRow so
-/// it reads as part of the rail's navigation rather than chrome.
-private struct NewProjectRailRow: View {
-    let onClick: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: onClick) {
-            HStack(spacing: 10) {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 16, height: 16)
-                Text("New Project")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.primary.opacity(isHovered ? 0.08 : 0.0))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help("Create a new project")
-    }
-}
-
-// MARK: - AppKit-backed row
-
-/// Renders each project row in AppKit so we can capture mouse-drag events
-/// to start a native NSDraggingSession. The drag carries the project's
-/// UUID as a private pasteboard item (no other app accepts that type),
-/// and on session end we check whether the drop happened outside our
-/// window — that's the signal to pop the project into a fresh window.
-private struct ProjectRow: NSViewRepresentable {
-    let project: Project
-    let isActive: Bool
-    let onClick: () -> Void
-    let onOpenInNewWindow: () -> Void
-    let onDelete: () -> Void
-
-    func makeNSView(context: Context) -> ProjectRowView {
-        let view = ProjectRowView()
-        view.configure(
-            project: project,
-            isActive: isActive,
-            onClick: onClick,
-            onOpenInNewWindow: onOpenInNewWindow,
-            onDelete: onDelete
-        )
-        return view
-    }
-
-    func updateNSView(_ nsView: ProjectRowView, context: Context) {
-        nsView.configure(
-            project: project,
-            isActive: isActive,
-            onClick: onClick,
-            onOpenInNewWindow: onOpenInNewWindow,
-            onDelete: onDelete
-        )
-    }
-}
-
-/// Private pasteboard type for project-row drags. We use a non-standard
-/// UTI so no other app (Finder in particular) accepts the drop — that
-/// way the drag session always ends with `operation == []`, which is
-/// our cue to tear off into a new window.
-private let projectRowPasteboardType = NSPasteboard.PasteboardType("com.clayspace.project-row")
-
-final class ProjectRowView: NSView, NSDraggingSource {
-    private var project: Project?
-    private var isActive: Bool = false
-    private var isHovered: Bool = false
-    private var onClick: (() -> Void)?
-    private var onOpenInNewWindow: (() -> Void)?
-    private var onDelete: (() -> Void)?
-
-    private var mouseDownPoint: NSPoint?
-    private var isDragging: Bool = false
-    private var trackingArea: NSTrackingArea?
-
-    override var isFlipped: Bool { true }
-    override var acceptsFirstResponder: Bool { true }
-
-    func configure(
-        project: Project,
-        isActive: Bool,
-        onClick: @escaping () -> Void,
-        onOpenInNewWindow: @escaping () -> Void,
-        onDelete: @escaping () -> Void
-    ) {
-        let changed = self.project?.id != project.id
-            || self.project?.name != project.name
-            || self.isActive != isActive
-        self.project = project
-        self.isActive = isActive
-        self.onClick = onClick
-        self.onOpenInNewWindow = onOpenInNewWindow
-        self.onDelete = onDelete
-        toolTip = project.rootPath.path
-        if changed { needsDisplay = true }
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        needsDisplay = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let project else { return }
-        let tint = NSColor.controlAccentColor
-
-        // Row background. The active row gets a subtle top-lit gradient so
-        // it reads as a raised "pill" instead of a flat paint swatch.
-        let rowRect = bounds
-        let rowPath = NSBezierPath(roundedRect: rowRect, xRadius: 7, yRadius: 7)
-        if isActive {
-            let top = tint.blended(withFraction: 0.12, of: .white) ?? tint
-            let bottom = tint.blended(withFraction: 0.10, of: .black) ?? tint
-            NSGradient(starting: top, ending: bottom)?.draw(in: rowPath, angle: 90)
-        } else if isHovered {
-            NSColor.labelColor.withAlphaComponent(0.08).setFill()
-            rowPath.fill()
-        }
-
-        // Folder icon (left)
-        let iconSize: CGFloat = 16
-        let iconRect = NSRect(
-            x: 10,
-            y: (bounds.height - iconSize) / 2,
-            width: iconSize,
-            height: iconSize
-        )
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-            .applying(.init(paletteColors: [isActive ? .white : tint]))
-        if let icon = NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(symbolConfig) {
-            icon.draw(in: iconRect)
-        }
-
-        // Project name (right of icon)
-        let textAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: isActive ? .semibold : .regular),
-            .foregroundColor: isActive ? NSColor.white : NSColor.labelColor,
-        ]
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
-        var attrs = textAttrs
-        attrs[.paragraphStyle] = paragraph
-        let name = NSAttributedString(string: project.name, attributes: attrs)
-        let textHeight = name.size().height
-        let textRect = NSRect(
-            x: iconRect.maxX + 10,
-            y: (bounds.height - textHeight) / 2,
-            width: bounds.width - iconRect.maxX - 20,
-            height: textHeight
-        )
-        name.draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-    }
-
-    // MARK: - Mouse + drag
-
-    override func mouseDown(with event: NSEvent) {
-        mouseDownPoint = convert(event.locationInWindow, from: nil)
-        isDragging = false
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard let start = mouseDownPoint, !isDragging else { return }
-        let current = convert(event.locationInWindow, from: nil)
-        if hypot(current.x - start.x, current.y - start.y) >= 4 {
-            isDragging = true
-            beginDrag(with: event)
-        }
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        if !isDragging {
-            onClick?()
-        }
-        mouseDownPoint = nil
-        isDragging = false
-    }
-
-    override func menu(for event: NSEvent) -> NSMenu? {
-        guard project != nil else { return nil }
-        let menu = NSMenu()
-
-        let openItem = NSMenuItem(
-            title: "Open in New Window",
-            action: #selector(handleOpenNewWindow),
-            keyEquivalent: ""
-        )
-        openItem.target = self
-        menu.addItem(openItem)
-
-        let finderItem = NSMenuItem(
-            title: "Show in Finder",
-            action: #selector(handleShowInFinder),
-            keyEquivalent: ""
-        )
-        finderItem.target = self
-        menu.addItem(finderItem)
-
-        menu.addItem(.separator())
-
-        let deleteItem = NSMenuItem(
-            title: "Move to Trash…",
-            action: #selector(handleDelete),
-            keyEquivalent: ""
-        )
-        deleteItem.target = self
-        menu.addItem(deleteItem)
-
-        return menu
-    }
-
-    @objc private func handleOpenNewWindow() {
-        onOpenInNewWindow?()
-    }
-
-    @objc private func handleShowInFinder() {
-        guard let project else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
-    }
-
-    @objc private func handleDelete() {
-        onDelete?()
-    }
-
-    private func beginDrag(with event: NSEvent) {
-        guard let project else { return }
-        let item = NSPasteboardItem()
-        item.setString(project.id.uuidString, forType: projectRowPasteboardType)
-        let draggingItem = NSDraggingItem(pasteboardWriter: item)
-        if let image = snapshotImage() {
-            draggingItem.setDraggingFrame(bounds, contents: image)
-        } else {
-            draggingItem.draggingFrame = bounds
-        }
-        let session = beginDraggingSession(with: [draggingItem], event: event, source: self)
-        // Our drags never have a real drop target — releasing outside the
-        // window is the "tear off" signal. Suppress the default slide-back
-        // animation so the icon just disappears when the new window opens.
-        session.animatesToStartingPositionsOnCancelOrFail = false
-    }
-
-    private func snapshotImage() -> NSImage? {
-        guard let rep = bitmapImageRepForCachingDisplay(in: bounds) else { return nil }
-        cacheDisplay(in: bounds, to: rep)
-        let image = NSImage(size: bounds.size)
-        image.addRepresentation(rep)
-        return image
-    }
-
-    // MARK: - NSDraggingSource
-
-    func draggingSession(
-        _ session: NSDraggingSession,
-        sourceOperationMaskFor context: NSDraggingContext
-    ) -> NSDragOperation {
-        // No destination accepts our pasteboard, so the OS always reports
-        // `[]` on drop. We still need a non-empty mask here so the session
-        // is actually allowed to start.
-        return [.copy, .generic]
-    }
-
-    func draggingSession(
-        _ session: NSDraggingSession,
-        endedAt screenPoint: NSPoint,
-        operation: NSDragOperation
-    ) {
-        // Treat "dropped with no operation" as a tear-off gesture only
-        // when the cursor left our window — otherwise the user just
-        // wiggled the mouse inside the rail and we shouldn't pop a new
-        // window.
-        guard operation == [] else { return }
-        guard let window else { return }
-        if !window.frame.contains(screenPoint) {
-            onOpenInNewWindow?()
         }
     }
 }

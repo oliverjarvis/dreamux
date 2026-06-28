@@ -2,6 +2,13 @@ import SwiftUI
 
 struct HomeView: View {
     @Bindable var store: ProjectStore
+    /// How to open a project when one of its cards is clicked. `nil` — the
+    /// standalone Home *window* — opens a dedicated project window. When
+    /// supplied, Home is embedded inside a project window's sidebar and
+    /// switches that window in place; its presence also suppresses the
+    /// launch redirect and the standalone min-size frame.
+    var onOpenProject: ((UUID) -> Void)? = nil
+
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
 
@@ -27,15 +34,24 @@ struct HomeView: View {
         didAttemptLaunchRedirect = true
     }
 
+    /// The standalone Home window wants a sensible minimum size; embedded
+    /// Home inherits the project window's bounds, so it imposes none.
+    private var minSize: CGSize? {
+        onOpenProject == nil ? CGSize(width: 560, height: 420) : nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
             content
         }
-        .frame(minWidth: 560, minHeight: 420)
+        .frame(minWidth: minSize?.width, minHeight: minSize?.height)
         .onAppear { store.refresh() }
         .task {
+            // Embedded Home (inside a project window) is a deliberate
+            // destination — skip the launch redirect and e2e auto-open.
+            guard onOpenProject == nil else { return }
             // e2e harness convenience: jump straight into the named
             // project's window so drivers don't have to script the
             // project grid. No-op when the name doesn't match a
@@ -100,12 +116,8 @@ struct HomeView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Clayspace").font(.title2.weight(.semibold))
-                Text("Anything in \(store.projectsRoot.path) shows up here.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Clayspace")
+                .font(.system(size: 34, weight: .bold))
             Spacer()
             Button {
                 store.refresh()
@@ -187,6 +199,10 @@ struct HomeView: View {
     }
 
     private func openProject(_ id: UUID) {
+        if let onOpenProject {
+            onOpenProject(id)
+            return
+        }
         openWindow(value: id)
         dismissWindow(id: "home")
     }

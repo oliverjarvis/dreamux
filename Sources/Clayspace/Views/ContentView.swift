@@ -1,5 +1,16 @@
 import SwiftUI
 
+/// The project window's three-column layout, as a single native
+/// `NavigationSplitView`:
+///
+///   • sidebar — the project switcher (`ProjectsRail`),
+///   • content — the selected project's Work Items (`WorkspaceSidebar`),
+///   • detail  — the terminal / Run / Signals pane for the active feature.
+///
+/// The run-layer stores (`runConfig`/`signals`/`runners`) and `sidebarMode`
+/// live here because both the content and detail columns need them — they
+/// used to sit in a private `FeaturesDetail` wrapper, but a NavigationSplit-
+/// View has to own all three columns in one place.
 struct ContentView: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
@@ -7,77 +18,37 @@ struct ContentView: View {
     let currentProjectID: UUID
     let onSwitchProject: (UUID) -> Void
 
-    @State private var section: AppSection = .features
-    @State private var railWidth: CGFloat = OuterRail.collapsedWidth
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ProjectsRail(
-                projects: projects,
-                currentProjectID: currentProjectID,
-                onSelect: onSwitchProject
-            )
-            .frame(width: ProjectsRail.width)
-
-            Divider()
-
-            // The OuterRail only earns its space when there's more than
-            // one section to switch between — until then, the lone
-            // Features tile sits next to the projects rail as a vestigial
-            // sliver, so we just show the detail directly.
-            if AppSection.allCases.count > 1 {
-                OuterRail(selection: $section, width: $railWidth)
-                    .frame(width: railWidth)
-
-                Divider()
-            }
-
-            sectionDetail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    @ViewBuilder
-    private var sectionDetail: some View {
-        switch section {
-        case .features:
-            FeaturesDetail(store: store, repoStore: repoStore)
-        }
-    }
-}
-
-/// Sidebar-pane swap inside the Features section. `.workspace` shows the
-/// terminal pane for the active feature; `.run` shows the Run page scoped
-/// to a specific workspace (its play button was clicked); `.signals`
-/// shows the project-wide log stream.
-enum SidebarMode: Hashable {
-    case workspace
-    case run(workspaceID: UUID)
-    case signals
-}
-
-/// The previous top-level layout — workspace siderail plus the
-/// tabs/terminals pane — now lives behind the "Features" section.
-private struct FeaturesDetail: View {
-    @Bindable var store: WorkspaceStore
-    @Bindable var repoStore: RepoStore
-
+    /// When true, the detail pane shows the Home landing page in place of
+    /// the active feature's terminal. The detail stays mounted (just
+    /// hidden) underneath so terminals, PTYs, and runners keep running.
+    @State private var showingHome = false
     @State private var sidebarMode: SidebarMode = .workspace
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var runConfig: RunConfigStore
     @State private var signals: SignalStore
     @State private var runners: RunnerManager
 
-    init(store: WorkspaceStore, repoStore: RepoStore) {
+    init(
+        store: WorkspaceStore,
+        repoStore: RepoStore,
+        projects: ProjectStore,
+        currentProjectID: UUID,
+        onSwitchProject: @escaping (UUID) -> Void
+    ) {
         self.store = store
         self.repoStore = repoStore
+        self.projects = projects
+        self.currentProjectID = currentProjectID
+        self.onSwitchProject = onSwitchProject
+
         let runConfig = RunConfigStore(project: repoStore.project)
         let signals = SignalStore()
         let runners = RunnerManager(project: repoStore.project, signals: signals)
         runners.reload(from: runConfig.rawTOML)
         // URL opens land as a browser tab inside the worktree's own
-        // workspace — the running app lives next to the terminals
-        // working on it. No matching workspace (e.g. the runner is on
-        // the default branch) falls back to the external browser.
+        // workspace — the running app lives next to the terminals working
+        // on it. No matching workspace (e.g. the runner is on the default
+        // branch) falls back to the external browser.
         runners.openURLInApp = { [weak store] url, branch, title in
             guard let store,
                   let workspace = store.workspaces.first(where: { $0.name == branch })
@@ -87,8 +58,8 @@ private struct FeaturesDetail: View {
         }
         if E2EMode.isActive {
             // Don't open EXTERNAL browsers / run open commands during
-            // automated runs — `openedTargets` still records every fire
-            // and the e2e state dump asserts on it. In-app web tabs are
+            // automated runs — `openedTargets` still records every fire and
+            // the e2e state dump asserts on it. In-app web tabs are
             // in-process and stay enabled so scenarios can assert them.
             runners.openOverride = { _ in }
         }
@@ -97,27 +68,34 @@ private struct FeaturesDetail: View {
         _runners = State(initialValue: runners)
     }
 
+    private var currentProject: Project? { projects.project(id: currentProjectID) }
+
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            ProjectsRail(
+                projects: projects,
+                currentProjectID: currentProjectID,
+                showingHome: $showingHome,
+                onSelect: onSwitchProject
+            )
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
+        } content: {
             WorkspaceSidebar(
                 store: store,
                 repoStore: repoStore,
                 runners: runners,
                 sidebarMode: $sidebarMode
             )
-            .frame(width: 220)
-            .frame(maxHeight: .infinity)
-            .background(.regularMaterial)
-
-            Divider()
-
-            mainPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 380)
+        } detail: {
+            detailColumn
         }
+        .navigationTitle(showingHome ? "Home" : (currentProject?.name ?? ""))
+        .navigationSubtitle(showingHome ? "" : (currentProject?.rootPath.path ?? ""))
         .onAppear {
-            // e2e only (no-op otherwise): hand the run-layer stores to
-            // the automation server and sync the bridge with whatever
-            // mode this fresh section starts in.
+            // e2e only (no-op otherwise): hand the run-layer stores to the
+            // automation server and sync the bridge with this window's
+            // starting mode.
             E2ERegistry.shared.registerRunStores(
                 projectID: repoStore.project.id,
                 runners: runners,
@@ -132,22 +110,43 @@ private struct FeaturesDetail: View {
         }
         .onChange(of: sidebarMode) { _, newValue in
             e2eBridge?.currentSidebarMode = newValue
+            // Touching the Work Items column (a feature, Signals, or a Run
+            // page) is a deliberate move back into the project, so it
+            // dismisses Home.
+            showingHome = false
+        }
+        .onChange(of: store.activeID) { _, _ in
+            // Selecting a different feature while Home is up returns to it.
+            showingHome = false
         }
     }
 
-    /// Bridge for this project window. `nil` whenever the e2e harness
-    /// is inactive, which turns all the consumption above into no-ops.
-    private var e2eBridge: E2EBridge? {
-        E2ERegistry.shared.bridge(forProject: repoStore.project.id)
-    }
+    @ViewBuilder
+    private var detailColumn: some View {
+        ZStack {
+            // Kept mounted (hidden via opacity, not removed) so a trip to
+            // Home and back doesn't tear down the active feature's
+            // terminals or re-init the runners — the same keep-alive trick
+            // WorkspaceTerminalContainer uses for inactive workspaces.
+            mainPane
+                .opacity(showingHome ? 0 : 1)
+                .allowsHitTesting(!showingHome)
 
-    /// The automation server can't reach this view's `@State`, so it
-    /// parks the requested pane on the bridge and we adopt it here —
-    /// same consume-and-clear pattern as `runners.pendingIsolation`.
-    private func consumePendingSidebarModeIfAny() {
-        guard let bridge = e2eBridge, let mode = bridge.pendingSidebarMode else { return }
-        bridge.pendingSidebarMode = nil
-        sidebarMode = mode
+            if showingHome {
+                HomeView(
+                    store: projects,
+                    onOpenProject: { id in
+                        // Re-picking this window's own project just leaves
+                        // Home; a different one switches the window to it.
+                        if id == currentProjectID {
+                            showingHome = false
+                        } else {
+                            onSwitchProject(id)
+                        }
+                    }
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -168,4 +167,29 @@ private struct FeaturesDetail: View {
             SignalsView(signals: signals, runners: runners)
         }
     }
+
+    /// Bridge for this project window. `nil` whenever the e2e harness is
+    /// inactive, which turns the consumption below into a no-op.
+    private var e2eBridge: E2EBridge? {
+        E2ERegistry.shared.bridge(forProject: repoStore.project.id)
+    }
+
+    /// The automation server can't reach this view's `@State`, so it parks
+    /// the requested pane on the bridge and we adopt it here — same
+    /// consume-and-clear pattern as `runners.pendingIsolation`.
+    private func consumePendingSidebarModeIfAny() {
+        guard let bridge = e2eBridge, let mode = bridge.pendingSidebarMode else { return }
+        bridge.pendingSidebarMode = nil
+        sidebarMode = mode
+    }
+}
+
+/// Detail-pane swap inside a project window. `.workspace` shows the
+/// terminal pane for the active feature; `.run` shows the Run page scoped
+/// to a specific workspace (its play button was clicked); `.signals`
+/// shows the project-wide log stream.
+enum SidebarMode: Hashable {
+    case workspace
+    case run(workspaceID: UUID)
+    case signals
 }
