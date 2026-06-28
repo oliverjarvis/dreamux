@@ -75,7 +75,7 @@ private struct LaunchGate: View {
             if projects.projects.isEmpty {
                 WelcomeView(store: projects, onOpenProject: { projectID = $0 })
             } else {
-                Color(NSColor.windowBackgroundColor)
+                Color.clear
             }
         }
         .onAppear(perform: resolve)
@@ -84,8 +84,9 @@ private struct LaunchGate: View {
     private func resolve() {
         projects.refresh()
         // e2e convenience: jump straight into the named project's window
-        // so drivers don't script project selection. No-op when the name
-        // doesn't match a discovered project.
+        // so drivers don't script project selection. Falls through to
+        // normal launch routing when the name doesn't match a discovered
+        // project.
         if let name = E2EMode.autoOpenProjectName,
            let match = projects.projects.first(where: { $0.name == name }) {
             projectID = match.id

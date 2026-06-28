@@ -130,8 +130,9 @@ class Driver:
         # -ApplePersistenceIgnoreState YES: without it, AppKit restores
         # whatever windows the user's last real Clayspace session left
         # behind (keyed by bundle id) — a stale project window from
-        # outside the sandbox would hijack the run and the Home view
-        # (whose .task performs CLAYSPACE_E2E_AUTOOPEN) never appears.
+        # outside the sandbox would hijack the run and the launch gate
+        # (whose .onAppear performs CLAYSPACE_E2E_AUTOOPEN) never
+        # resolves into the demo project.
         self.app = subprocess.Popen(
             [APP_BINARY, "-ApplePersistenceIgnoreState", "YES"],
             env=env,
