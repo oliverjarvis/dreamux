@@ -20,15 +20,30 @@ struct ClayspaceApp: App {
     }
 
     var body: some Scene {
-        Window("Clayspace", id: "home") {
-            HomeView(store: projects)
+        WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
+            ProjectRootView(projectID: $projectID, projects: projects)
         }
         .commands {
-            HomeCommands()
+            ProjectCommands()
+            IntegrationCommands()
+            NotificationCommands()
         }
+    }
+}
 
-        WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
-            if let id = projectID, let project = projects.project(id: id) {
+// MARK: - Window root
+
+/// Routes a project window between three states: a live project, the
+/// launch gate (no project bound — launch or after the last project was
+/// deleted), or the missing-project fallback (the bound project's folder
+/// vanished, usually deleted from another window).
+private struct ProjectRootView: View {
+    @Binding var projectID: UUID?
+    let projects: ProjectStore
+
+    var body: some View {
+        if let id = projectID {
+            if let project = projects.project(id: id) {
                 ProjectWindow(
                     project: project,
                     onSwitchProject: { projectID = $0 }
@@ -36,13 +51,54 @@ struct ClayspaceApp: App {
                 .environment(projects)
                 .frame(minWidth: 720, minHeight: 480)
             } else {
-                MissingProjectView(store: projects)
+                MissingProjectView(onContinue: { projectID = nil })
                     .frame(minWidth: 480, minHeight: 320)
             }
+        } else {
+            LaunchGate(projectID: $projectID, projects: projects)
+                .frame(minWidth: 480, minHeight: 320)
         }
-        .commands {
-            ProjectCommands()
-            IntegrationCommands()
+    }
+}
+
+/// Decides where a project-less window lands. With projects present it
+/// rewrites the window's binding to the right one (routing straight into
+/// it); with none it shows `WelcomeView`. This replaces the old Home
+/// window's one-shot launch redirect — with no Home to return to,
+/// re-resolving a nil window is always correct.
+private struct LaunchGate: View {
+    @Binding var projectID: UUID?
+    let projects: ProjectStore
+
+    var body: some View {
+        Group {
+            if projects.projects.isEmpty {
+                WelcomeView(store: projects, onOpenProject: { projectID = $0 })
+            } else {
+                Color(NSColor.windowBackgroundColor)
+            }
+        }
+        .onAppear(perform: resolve)
+    }
+
+    private func resolve() {
+        projects.refresh()
+        // e2e convenience: jump straight into the named project's window
+        // so drivers don't script project selection. No-op when the name
+        // doesn't match a discovered project.
+        if let name = E2EMode.autoOpenProjectName,
+           let match = projects.projects.first(where: { $0.name == name }) {
+            projectID = match.id
+            return
+        }
+        switch LaunchDestination.resolve(
+            lastOpenedID: LastOpenedProject.load(),
+            projects: projects.projects
+        ) {
+        case .project(let id):
+            projectID = id
+        case .welcome:
+            break // WelcomeView is already on screen.
         }
     }
 }
@@ -64,9 +120,9 @@ private struct IntegrationCommands: Commands {
 // MARK: - Missing project fallback
 
 private struct MissingProjectView: View {
-    let store: ProjectStore
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismissWindow) private var dismissWindow
+    /// Clear this window's project so the launch gate re-resolves
+    /// (routing to another project, or Welcome when none remain).
+    let onContinue: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -78,25 +134,19 @@ private struct MissingProjectView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Back to Home") {
-                openWindow(id: "home")
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Continue", action: onContinue)
+                .buttonStyle(.borderedProminent)
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - Home commands
+// MARK: - App menu commands
 
-private struct HomeCommands: Commands {
-    @Environment(\.openWindow) private var openWindow
-
+private struct NotificationCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .appInfo) {
-            Button("Show Home") { openWindow(id: "home") }
-                .keyboardShortcut("0", modifiers: [.command, .shift])
             Button("Notification Settings…") {
                 NotificationManager.shared.openSystemNotificationSettings()
             }
