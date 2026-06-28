@@ -1,15 +1,16 @@
 import Foundation
 
-/// Where a fresh launch should land. Home is shown only when there are
-/// no projects to open; otherwise launch jumps straight into a project
-/// window — the remembered last-opened project when it still exists,
-/// else the first project in store order.
+/// Where a fresh launch should land. `welcome` (the create-your-first-
+/// project screen) is shown only when there are no projects to open;
+/// otherwise launch jumps straight into a project window — the remembered
+/// last-opened project when it still exists, else the first project in
+/// store order.
 enum LaunchDestination: Equatable {
-    case home
+    case welcome
     case project(UUID)
 
     static func resolve(lastOpenedID: UUID?, projects: [Project]) -> LaunchDestination {
-        guard !projects.isEmpty else { return .home }
+        guard !projects.isEmpty else { return .welcome }
         if let lastOpenedID, projects.contains(where: { $0.id == lastOpenedID }) {
             return .project(lastOpenedID)
         }

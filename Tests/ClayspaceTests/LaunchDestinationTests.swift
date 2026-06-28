@@ -12,9 +12,9 @@ final class LaunchDestinationTests: XCTestCase {
 
     // MARK: - resolve
 
-    func testEmptyStoreLandsOnHome() {
-        XCTAssertEqual(LaunchDestination.resolve(lastOpenedID: nil, projects: []), .home)
-        XCTAssertEqual(LaunchDestination.resolve(lastOpenedID: UUID(), projects: []), .home)
+    func testEmptyStoreLandsOnWelcome() {
+        XCTAssertEqual(LaunchDestination.resolve(lastOpenedID: nil, projects: []), .welcome)
+        XCTAssertEqual(LaunchDestination.resolve(lastOpenedID: UUID(), projects: []), .welcome)
     }
 
     func testRememberedProjectWins() {
