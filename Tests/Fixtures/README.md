@@ -1,8 +1,8 @@
 # Test fixtures
 
-Git-tracked data for the Clayspace test suite. Nothing in here is a
+Git-tracked data for the Dreamux test suite. Nothing in here is a
 SwiftPM resource — tests locate this directory via `#filePath` (see
-`RepoFixtures` in Tests/ClayspaceTests/Support/TestSandbox.swift) and
+`RepoFixtures` in Tests/DreamuxTests/Support/TestSandbox.swift) and
 copy what they need into a per-test sandbox. There are intentionally no
 nested `.git` directories; tests `git init` their copies themselves.
 
@@ -16,14 +16,14 @@ the minimal deterministic edits the real agent would:
 - **detect** (prompt contains `Inspect every repo`): for each repo
   under `./repos/*` it finds the default branch folder (first
   non-hidden dir that isn't `.bare`), reads that folder's
-  `clayspace-runner.snippet.toml`, substitutes `{{CWD}}` with
+  `dreamux-runner.snippet.toml`, substitutes `{{CWD}}` with
   `repos/<repo>/<branch>`, concatenates everything into
-  `./.clayspace/run.toml`, and prints `run.toml ready`.
+  `./.dreamux/run.toml`, and prints `run.toml ready`.
 - **isolate** (prompt contains `the runner named "<name>" currently
   binds a fixed port`): rewrites the marker line (below) in every
   branch worktree under `repos/<name>/`, appends
   `port_env = "<NAME>_PORT"` to the matching `[[runners]]` entry in
-  `./.clayspace/run.toml`, and prints `isolated <name>`.
+  `./.dreamux/run.toml`, and prints `isolated <name>`.
 - **diagnose** (prompt contains `Figure out why and fix it`): prints
   `diagnosed <runner>` and makes no edits.
 
@@ -34,11 +34,11 @@ session starts.
 
 ## sample-apps/
 
-Plain directories tests commit into sandboxed Clayspace repos (via
+Plain directories tests commit into sandboxed Dreamux repos (via
 `GitFixtures.makeBareLayoutRepo`). Both are python3-stdlib HTTP servers
 that print `listening on <port>` on startup, answer `GET /` with
 `{"app": ..., "cwd": ..., "port": ...}`, and exit cleanly on SIGTERM.
-Each carries a `clayspace-runner.snippet.toml` — the `[[runners]]`
+Each carries a `dreamux-runner.snippet.toml` — the `[[runners]]`
 block the fake claude's detect flow stitches into `run.toml` (with
 `{{CWD}}` substituted). Both snippets start the server by absolute
 path (`python3 "$PWD/server.py"`) and stop it with a pkill pattern
@@ -56,11 +56,11 @@ matching processes anywhere on the host.
 
 `fixedport-server/server.py` contains exactly:
 
-    PORT = 4700  # CLAYSPACE-FIXTURE-PORT
+    PORT = 4700  # DREAMUX-FIXTURE-PORT
 
 The fake claude's isolate flow rewrites exactly that line to:
 
-    PORT = int(os.environ.get("FIXEDPORT_SERVER_PORT", "4700"))  # CLAYSPACE-FIXTURE-PORT
+    PORT = int(os.environ.get("FIXEDPORT_SERVER_PORT", "4700"))  # DREAMUX-FIXTURE-PORT
 
 (preserving the original port as the default and ensuring `import os`
 exists). Tests assert on these strings — keep the fixture, the shim,

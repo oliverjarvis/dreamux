@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Browse the skills.sh registry, preview a skill's files, install via `npx skills`, and manage installed skills — per Clayspace project and globally.
+**Goal:** Browse the skills.sh registry, preview a skill's files, install via `npx skills`, and manage installed skills — per Dreamux project and globally.
 
 **Architecture:** Hybrid, per the approved spec (`docs/superpowers/specs/2026-06-12-skills-sh-integration-design.md`): browsing hits the public `https://skills.sh/api/search` JSON endpoint; file preview shallow-clones the skill's GitHub repo via existing `GitOperations`; all mutations and the installed list go through `npx skills`. Project-scope installs land canonically at `<project>/.agents/skills/` and a `SkillLinker` fans symlinks out into every repo worktree (agents only discover skills up to the repository root), suppressing git noise via a managed block in each repo's `.bare/info/exclude`.
 
@@ -16,11 +16,11 @@
 - The v1 API (`/api/v1/*`) requires Vercel OIDC auth — never use it.
 - Node failure mode to handle: asdf shims present but no version set → running `node`/`npx` exits non-zero with "No version is set".
 
-**Environment overrides introduced by this plan (all mirror existing `CLAYSPACE_CLAUDE_BIN`/`CLAYSPACE_GH_BIN` conventions):**
-- `CLAYSPACE_SKILLS_BIN` — executable replacing `npx -y skills`; invoked with the subcommand argv directly.
-- `CLAYSPACE_SKILLS_API_BASE` — base URL replacing `https://skills.sh`.
-- `CLAYSPACE_SKILLS_CACHE_DIR` — preview clone cache root (default `~/Library/Caches/Clayspace/skill-previews`).
-- `CLAYSPACE_SKILLS_GIT_BASE` — prefix for resolving `<owner>/<repo>` clone URLs (default `https://github.com/`; tests point it at a local fixtures dir).
+**Environment overrides introduced by this plan (all mirror existing `DREAMUX_CLAUDE_BIN`/`DREAMUX_GH_BIN` conventions):**
+- `DREAMUX_SKILLS_BIN` — executable replacing `npx -y skills`; invoked with the subcommand argv directly.
+- `DREAMUX_SKILLS_API_BASE` — base URL replacing `https://skills.sh`.
+- `DREAMUX_SKILLS_CACHE_DIR` — preview clone cache root (default `~/Library/Caches/Dreamux/skill-previews`).
+- `DREAMUX_SKILLS_GIT_BASE` — prefix for resolving `<owner>/<repo>` clone URLs (default `https://github.com/`; tests point it at a local fixtures dir).
 - `SKILLS_FAKE_GLOBAL_DIR` — consumed by the fake CLI only: where "global" installs land.
 - `SKILLS_FAKE_LOG` — consumed by the fake CLI only: JSONL argv log for assertions.
 
@@ -28,39 +28,39 @@
 
 | File | Responsibility |
 |---|---|
-| `Sources/Clayspace/Models/SkillTypes.swift` (create) | `SkillScope`, `RegistrySkill`, `InstalledSkill`, search-response decoding |
-| `Sources/Clayspace/Shell/SkillsRegistryClient.swift` (create) | public search endpoint client |
-| `Sources/Clayspace/Shell/NodeDetector.swift` (create) | find a node bin dir that actually executes |
-| `Sources/Clayspace/Shell/SkillsCLI.swift` (create) | async wrapper around `npx -y skills` |
-| `Sources/Clayspace/Shell/SkillLinker.swift` (create) | project-scope symlink fan-out + exclude management |
-| `Sources/Clayspace/Shell/SkillPreviewCache.swift` (create) | shallow-clone cache + skill file listing |
-| `Sources/Clayspace/Models/SkillsStore.swift` (create) | `@Observable` orchestration per scope |
-| `Sources/Clayspace/Models/AppSection.swift` (modify) | add `.skills` |
-| `Sources/Clayspace/Views/ProjectWindow.swift`, `Views/ContentView.swift` (modify) | lift signals trio up; wire Skills section |
-| `Sources/Clayspace/Views/SkillsBrowserView.swift` (create) | sidebar (installed) + search/topics/results |
-| `Sources/Clayspace/Views/SkillDetailView.swift` (create) | file tree + preview + install/remove/update |
-| `Sources/Clayspace/ClayspaceApp.swift`, `Views/HomeView.swift` (modify) | global Skills window + Home button |
-| `Sources/Clayspace/Shell/FeatureProvisioner.swift` (modify) | reconcile links when worktrees appear |
-| `Sources/Clayspace/E2E/E2ERegistry.swift`, `E2E/E2ECommands.swift` (modify) | section switching + skills commands |
+| `Sources/Dreamux/Models/SkillTypes.swift` (create) | `SkillScope`, `RegistrySkill`, `InstalledSkill`, search-response decoding |
+| `Sources/Dreamux/Shell/SkillsRegistryClient.swift` (create) | public search endpoint client |
+| `Sources/Dreamux/Shell/NodeDetector.swift` (create) | find a node bin dir that actually executes |
+| `Sources/Dreamux/Shell/SkillsCLI.swift` (create) | async wrapper around `npx -y skills` |
+| `Sources/Dreamux/Shell/SkillLinker.swift` (create) | project-scope symlink fan-out + exclude management |
+| `Sources/Dreamux/Shell/SkillPreviewCache.swift` (create) | shallow-clone cache + skill file listing |
+| `Sources/Dreamux/Models/SkillsStore.swift` (create) | `@Observable` orchestration per scope |
+| `Sources/Dreamux/Models/AppSection.swift` (modify) | add `.skills` |
+| `Sources/Dreamux/Views/ProjectWindow.swift`, `Views/ContentView.swift` (modify) | lift signals trio up; wire Skills section |
+| `Sources/Dreamux/Views/SkillsBrowserView.swift` (create) | sidebar (installed) + search/topics/results |
+| `Sources/Dreamux/Views/SkillDetailView.swift` (create) | file tree + preview + install/remove/update |
+| `Sources/Dreamux/DreamuxApp.swift`, `Views/HomeView.swift` (modify) | global Skills window + Home button |
+| `Sources/Dreamux/Shell/FeatureProvisioner.swift` (modify) | reconcile links when worktrees appear |
+| `Sources/Dreamux/E2E/E2ERegistry.swift`, `E2E/E2ECommands.swift` (modify) | section switching + skills commands |
 | `Tests/Fixtures/bin/skills` (create) | fake CLI |
 | `Scripts/e2e/skills-api-stub.py` (create), `Scripts/e2e/run-e2e.sh`, `driver.py`, `PROTOCOL.md` (modify) | e2e scenario |
-| `Tests/ClayspaceTests/Skill*.swift` (create) | unit/integration tests per component |
+| `Tests/DreamuxTests/Skill*.swift` (create) | unit/integration tests per component |
 
-Conventions to follow throughout: tests are `@MainActor final class …Tests: XCTestCase` using `TestSandbox` + `GitFixtures` (see `Tests/ClayspaceTests/FeatureProvisionerTests.swift`); git identity env vars in `setUp` exactly as that file does; process helpers mirror `GitOperations.runGit`/`GhOperations`.
+Conventions to follow throughout: tests are `@MainActor final class …Tests: XCTestCase` using `TestSandbox` + `GitFixtures` (see `Tests/DreamuxTests/FeatureProvisionerTests.swift`); git identity env vars in `setUp` exactly as that file does; process helpers mirror `GitOperations.runGit`/`GhOperations`.
 
 ---
 
 ### Task 1: Skill value types + JSON decoding
 
 **Files:**
-- Create: `Sources/Clayspace/Models/SkillTypes.swift`
-- Test: `Tests/ClayspaceTests/SkillTypesTests.swift`
+- Create: `Sources/Dreamux/Models/SkillTypes.swift`
+- Test: `Tests/DreamuxTests/SkillTypesTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 final class SkillTypesTests: XCTestCase {
     /// Real response shape captured from skills.sh/api/search 2026-06-12.
@@ -118,7 +118,7 @@ Expected: compile FAILURE — `cannot find 'SkillSearchResponse' in scope`
 import Foundation
 
 /// Scope a skill operation applies to: the user's home directory (`-g`
-/// installs, picked up by agents everywhere) or one Clayspace project's
+/// installs, picked up by agents everywhere) or one Dreamux project's
 /// root, where canonical copies live under `<project>/.agents/skills/`.
 enum SkillScope: Hashable, Sendable {
     case global
@@ -185,7 +185,7 @@ Expected: `Executed 3 tests, with 0 failures`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Models/SkillTypes.swift Tests/ClayspaceTests/SkillTypesTests.swift
+git add Sources/Dreamux/Models/SkillTypes.swift Tests/DreamuxTests/SkillTypesTests.swift
 git commit -m "Add skill value types and registry/CLI JSON decoding"
 ```
 
@@ -194,14 +194,14 @@ git commit -m "Add skill value types and registry/CLI JSON decoding"
 ### Task 2: SkillsRegistryClient (public search endpoint)
 
 **Files:**
-- Create: `Sources/Clayspace/Shell/SkillsRegistryClient.swift`
-- Test: `Tests/ClayspaceTests/SkillsRegistryClientTests.swift`
+- Create: `Sources/Dreamux/Shell/SkillsRegistryClient.swift`
+- Test: `Tests/DreamuxTests/SkillsRegistryClientTests.swift`
 
 - [ ] **Step 1: Write the failing test** (uses a `URLProtocol` stub — no network)
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 /// Intercepts every request on a private URLSession so client tests
 /// run with zero network. Set `handler` per test.
@@ -306,8 +306,8 @@ enum SkillsRegistryError: LocalizedError {
 /// Minimal client for the public skills.sh search endpoint — the same
 /// one `skills find` uses. The full v1 registry API requires Vercel
 /// OIDC auth, so search is the only endpoint we consume.
-/// `CLAYSPACE_SKILLS_API_BASE` points this at a local stub during
-/// tests/e2e, mirroring the `CLAYSPACE_*_BIN` overrides.
+/// `DREAMUX_SKILLS_API_BASE` points this at a local stub during
+/// tests/e2e, mirroring the `DREAMUX_*_BIN` overrides.
 struct SkillsRegistryClient: Sendable {
     let baseURL: URL
     let session: URLSession
@@ -315,7 +315,7 @@ struct SkillsRegistryClient: Sendable {
     init(baseURL: URL? = nil, session: URLSession = .shared) {
         if let baseURL {
             self.baseURL = baseURL
-        } else if let override = ProcessInfo.processInfo.environment["CLAYSPACE_SKILLS_API_BASE"],
+        } else if let override = ProcessInfo.processInfo.environment["DREAMUX_SKILLS_API_BASE"],
                   !override.isEmpty, let url = URL(string: override) {
             self.baseURL = url
         } else {
@@ -354,7 +354,7 @@ Expected: `Executed 3 tests, with 0 failures`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Shell/SkillsRegistryClient.swift Tests/ClayspaceTests/SkillsRegistryClientTests.swift
+git add Sources/Dreamux/Shell/SkillsRegistryClient.swift Tests/DreamuxTests/SkillsRegistryClientTests.swift
 git commit -m "Add skills.sh public search client"
 ```
 
@@ -363,14 +363,14 @@ git commit -m "Add skills.sh public search client"
 ### Task 3: NodeDetector
 
 **Files:**
-- Create: `Sources/Clayspace/Shell/NodeDetector.swift`
-- Test: `Tests/ClayspaceTests/NodeDetectorTests.swift`
+- Create: `Sources/Dreamux/Shell/NodeDetector.swift`
+- Test: `Tests/DreamuxTests/NodeDetectorTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 final class NodeDetectorTests: XCTestCase {
     private var sandboxDir: URL!
@@ -429,7 +429,7 @@ Expected: compile FAILURE — `cannot find 'NodeDetector' in scope`
 import Foundation
 
 /// Finds a node installation that actually runs. `npx` (which
-/// `SkillsCLI` uses) needs node, but Clayspace.app launches with a
+/// `SkillsCLI` uses) needs node, but Dreamux.app launches with a
 /// minimal GUI environment — and even a login shell can resolve `node`
 /// to a broken asdf shim ("No version is set"). So candidates are
 /// gathered (login-shell PATH first, then version managers
@@ -540,7 +540,7 @@ Expected: `Executed 3 tests, with 0 failures`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Shell/NodeDetector.swift Tests/ClayspaceTests/NodeDetectorTests.swift
+git add Sources/Dreamux/Shell/NodeDetector.swift Tests/DreamuxTests/NodeDetectorTests.swift
 git commit -m "Add NodeDetector that probes for a working node binary"
 ```
 
@@ -550,16 +550,16 @@ git commit -m "Add NodeDetector that probes for a working node binary"
 
 **Files:**
 - Create: `Tests/Fixtures/bin/skills` (python, `chmod +x`)
-- Create: `Sources/Clayspace/Shell/SkillsCLI.swift`
-- Test: `Tests/ClayspaceTests/SkillsCLITests.swift`
+- Create: `Sources/Dreamux/Shell/SkillsCLI.swift`
+- Test: `Tests/DreamuxTests/SkillsCLITests.swift`
 
 - [ ] **Step 1: Write the fake CLI fixture**
 
 ```python
 #!/usr/bin/env python3
-"""fake skills — Clayspace's test stand-in for `npx -y skills`.
+"""fake skills — Dreamux's test stand-in for `npx -y skills`.
 
-Pointed at via CLAYSPACE_SKILLS_BIN so SkillsCLI/SkillsStore tests and
+Pointed at via DREAMUX_SKILLS_BIN so SkillsCLI/SkillsStore tests and
 the e2e harness exercise install/list/remove/update with no network
 and no node. Maintains real `.agents/skills/<name>/SKILL.md` dirs under
 a "scope root": the cwd for project scope, $SKILLS_FAKE_GLOBAL_DIR for
@@ -694,7 +694,7 @@ Then: `chmod +x Tests/Fixtures/bin/skills`
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 /// Integration tests for SkillsCLI against the fake `skills` fixture —
 /// asserts exact argv/cwd construction and JSON parsing, no node/npm.
@@ -709,7 +709,7 @@ final class SkillsCLITests: XCTestCase {
     /// reach Tests/Fixtures (#filePath-relative).
     static var fakeSkillsBin: String {
         URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()  // ClayspaceTests
+            .deletingLastPathComponent()  // DreamuxTests
             .deletingLastPathComponent()  // Tests
             .appendingPathComponent("Fixtures/bin/skills").path
     }
@@ -721,13 +721,13 @@ final class SkillsCLITests: XCTestCase {
             .appendingPathComponent("fake-global", isDirectory: true)
         logURL = projectRoot.deletingLastPathComponent()
             .appendingPathComponent("invocations.jsonl")
-        setenv("CLAYSPACE_SKILLS_BIN", Self.fakeSkillsBin, 1)
+        setenv("DREAMUX_SKILLS_BIN", Self.fakeSkillsBin, 1)
         setenv("SKILLS_FAKE_GLOBAL_DIR", globalDir.path, 1)
         setenv("SKILLS_FAKE_LOG", logURL.path, 1)
     }
 
     override func tearDown() async throws {
-        unsetenv("CLAYSPACE_SKILLS_BIN")
+        unsetenv("DREAMUX_SKILLS_BIN")
         unsetenv("SKILLS_FAKE_GLOBAL_DIR")
         unsetenv("SKILLS_FAKE_LOG")
         sandbox?.destroy()
@@ -801,7 +801,7 @@ final class SkillsCLITests: XCTestCase {
     }
 
     func testNodeUnavailableWithoutOverride() async {
-        unsetenv("CLAYSPACE_SKILLS_BIN")
+        unsetenv("DREAMUX_SKILLS_BIN")
         do {
             _ = try await SkillsCLI(nodeBinDirectory: nil).list(scope: .global)
             XCTFail("expected nodeUnavailable")
@@ -844,7 +844,7 @@ enum SkillsCLIError: LocalizedError {
 /// installed listing go through it so on-disk layout, lockfiles, and
 /// update semantics stay exactly what the CLI produces.
 ///
-/// Binary resolution: `CLAYSPACE_SKILLS_BIN` (tests/e2e) is executed
+/// Binary resolution: `DREAMUX_SKILLS_BIN` (tests/e2e) is executed
 /// directly with the subcommand argv; otherwise we exec
 /// `<nodeBinDirectory>/npx -y skills <argv…>` with that directory
 /// prepended to PATH (npx needs to find its own node).
@@ -907,7 +907,7 @@ struct SkillsCLI: Sendable {
 
     /// (executable, leading args) for the current configuration.
     private func invocation() throws -> (String, [String]) {
-        if let override = ProcessInfo.processInfo.environment["CLAYSPACE_SKILLS_BIN"],
+        if let override = ProcessInfo.processInfo.environment["DREAMUX_SKILLS_BIN"],
            !override.isEmpty {
             return (override, [])
         }
@@ -1052,7 +1052,7 @@ Expected: `Executed 5 tests, with 0 failures` (fix the `/private` path prefix as
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Tests/Fixtures/bin/skills Sources/Clayspace/Shell/SkillsCLI.swift Tests/ClayspaceTests/SkillsCLITests.swift
+git add Tests/Fixtures/bin/skills Sources/Dreamux/Shell/SkillsCLI.swift Tests/DreamuxTests/SkillsCLITests.swift
 git commit -m "Add SkillsCLI wrapper and fake skills fixture"
 ```
 
@@ -1061,14 +1061,14 @@ git commit -m "Add SkillsCLI wrapper and fake skills fixture"
 ### Task 5: SkillLinker (project-scope fan-out)
 
 **Files:**
-- Create: `Sources/Clayspace/Shell/SkillLinker.swift`
-- Test: `Tests/ClayspaceTests/SkillLinkerTests.swift`
+- Create: `Sources/Dreamux/Shell/SkillLinker.swift`
+- Test: `Tests/DreamuxTests/SkillLinkerTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 /// SkillLinker tests against real git repos (TestSandbox + GitFixtures):
 /// links in every worktree, exclude entries keep `git status` clean,
@@ -1081,10 +1081,10 @@ final class SkillLinkerTests: XCTestCase {
     private var alpha: Repository!
 
     override func setUp() async throws {
-        setenv("GIT_AUTHOR_NAME", "Clayspace Tests", 1)
-        setenv("GIT_AUTHOR_EMAIL", "tests@clayspace.local", 1)
-        setenv("GIT_COMMITTER_NAME", "Clayspace Tests", 1)
-        setenv("GIT_COMMITTER_EMAIL", "tests@clayspace.local", 1)
+        setenv("GIT_AUTHOR_NAME", "Dreamux Tests", 1)
+        setenv("GIT_AUTHOR_EMAIL", "tests@dreamux.local", 1)
+        setenv("GIT_COMMITTER_NAME", "Dreamux Tests", 1)
+        setenv("GIT_COMMITTER_EMAIL", "tests@dreamux.local", 1)
         sandbox = try TestSandbox()
         project = try sandbox.makeProject(named: "proj")
         alpha = try await GitFixtures.makeBareLayoutRepo(
@@ -1230,7 +1230,7 @@ struct SkillLinkReport: Equatable, Sendable {
 /// `npx skills add` (cwd = project root) puts canonical copies in
 /// `<project>/.agents/skills/`. Agents, however, discover skills from
 /// their starting directory up to the *repository* root — and every
-/// agent in Clayspace starts inside a repo worktree, below the project
+/// agent in Dreamux starts inside a repo worktree, below the project
 /// root, so the canonical copies are invisible to them. For each
 /// worktree of each repo we therefore create
 ///
@@ -1249,8 +1249,8 @@ struct SkillLinkReport: Equatable, Sendable {
 /// uninstalled skills removed, and anything that isn't a symlink into
 /// the project's canonical store is left alone and reported.
 enum SkillLinker {
-    static let excludeBlockStart = "# >>> clayspace skills (managed) >>>"
-    static let excludeBlockEnd = "# <<< clayspace skills (managed) <<<"
+    static let excludeBlockStart = "# >>> dreamux skills (managed) >>>"
+    static let excludeBlockEnd = "# <<< dreamux skills (managed) <<<"
     private static let agentDirNames = [".agents", ".claude"]
 
     /// Skills canonically installed at the project root — the
@@ -1447,7 +1447,7 @@ Expected: `Executed 5 tests, with 0 failures`. If `status --porcelain` shows the
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Shell/SkillLinker.swift Tests/ClayspaceTests/SkillLinkerTests.swift
+git add Sources/Dreamux/Shell/SkillLinker.swift Tests/DreamuxTests/SkillLinkerTests.swift
 git commit -m "Add SkillLinker fan-out with managed git excludes"
 ```
 
@@ -1456,8 +1456,8 @@ git commit -m "Add SkillLinker fan-out with managed git excludes"
 ### Task 6: Reconcile on worktree creation (FeatureProvisioner hook)
 
 **Files:**
-- Modify: `Sources/Clayspace/Shell/FeatureProvisioner.swift` (provision: after `writeReadme(...)` around line 101; ensureFeatureDirectory: after `writeReadme(...)` around line 189)
-- Test: `Tests/ClayspaceTests/SkillLinkerTests.swift` (add one test)
+- Modify: `Sources/Dreamux/Shell/FeatureProvisioner.swift` (provision: after `writeReadme(...)` around line 101; ensureFeatureDirectory: after `writeReadme(...)` around line 189)
+- Test: `Tests/DreamuxTests/SkillLinkerTests.swift` (add one test)
 
 - [ ] **Step 1: Write the failing test** (append to `SkillLinkerTests`)
 
@@ -1523,7 +1523,7 @@ Expected: both `0 failures`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Shell/FeatureProvisioner.swift Tests/ClayspaceTests/SkillLinkerTests.swift
+git add Sources/Dreamux/Shell/FeatureProvisioner.swift Tests/DreamuxTests/SkillLinkerTests.swift
 git commit -m "Reconcile skill links when feature worktrees are provisioned"
 ```
 
@@ -1532,28 +1532,28 @@ git commit -m "Reconcile skill links when feature worktrees are provisioned"
 ### Task 7: SkillPreviewCache
 
 **Files:**
-- Create: `Sources/Clayspace/Shell/SkillPreviewCache.swift`
-- Test: `Tests/ClayspaceTests/SkillPreviewCacheTests.swift`
+- Create: `Sources/Dreamux/Shell/SkillPreviewCache.swift`
+- Test: `Tests/DreamuxTests/SkillPreviewCacheTests.swift`
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 /// Preview-cache tests against a local fixture "GitHub": a committed
 /// repo under <sandbox>/remotes/<owner>/<repo>, reached by pointing
-/// CLAYSPACE_SKILLS_GIT_BASE at the remotes dir. Real git, no network.
+/// DREAMUX_SKILLS_GIT_BASE at the remotes dir. Real git, no network.
 @MainActor
 final class SkillPreviewCacheTests: XCTestCase {
     private var sandbox: TestSandbox!
     private var cacheRoot: URL!
 
     override func setUp() async throws {
-        setenv("GIT_AUTHOR_NAME", "Clayspace Tests", 1)
-        setenv("GIT_AUTHOR_EMAIL", "tests@clayspace.local", 1)
-        setenv("GIT_COMMITTER_NAME", "Clayspace Tests", 1)
-        setenv("GIT_COMMITTER_EMAIL", "tests@clayspace.local", 1)
+        setenv("GIT_AUTHOR_NAME", "Dreamux Tests", 1)
+        setenv("GIT_AUTHOR_EMAIL", "tests@dreamux.local", 1)
+        setenv("GIT_COMMITTER_NAME", "Dreamux Tests", 1)
+        setenv("GIT_COMMITTER_EMAIL", "tests@dreamux.local", 1)
         sandbox = try TestSandbox()
         let remotes = sandbox.root.appendingPathComponent("remotes", isDirectory: true)
         try await GitFixtures.makeCommittedRepo(
@@ -1565,13 +1565,13 @@ final class SkillPreviewCacheTests: XCTestCase {
                 "README.md": "not a skill file\n",
             ])
         cacheRoot = sandbox.root.appendingPathComponent("cache", isDirectory: true)
-        setenv("CLAYSPACE_SKILLS_GIT_BASE", remotes.path + "/", 1)
-        setenv("CLAYSPACE_SKILLS_CACHE_DIR", cacheRoot.path, 1)
+        setenv("DREAMUX_SKILLS_GIT_BASE", remotes.path + "/", 1)
+        setenv("DREAMUX_SKILLS_CACHE_DIR", cacheRoot.path, 1)
     }
 
     override func tearDown() async throws {
-        unsetenv("CLAYSPACE_SKILLS_GIT_BASE")
-        unsetenv("CLAYSPACE_SKILLS_CACHE_DIR")
+        unsetenv("DREAMUX_SKILLS_GIT_BASE")
+        unsetenv("DREAMUX_SKILLS_CACHE_DIR")
         sandbox?.destroy()
         sandbox = nil
     }
@@ -1618,7 +1618,7 @@ final class SkillPreviewCacheTests: XCTestCase {
 }
 ```
 
-(If `TestSandbox` doesn't expose `root`, use whatever accessor it has — read `Tests/ClayspaceTests/Support/TestSandbox.swift` first and adapt the fixture paths, not the production code.)
+(If `TestSandbox` doesn't expose `root`, use whatever accessor it has — read `Tests/DreamuxTests/Support/TestSandbox.swift` first and adapt the fixture paths, not the production code.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1651,27 +1651,27 @@ struct SkillPreview: Equatable, Sendable {
 
 /// Shallow-clones a skill's source repo so the browser can show the
 /// real files before anything is installed. Clones live under
-/// `~/Library/Caches/Clayspace/skill-previews/<owner>__<repo>/` and
+/// `~/Library/Caches/Dreamux/skill-previews/<owner>__<repo>/` and
 /// are reused for 24h (preview is a read-only convenience; `add`
 /// always fetches fresh through the CLI).
 enum SkillPreviewCache {
     static let maxAge: TimeInterval = 24 * 60 * 60
 
     static var cacheRoot: URL {
-        if let override = ProcessInfo.processInfo.environment["CLAYSPACE_SKILLS_CACHE_DIR"],
+        if let override = ProcessInfo.processInfo.environment["DREAMUX_SKILLS_CACHE_DIR"],
            !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
         let caches = (try? FileManager.default.url(
             for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         )) ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return caches.appendingPathComponent("Clayspace/skill-previews", isDirectory: true)
+        return caches.appendingPathComponent("Dreamux/skill-previews", isDirectory: true)
     }
 
     /// `<owner>/<repo>` → clone URL. Default base is GitHub over https;
-    /// tests point CLAYSPACE_SKILLS_GIT_BASE at a local fixtures dir.
+    /// tests point DREAMUX_SKILLS_GIT_BASE at a local fixtures dir.
     static func cloneURL(source: String) -> String {
-        let base = ProcessInfo.processInfo.environment["CLAYSPACE_SKILLS_GIT_BASE"]
+        let base = ProcessInfo.processInfo.environment["DREAMUX_SKILLS_GIT_BASE"]
             .flatMap { $0.isEmpty ? nil : $0 } ?? "https://github.com/"
         return base.hasPrefix("http") ? base + source + ".git" : base + source
     }
@@ -1770,7 +1770,7 @@ Expected: `Executed 4 tests, with 0 failures`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Shell/SkillPreviewCache.swift Tests/ClayspaceTests/SkillPreviewCacheTests.swift
+git add Sources/Dreamux/Shell/SkillPreviewCache.swift Tests/DreamuxTests/SkillPreviewCacheTests.swift
 git commit -m "Add shallow-clone preview cache for skill files"
 ```
 
@@ -1779,14 +1779,14 @@ git commit -m "Add shallow-clone preview cache for skill files"
 ### Task 8: SkillsStore
 
 **Files:**
-- Create: `Sources/Clayspace/Models/SkillsStore.swift`
-- Test: `Tests/ClayspaceTests/SkillsStoreTests.swift`
+- Create: `Sources/Dreamux/Models/SkillsStore.swift`
+- Test: `Tests/DreamuxTests/SkillsStoreTests.swift`
 
 - [ ] **Step 1: Write the failing test** (drives the store through the fake CLI; search isn't covered here — it's pure `SkillsRegistryClient`, already tested)
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 @MainActor
 final class SkillsStoreTests: XCTestCase {
@@ -1796,22 +1796,22 @@ final class SkillsStoreTests: XCTestCase {
     private var store: SkillsStore!
 
     override func setUp() async throws {
-        setenv("GIT_AUTHOR_NAME", "Clayspace Tests", 1)
-        setenv("GIT_AUTHOR_EMAIL", "tests@clayspace.local", 1)
-        setenv("GIT_COMMITTER_NAME", "Clayspace Tests", 1)
-        setenv("GIT_COMMITTER_EMAIL", "tests@clayspace.local", 1)
+        setenv("GIT_AUTHOR_NAME", "Dreamux Tests", 1)
+        setenv("GIT_AUTHOR_EMAIL", "tests@dreamux.local", 1)
+        setenv("GIT_COMMITTER_NAME", "Dreamux Tests", 1)
+        setenv("GIT_COMMITTER_EMAIL", "tests@dreamux.local", 1)
         sandbox = try TestSandbox()
         project = try sandbox.makeProject(named: "proj")
         alpha = try await GitFixtures.makeBareLayoutRepo(
             in: project.rootPath, name: "alpha", files: ["alpha.txt": "a\n"])
-        setenv("CLAYSPACE_SKILLS_BIN", SkillsCLITests.fakeSkillsBin, 1)
+        setenv("DREAMUX_SKILLS_BIN", SkillsCLITests.fakeSkillsBin, 1)
         setenv("SKILLS_FAKE_GLOBAL_DIR",
                sandbox.root.appendingPathComponent("fake-global").path, 1)
         store = SkillsStore(scope: .project(project.rootPath))
     }
 
     override func tearDown() async throws {
-        unsetenv("CLAYSPACE_SKILLS_BIN")
+        unsetenv("DREAMUX_SKILLS_BIN")
         unsetenv("SKILLS_FAKE_GLOBAL_DIR")
         sandbox?.destroy()
         sandbox = nil
@@ -1859,7 +1859,7 @@ final class SkillsStoreTests: XCTestCase {
         // The fake fails on unsupported subcommands; simulate by removing
         // a skill that doesn't exist? The fake tolerates that — instead
         // break the CLI path entirely.
-        setenv("CLAYSPACE_SKILLS_BIN", "/nonexistent/skills", 1)
+        setenv("DREAMUX_SKILLS_BIN", "/nonexistent/skills", 1)
         await store.install(source: "acme/x", skillName: "foo", extraAgents: [])
         XCTAssertNotNil(store.lastError)
     }
@@ -1935,7 +1935,7 @@ final class SkillsStore {
     func prepare() async {
         if case .unknown = nodeStatus {
             nodeStatus = .detecting
-            if let override = ProcessInfo.processInfo.environment["CLAYSPACE_SKILLS_BIN"],
+            if let override = ProcessInfo.processInfo.environment["DREAMUX_SKILLS_BIN"],
                !override.isEmpty {
                 // Fake/override CLI needs no node — keeps tests and e2e
                 // independent of the machine's node install.
@@ -2053,7 +2053,7 @@ Expected: `Executed 5 tests, with 0 failures`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Models/SkillsStore.swift Tests/ClayspaceTests/SkillsStoreTests.swift
+git add Sources/Dreamux/Models/SkillsStore.swift Tests/DreamuxTests/SkillsStoreTests.swift
 git commit -m "Add SkillsStore orchestrating registry, CLI, and linker"
 ```
 
@@ -2064,8 +2064,8 @@ git commit -m "Add SkillsStore orchestrating registry, CLI, and linker"
 The Skills section needs the project's `SignalStore`, which `FeaturesDetail` currently creates privately (`ContentView.swift:67-98`). Move `RunConfigStore`/`SignalStore`/`RunnerManager` creation up to `ProjectWindowContents` so both sections share them. Pure refactor — no behavior change.
 
 **Files:**
-- Modify: `Sources/Clayspace/Views/ProjectWindow.swift`
-- Modify: `Sources/Clayspace/Views/ContentView.swift`
+- Modify: `Sources/Dreamux/Views/ProjectWindow.swift`
+- Modify: `Sources/Dreamux/Views/ContentView.swift`
 
 - [ ] **Step 1: Move store creation into `ProjectWindowContents`**
 
@@ -2137,7 +2137,7 @@ Expected: build succeeds, `0 failures`
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/ProjectWindow.swift Sources/Clayspace/Views/ContentView.swift
+git add Sources/Dreamux/Views/ProjectWindow.swift Sources/Dreamux/Views/ContentView.swift
 git commit -m "Lift run-layer stores to the project window"
 ```
 
@@ -2146,10 +2146,10 @@ git commit -m "Lift run-layer stores to the project window"
 ### Task 10: Skills section UI (AppSection, browser, detail)
 
 **Files:**
-- Modify: `Sources/Clayspace/Models/AppSection.swift`
-- Modify: `Sources/Clayspace/Views/ContentView.swift`
-- Create: `Sources/Clayspace/Views/SkillsBrowserView.swift`
-- Create: `Sources/Clayspace/Views/SkillDetailView.swift`
+- Modify: `Sources/Dreamux/Models/AppSection.swift`
+- Modify: `Sources/Dreamux/Views/ContentView.swift`
+- Create: `Sources/Dreamux/Views/SkillsBrowserView.swift`
+- Create: `Sources/Dreamux/Views/SkillDetailView.swift`
 
 No unit tests for SwiftUI views (none exist in this codebase); the e2e scenario in Task 12 exercises them. Steps here are build-verified.
 
@@ -2680,7 +2680,7 @@ Expected: success. Then launch via the project's usual run path and click the ne
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/Clayspace/Models/AppSection.swift Sources/Clayspace/Views/ContentView.swift Sources/Clayspace/Views/SkillsBrowserView.swift Sources/Clayspace/Views/SkillDetailView.swift Sources/Clayspace/E2E/E2ERegistry.swift
+git add Sources/Dreamux/Models/AppSection.swift Sources/Dreamux/Views/ContentView.swift Sources/Dreamux/Views/SkillsBrowserView.swift Sources/Dreamux/Views/SkillDetailView.swift Sources/Dreamux/E2E/E2ERegistry.swift
 git commit -m "Add Skills section with registry browser and file preview"
 ```
 
@@ -2689,12 +2689,12 @@ git commit -m "Add Skills section with registry browser and file preview"
 ### Task 11: Global Skills window + Home entry point
 
 **Files:**
-- Modify: `Sources/Clayspace/ClayspaceApp.swift`
-- Modify: `Sources/Clayspace/Views/HomeView.swift` (header, `HomeView.swift:83-107`)
+- Modify: `Sources/Dreamux/DreamuxApp.swift`
+- Modify: `Sources/Dreamux/Views/HomeView.swift` (header, `HomeView.swift:83-107`)
 
 - [ ] **Step 1: Add the window scene**
 
-In `ClayspaceApp.body`, after the `Window("Clayspace", id: "home")` scene:
+In `DreamuxApp.body`, after the `Window("Dreamux", id: "home")` scene:
 
 ```swift
         Window("Skills", id: "global-skills") {
@@ -2749,7 +2749,7 @@ Expected: success. Launch, click Skills on Home → global window opens, lists g
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Sources/Clayspace/ClayspaceApp.swift Sources/Clayspace/Views/HomeView.swift Sources/Clayspace/E2E/E2ERegistry.swift
+git add Sources/Dreamux/DreamuxApp.swift Sources/Dreamux/Views/HomeView.swift Sources/Dreamux/E2E/E2ERegistry.swift
 git commit -m "Add global Skills window reachable from Home"
 ```
 
@@ -2758,9 +2758,9 @@ git commit -m "Add global Skills window reachable from Home"
 ### Task 12: E2E — registry, commands, stub API, scenario
 
 **Files:**
-- Modify: `Sources/Clayspace/E2E/E2ERegistry.swift` (real `registerSkillsStore`/`registerGlobalSkillsStore` + bridge field for section switching)
-- Modify: `Sources/Clayspace/Views/ContentView.swift` (consume pending section)
-- Modify: `Sources/Clayspace/E2E/E2ECommands.swift` (new commands)
+- Modify: `Sources/Dreamux/E2E/E2ERegistry.swift` (real `registerSkillsStore`/`registerGlobalSkillsStore` + bridge field for section switching)
+- Modify: `Sources/Dreamux/Views/ContentView.swift` (consume pending section)
+- Modify: `Sources/Dreamux/E2E/E2ECommands.swift` (new commands)
 - Create: `Scripts/e2e/skills-api-stub.py`
 - Modify: `Scripts/e2e/run-e2e.sh`, `Scripts/e2e/driver.py`, `Scripts/e2e/PROTOCOL.md`
 
@@ -2912,7 +2912,7 @@ And the handlers (adapt the project/store resolution helpers to the file's exist
 Serves GET /api/search?q=<query>&limit=<n> with a fixed result set
 filtered by substring match, mimicking the public endpoint's shape.
 Port is given by argv[1]; run-e2e.sh exports the resulting base URL as
-CLAYSPACE_SKILLS_API_BASE.
+DREAMUX_SKILLS_API_BASE.
 """
 import json
 import sys
@@ -2969,11 +2969,11 @@ if __name__ == "__main__":
 SKILLS_API_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 python3 "$SCRIPT_DIR/skills-api-stub.py" "$SKILLS_API_PORT" &
 SKILLS_API_PID=$!
-export CLAYSPACE_SKILLS_API_BASE="http://127.0.0.1:$SKILLS_API_PORT"
-export CLAYSPACE_SKILLS_BIN="$REPO/Tests/Fixtures/bin/skills"
+export DREAMUX_SKILLS_API_BASE="http://127.0.0.1:$SKILLS_API_PORT"
+export DREAMUX_SKILLS_BIN="$REPO/Tests/Fixtures/bin/skills"
 export SKILLS_FAKE_GLOBAL_DIR="$E2E_SANDBOX/global-skills"
-export CLAYSPACE_SKILLS_CACHE_DIR="$E2E_SANDBOX/skills-cache"
-export CLAYSPACE_SKILLS_GIT_BASE="$E2E_SEED_DIR/skills-remotes/"
+export DREAMUX_SKILLS_CACHE_DIR="$E2E_SANDBOX/skills-cache"
+export DREAMUX_SKILLS_GIT_BASE="$E2E_SEED_DIR/skills-remotes/"
 ```
 
 and seed `"$E2E_SEED_DIR/skills-remotes/acme/agent-skills"` as a git repo containing `skills/react-best-practices/SKILL.md` + one extra file (same git-init pattern the script uses to seed the sample-app repos). Add `kill $SKILLS_API_PID` to the cleanup trap.
@@ -3048,7 +3048,7 @@ Expected: all scenarios pass, including `scenario_skills`; screenshot `skills-in
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/Clayspace/E2E Sources/Clayspace/Views/ContentView.swift Scripts/e2e Tests/Fixtures/bin/skills
+git add Sources/Dreamux/E2E Sources/Dreamux/Views/ContentView.swift Scripts/e2e Tests/Fixtures/bin/skills
 git commit -m "Add skills e2e commands, stub registry API, and scenario"
 ```
 

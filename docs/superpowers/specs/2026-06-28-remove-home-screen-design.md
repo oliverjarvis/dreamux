@@ -30,7 +30,7 @@ only scene. At launch SwiftUI opens one window with `projectID == nil`; a
 **launch gate** resolves where to land and rewrites the binding in place. No
 second window, no open/dismiss dance.
 
-### Scene structure (`ClayspaceApp`)
+### Scene structure (`DreamuxApp`)
 
 Delete the `Window(id: "home")` scene and `HomeCommands`' "Show Home"/⇧⌘0.
 Move the surviving "Notification Settings…" command onto the project scene's
@@ -47,7 +47,7 @@ commands. The `WindowGroup` builder delegates to a new `ProjectRootView`:
 On appear, resolves a destination and acts:
 
 1. If `E2EMode.autoOpenProjectName` matches a project → set `projectID` to it.
-   (Preserves the `CLAYSPACE_E2E_AUTOOPEN` contract — the lookup simply moves
+   (Preserves the `DREAMUX_E2E_AUTOOPEN` contract — the lookup simply moves
    here from `HomeView.task`.)
 2. Otherwise `LaunchDestination.resolve(lastOpenedID:projects:)`:
    - `.project(id)` → set `projectID = id` (routes straight into the project).
@@ -98,7 +98,7 @@ store, `.project(id)` otherwise (logic unchanged).
 
 ### Docs
 
-Update the `CLAYSPACE_E2E_AUTOOPEN` row in `Scripts/e2e/PROTOCOL.md`: the name
+Update the `DREAMUX_E2E_AUTOOPEN` row in `Scripts/e2e/PROTOCOL.md`: the name
 is now resolved by the launch gate, not "the Home view".
 
 ## Components / boundaries
@@ -122,7 +122,7 @@ is now resolved by the launch gate, not "the Home view".
   the deleted symbols.
 - **Manual (per the `run` skill):** launch the bundle and confirm it lands in a
   project window directly — no Home grid, no `Home` row in the sidebar.
-- **e2e:** `CLAYSPACE_E2E_AUTOOPEN` still opens the demo project window at
+- **e2e:** `DREAMUX_E2E_AUTOOPEN` still opens the demo project window at
   launch (the driver waits on `project window for <name>`), so
   `Scripts/e2e/run-e2e.sh` should pass unchanged.
 

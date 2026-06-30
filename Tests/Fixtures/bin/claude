@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Fake `claude` CLI for Clayspace e2e tests.
+"""Fake `claude` CLI for Dreamux e2e tests.
 
 The app's Run pane shells out to `claude '<prompt>'` for three flows
-(see Sources/Clayspace/Views/RunSetupView.swift). This shim impersonates
+(see Sources/Dreamux/Views/RunSetupView.swift). This shim impersonates
 the real CLI deterministically — no network, no LLM — by recognizing
 each prompt and performing the minimal file edits the real agent would:
 
   detect    prompt contains "Inspect every repo"
-            -> concatenate each repo's clayspace-runner.snippet.toml
-               into ./.clayspace/run.toml; print "run.toml ready"
+            -> concatenate each repo's dreamux-runner.snippet.toml
+               into ./.dreamux/run.toml; print "run.toml ready"
   isolate   prompt contains 'the runner named "<name>" currently binds
             a fixed port'
-            -> rewrite the CLAYSPACE-FIXTURE-PORT marker line in every
+            -> rewrite the DREAMUX-FIXTURE-PORT marker line in every
                branch worktree of repos/<name>/ to read the port from
                an env var; append port_env to the matching [[runners]]
                entry; print "isolated <name>"
@@ -29,8 +29,8 @@ import os
 import re
 import sys
 
-MARKER = "CLAYSPACE-FIXTURE-PORT"
-MARKER_RE = re.compile(r'^(\s*)PORT = (\d+)(\s*)# CLAYSPACE-FIXTURE-PORT\s*$')
+MARKER = "DREAMUX-FIXTURE-PORT"
+MARKER_RE = re.compile(r'^(\s*)PORT = (\d+)(\s*)# DREAMUX-FIXTURE-PORT\s*$')
 
 # Flags of the real CLI that take a separate value argument. Anything
 # else starting with "-" is treated as a boolean flag.
@@ -84,7 +84,7 @@ def do_detect():
         branch = default_branch_folder(repo_dir)
         if branch is None:
             continue
-        snippet_path = os.path.join(repo_dir, branch, "clayspace-runner.snippet.toml")
+        snippet_path = os.path.join(repo_dir, branch, "dreamux-runner.snippet.toml")
         if not os.path.isfile(snippet_path):
             continue
         with open(snippet_path, "r", encoding="utf-8") as f:
@@ -92,8 +92,8 @@ def do_detect():
         snippet = snippet.replace("{{CWD}}", f"repos/{repo}/{branch}")
         snippets.append(snippet.strip() + "\n")
 
-    os.makedirs(".clayspace", exist_ok=True)
-    with open(os.path.join(".clayspace", "run.toml"), "w", encoding="utf-8") as f:
+    os.makedirs(".dreamux", exist_ok=True)
+    with open(os.path.join(".dreamux", "run.toml"), "w", encoding="utf-8") as f:
         f.write("\n".join(snippets))
     print("run.toml ready")
     return 0
@@ -195,7 +195,7 @@ def do_isolate(runner_name):
         print("fake-claude: no marker lines found to rewrite", file=sys.stderr)
         return 1
 
-    run_toml = os.path.join(".clayspace", "run.toml")
+    run_toml = os.path.join(".dreamux", "run.toml")
     if not os.path.isfile(run_toml) or not append_port_env(run_toml, runner_name, env_var):
         print(f"fake-claude: no [[runners]] entry named {runner_name} in {run_toml}",
               file=sys.stderr)

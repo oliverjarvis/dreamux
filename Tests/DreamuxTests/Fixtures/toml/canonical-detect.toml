@@ -1,0 +1,16 @@
+# .dreamux/run.toml — the exact two-runner shape RunSetupView's
+# detect prompt asks Claude to write (see RunSetupView.detectPrompt).
+
+[[runners]]
+name = "frontend"
+cwd = "repos/frontend/main"
+start = "npm run dev"
+stop = "pkill -f 'node.*dev'"
+port = 3000
+
+[[runners]]
+name = "api"
+cwd = "repos/api/main"
+start = "cargo run"
+stop = "pkill -f 'cargo run'"
+port = 8080

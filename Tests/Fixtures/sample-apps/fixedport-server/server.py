@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Clayspace test fixture: an HTTP server with a HARDCODED port. The
-line tagged CLAYSPACE-FIXTURE-PORT below is a marker contract — the
+"""Dreamux test fixture: an HTTP server with a HARDCODED port. The
+line tagged DREAMUX-FIXTURE-PORT below is a marker contract — the
 fake `claude` shim's isolate flow rewrites exactly that line to read
 the port from FIXEDPORT_SERVER_PORT instead. Do not reformat it.
 
@@ -11,7 +11,7 @@ import os
 import signal
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-PORT = 4700  # CLAYSPACE-FIXTURE-PORT
+PORT = 4700  # DREAMUX-FIXTURE-PORT
 
 
 class Handler(BaseHTTPRequestHandler):

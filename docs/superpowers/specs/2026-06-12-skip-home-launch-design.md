@@ -5,7 +5,7 @@
 
 ## Problem
 
-Launching Clayspace shows the Home window (project grid) and requires a
+Launching Dreamux shows the Home window (project grid) and requires a
 click before reaching the real workspace. The `ProjectsRail` inside the
 project window already lists every project, switches between them, opens
 new windows, and tears off via drag — so for a returning user the Home

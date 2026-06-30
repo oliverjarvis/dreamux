@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Out-of-process e2e driver for Clayspace.
+"""Out-of-process e2e driver for Dreamux.
 
 Launched by Scripts/e2e/run-e2e.sh after it has built the app bundle,
 created a per-run sandbox, and seeded local git repos from the fixture
@@ -12,15 +12,15 @@ from the fixture servers. Screenshots land in $ARTIFACTS.
 python3 stdlib only — no third-party deps.
 
 Environment contract (set by run-e2e.sh):
-  E2E_APP_BINARY       Clayspace.app/Contents/MacOS/Clayspace (absolute)
+  E2E_APP_BINARY       Dreamux.app/Contents/MacOS/Dreamux (absolute)
   E2E_SANDBOX          per-run sandbox root (mktemp -d)
   E2E_SOCKET           short /tmp path for the app's unix socket
   E2E_SEED_DIR         dir containing the seeded portenv-server /
                        fixedport-server git repos
   E2E_PROJECT_NAME     project folder name under the projects root
   ARTIFACTS            screenshot/log output dir (wiped by run-e2e.sh)
-  CLAYSPACE_CLAUDE_BIN the fake claude shim (forwarded to the app)
-  CLAYSPACE_GH_BIN     the fake gh shim (forwarded to the app)
+  DREAMUX_CLAUDE_BIN the fake claude shim (forwarded to the app)
+  DREAMUX_GH_BIN     the fake gh shim (forwarded to the app)
 
 Exit status: 0 only when every scenario passed.
 """
@@ -45,16 +45,16 @@ SOCKET_PATH = os.environ["E2E_SOCKET"]
 SEED_DIR = os.environ["E2E_SEED_DIR"]
 PROJECT_NAME = os.environ.get("E2E_PROJECT_NAME", "demo-project")
 ARTIFACTS = os.environ["ARTIFACTS"]
-CLAUDE_BIN = os.environ["CLAYSPACE_CLAUDE_BIN"]
-GH_BIN = os.environ["CLAYSPACE_GH_BIN"]
+CLAUDE_BIN = os.environ["DREAMUX_CLAUDE_BIN"]
+GH_BIN = os.environ["DREAMUX_GH_BIN"]
 
 PROJECTS_ROOT = os.path.join(SANDBOX, "projects")
 STATE_DIR = os.path.join(SANDBOX, "state")
 PROJECT_DIR = os.path.join(PROJECTS_ROOT, PROJECT_NAME)
 
 GIT_IDENTITY = [
-    "-c", "user.name=Clayspace E2E",
-    "-c", "user.email=e2e@clayspace.local",
+    "-c", "user.name=Dreamux E2E",
+    "-c", "user.email=e2e@dreamux.local",
 ]
 
 
@@ -100,17 +100,17 @@ class Driver:
     # -- app lifecycle ------------------------------------------------------
 
     def launch_app(self, extra_env=None):
-        """Launch the binary inside Clayspace.app directly so env vars
+        """Launch the binary inside Dreamux.app directly so env vars
         pass through, then wait for the automation socket to accept."""
         self.launch_counter += 1
         env = os.environ.copy()
         env.update({
-            "CLAYSPACE_E2E_SOCKET": SOCKET_PATH,
-            "CLAYSPACE_E2E_AUTOOPEN": PROJECT_NAME,
-            "CLAYSPACE_PROJECTS_ROOT": PROJECTS_ROOT,
-            "CLAYSPACE_STATE_DIR": STATE_DIR,
-            "CLAYSPACE_CLAUDE_BIN": CLAUDE_BIN,
-            "CLAYSPACE_GH_BIN": GH_BIN,
+            "DREAMUX_E2E_SOCKET": SOCKET_PATH,
+            "DREAMUX_E2E_AUTOOPEN": PROJECT_NAME,
+            "DREAMUX_PROJECTS_ROOT": PROJECTS_ROOT,
+            "DREAMUX_STATE_DIR": STATE_DIR,
+            "DREAMUX_CLAUDE_BIN": CLAUDE_BIN,
+            "DREAMUX_GH_BIN": GH_BIN,
         })
         if extra_env:
             env.update(extra_env)
@@ -128,10 +128,10 @@ class Driver:
         log_path = os.path.join(ARTIFACTS, f"app-{self.launch_counter}.log")
         self.app_log = open(log_path, "ab")
         # -ApplePersistenceIgnoreState YES: without it, AppKit restores
-        # whatever windows the user's last real Clayspace session left
+        # whatever windows the user's last real Dreamux session left
         # behind (keyed by bundle id) — a stale project window from
         # outside the sandbox would hijack the run and the launch gate
-        # (whose .onAppear performs CLAYSPACE_E2E_AUTOOPEN) never
+        # (whose .onAppear performs DREAMUX_E2E_AUTOOPEN) never
         # resolves into the demo project.
         self.app = subprocess.Popen(
             [APP_BINARY, "-ApplePersistenceIgnoreState", "YES"],
@@ -386,7 +386,7 @@ def feature_dir(name):
 
 
 def run_toml_path():
-    return os.path.join(PROJECT_DIR, ".clayspace", "run.toml")
+    return os.path.join(PROJECT_DIR, ".dreamux", "run.toml")
 
 
 def read_run_toml():
@@ -428,8 +428,8 @@ def scenario_repos_and_feature(d):
         # app's own merge commits work on machines without global git
         # config. Plain `git config` in a worktree writes to the common
         # config file, which every worktree shares.
-        git("config", "user.name", "Clayspace E2E", cwd=worktree(repo, "main"))
-        git("config", "user.email", "e2e@clayspace.local",
+        git("config", "user.name", "Dreamux E2E", cwd=worktree(repo, "main"))
+        git("config", "user.email", "e2e@dreamux.local",
             cwd=worktree(repo, "main"))
 
     d.cmd("createFeature", name="feat-alpha",
@@ -469,7 +469,7 @@ def scenario_discovery(d):
     # The embedded terminal boots a real zsh before pasting the claude
     # line, so allow a generous window for run.toml to land.
     d.wait_until(lambda: os.path.isfile(run_toml_path()), 60.0,
-                 ".clayspace/run.toml to be written by the fake claude")
+                 ".dreamux/run.toml to be written by the fake claude")
 
     def both_runners_parsed():
         resp = d.cmd("reloadRunConfig")
@@ -762,8 +762,8 @@ def scenario_publish_pr(d):
     origin = git("remote", "get-url", "origin", cwd=worktree("pr-server", "main"))
     require(os.path.realpath(origin) == os.path.realpath(remote),
             f"pr-server origin is {origin}, expected the bare remote {remote}")
-    git("config", "user.name", "Clayspace E2E", cwd=worktree("pr-server", "main"))
-    git("config", "user.email", "e2e@clayspace.local",
+    git("config", "user.name", "Dreamux E2E", cwd=worktree("pr-server", "main"))
+    git("config", "user.email", "e2e@dreamux.local",
         cwd=worktree("pr-server", "main"))
 
     # Real work on the feature branch, committed by the driver.

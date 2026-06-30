@@ -16,12 +16,12 @@
 
 | File | Status | Responsibility |
 |---|---|---|
-| `Sources/Clayspace/Models/LaunchDestination.swift` | Create | Pure launch-target resolution + UserDefaults-backed last-opened memory |
-| `Tests/ClayspaceTests/LaunchDestinationTests.swift` | Create | Unit tests for resolution + persistence round-trip |
-| `Sources/Clayspace/Views/CreateProjectFlow.swift` | Create | Self-contained New Project sheet (form + create + repo bootstrap), shared by Home and rail |
-| `Sources/Clayspace/Views/ProjectWindow.swift` | Modify | Record last-opened project ID on appear |
-| `Sources/Clayspace/Views/HomeView.swift` | Modify | One-shot launch redirect; slim down to consume shared sheet |
-| `Sources/Clayspace/Views/ProjectsRail.swift` | Modify | "＋ New Project" row; "Move to Trash…" context menu + confirmation |
+| `Sources/Dreamux/Models/LaunchDestination.swift` | Create | Pure launch-target resolution + UserDefaults-backed last-opened memory |
+| `Tests/DreamuxTests/LaunchDestinationTests.swift` | Create | Unit tests for resolution + persistence round-trip |
+| `Sources/Dreamux/Views/CreateProjectFlow.swift` | Create | Self-contained New Project sheet (form + create + repo bootstrap), shared by Home and rail |
+| `Sources/Dreamux/Views/ProjectWindow.swift` | Modify | Record last-opened project ID on appear |
+| `Sources/Dreamux/Views/HomeView.swift` | Modify | One-shot launch redirect; slim down to consume shared sheet |
+| `Sources/Dreamux/Views/ProjectsRail.swift` | Modify | "＋ New Project" row; "Move to Trash…" context menu + confirmation |
 
 Existing code conventions to follow: XCTest (not swift-testing), `@MainActor @Observable` stores, file-scope private views, comments explain *why* not *what*.
 
@@ -30,16 +30,16 @@ Existing code conventions to follow: XCTest (not swift-testing), `@MainActor @Ob
 ### Task 1: LaunchDestination helper (TDD)
 
 **Files:**
-- Create: `Sources/Clayspace/Models/LaunchDestination.swift`
-- Test: `Tests/ClayspaceTests/LaunchDestinationTests.swift`
+- Create: `Sources/Dreamux/Models/LaunchDestination.swift`
+- Test: `Tests/DreamuxTests/LaunchDestinationTests.swift`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `Tests/ClayspaceTests/LaunchDestinationTests.swift`:
+Create `Tests/DreamuxTests/LaunchDestinationTests.swift`:
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 /// Covers the pure launch-target resolution (`LaunchDestination.resolve`)
 /// and the UserDefaults round-trip behind it (`LastOpenedProject`). The
@@ -120,7 +120,7 @@ Expected: compile FAILURE — `cannot find 'LaunchDestination' in scope`
 
 - [ ] **Step 3: Write the implementation**
 
-Create `Sources/Clayspace/Models/LaunchDestination.swift`:
+Create `Sources/Dreamux/Models/LaunchDestination.swift`:
 
 ```swift
 import Foundation
@@ -169,7 +169,7 @@ Expected: PASS, 6 tests
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Models/LaunchDestination.swift Tests/ClayspaceTests/LaunchDestinationTests.swift
+git add Sources/Dreamux/Models/LaunchDestination.swift Tests/DreamuxTests/LaunchDestinationTests.swift
 git commit -m "Add launch-destination resolution and last-opened persistence"
 ```
 
@@ -178,13 +178,13 @@ git commit -m "Add launch-destination resolution and last-opened persistence"
 ### Task 2: Record the last-opened project
 
 **Files:**
-- Modify: `Sources/Clayspace/Views/ProjectWindow.swift:62-77` (the `onAppear` in `ProjectWindowContents`)
+- Modify: `Sources/Dreamux/Views/ProjectWindow.swift:62-77` (the `onAppear` in `ProjectWindowContents`)
 
 `ProjectWindowContents.onAppear` runs on every path a project window appears or switches through (open from Home, rail switch — the `.id(project.id)` re-init re-fires it — and tear-off windows). Last writer wins, which is exactly the "most recently in front of the user" semantics we want.
 
 - [ ] **Step 1: Add the recording call**
 
-In `Sources/Clayspace/Views/ProjectWindow.swift`, at the top of the existing `.onAppear` block:
+In `Sources/Dreamux/Views/ProjectWindow.swift`, at the top of the existing `.onAppear` block:
 
 ```swift
 .onAppear {
@@ -206,7 +206,7 @@ Expected: `Build complete!`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/ProjectWindow.swift
+git add Sources/Dreamux/Views/ProjectWindow.swift
 git commit -m "Record last-opened project when a project window appears"
 ```
 
@@ -215,11 +215,11 @@ git commit -m "Record last-opened project when a project window appears"
 ### Task 3: One-shot launch redirect in HomeView
 
 **Files:**
-- Modify: `Sources/Clayspace/Views/HomeView.swift:28-38` (the `.task`), plus new statics on `HomeView`
+- Modify: `Sources/Dreamux/Views/HomeView.swift:28-38` (the `.task`), plus new statics on `HomeView`
 
 - [ ] **Step 1: Replace the `.task` block**
 
-In `Sources/Clayspace/Views/HomeView.swift`, replace the existing `.task { ... }` (currently the e2e auto-open) with:
+In `Sources/Dreamux/Views/HomeView.swift`, replace the existing `.task { ... }` (currently the e2e auto-open) with:
 
 ```swift
 .task {
@@ -275,13 +275,13 @@ Expected: `Build complete!`, all tests PASS
 
 - [ ] **Step 4: Manual smoke check**
 
-Run: `./Scripts/make-app.sh debug && open ./Clayspace.app`
+Run: `./Scripts/make-app.sh debug && open ./Dreamux.app`
 Expected: app opens directly into a project window (one of the existing projects), no Home grid. ⇧⌘0 then shows Home and it *stays* (no bounce-back).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/HomeView.swift
+git add Sources/Dreamux/Views/HomeView.swift
 git commit -m "Redirect launch from Home into the last-opened project"
 ```
 
@@ -290,14 +290,14 @@ git commit -m "Redirect launch from Home into the last-opened project"
 ### Task 4: Extract a self-contained CreateProjectSheet
 
 **Files:**
-- Create: `Sources/Clayspace/Views/CreateProjectFlow.swift`
-- Modify: `Sources/Clayspace/Views/HomeView.swift` (remove moved code; slim sheet presentation)
+- Create: `Sources/Dreamux/Views/CreateProjectFlow.swift`
+- Modify: `Sources/Dreamux/Views/HomeView.swift` (remove moved code; slim sheet presentation)
 
 The sheet currently takes seven bindings because `HomeView` owns the async create. Restructure it to own its form state and the create + repo-bootstrap flow internally, exposing only `store` and `onCreated`. `AddRepoIntent` already lives in `Views/AddRepoSheet.swift` (same module — no import changes).
 
 - [ ] **Step 1: Create the shared component**
 
-Create `Sources/Clayspace/Views/CreateProjectFlow.swift`. The form body, helper computed properties, and `chooseImportFolder` move verbatim from `HomeView.swift`; the diffs are: bindings become `@State`, `onCancel` becomes `dismiss()`, `onCreate` becomes the internal `createProject()`, and `isCreating` is unified with `isWorking`.
+Create `Sources/Dreamux/Views/CreateProjectFlow.swift`. The form body, helper computed properties, and `chooseImportFolder` move verbatim from `HomeView.swift`; the diffs are: bindings become `@State`, `onCancel` becomes `dismiss()`, `onCreate` becomes the internal `createProject()`, and `isCreating` is unified with `isWorking`.
 
 ```swift
 import SwiftUI
@@ -338,7 +338,7 @@ struct CreateProjectSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New Project")
                 .font(.headline)
-            Text("A folder will be created under ~/Documents/Clayspace.")
+            Text("A folder will be created under ~/Documents/Dreamux.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -571,7 +571,7 @@ struct CreateProjectSheet: View {
 
 - [ ] **Step 2: Slim down HomeView**
 
-In `Sources/Clayspace/Views/HomeView.swift`:
+In `Sources/Dreamux/Views/HomeView.swift`:
 
 1. Delete the form-state properties (keep `showCreate`, `pendingDelete`, `deleteError`):
 
@@ -613,13 +613,13 @@ Expected: `Build complete!`, all tests PASS
 
 - [ ] **Step 4: Manual smoke check**
 
-Run: `./Scripts/make-app.sh debug && open ./Clayspace.app`, press ⇧⌘0 to show Home, click "New Project".
+Run: `./Scripts/make-app.sh debug && open ./Dreamux.app`, press ⇧⌘0 to show Home, click "New Project".
 Expected: sheet looks and behaves exactly as before; creating a project opens its window.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/CreateProjectFlow.swift Sources/Clayspace/Views/HomeView.swift
+git add Sources/Dreamux/Views/CreateProjectFlow.swift Sources/Dreamux/Views/HomeView.swift
 git commit -m "Extract CreateProjectSheet into a self-contained shared component"
 ```
 
@@ -628,7 +628,7 @@ git commit -m "Extract CreateProjectSheet into a self-contained shared component
 ### Task 5: "＋ New Project" row in the projects rail
 
 **Files:**
-- Modify: `Sources/Clayspace/Views/ProjectsRail.swift`
+- Modify: `Sources/Dreamux/Views/ProjectsRail.swift`
 
 - [ ] **Step 1: Add the row and sheet**
 
@@ -704,13 +704,13 @@ Expected: `Build complete!`, all tests PASS
 
 - [ ] **Step 4: Manual smoke check**
 
-Run: `./Scripts/make-app.sh debug && open ./Clayspace.app`
+Run: `./Scripts/make-app.sh debug && open ./Dreamux.app`
 Expected: rail shows "New Project" pinned at the bottom; clicking it opens the sheet; creating a project switches the current window to it.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/ProjectsRail.swift
+git add Sources/Dreamux/Views/ProjectsRail.swift
 git commit -m "Add New Project row to the projects rail"
 ```
 
@@ -719,7 +719,7 @@ git commit -m "Add New Project row to the projects rail"
 ### Task 6: "Move to Trash…" from the rail
 
 **Files:**
-- Modify: `Sources/Clayspace/Views/ProjectsRail.swift`
+- Modify: `Sources/Dreamux/Views/ProjectsRail.swift`
 
 - [ ] **Step 1: Thread an onDelete callback into the AppKit row**
 
@@ -894,13 +894,13 @@ Expected: `Build complete!`, all tests PASS
 
 - [ ] **Step 4: Manual smoke check**
 
-Run: `./Scripts/make-app.sh debug && open ./Clayspace.app`. Create a throwaway project from the rail, then right-click its row → "Move to Trash…".
+Run: `./Scripts/make-app.sh debug && open ./Dreamux.app`. Create a throwaway project from the rail, then right-click its row → "Move to Trash…".
 Expected: confirmation alert appears; confirming removes the row and (if it was the current project) switches the window to another project. The folder lands in the Trash.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/ProjectsRail.swift
+git add Sources/Dreamux/Views/ProjectsRail.swift
 git commit -m "Add Move to Trash to the projects rail context menu"
 ```
 
@@ -922,7 +922,7 @@ Expected: all scenarios pass. The launch redirect is suppressed under `E2EMode`,
 
 - [ ] **Step 3: Manual checklist**
 
-Run: `./Scripts/make-app.sh debug && open ./Clayspace.app` and verify:
+Run: `./Scripts/make-app.sh debug && open ./Dreamux.app` and verify:
 
 1. Launch lands in the last project you had open (no Home grid).
 2. Quit, reopen — lands in the same project again.

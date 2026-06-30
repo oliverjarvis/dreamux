@@ -5,7 +5,7 @@
 
 ## Goal
 
-Let users browse the skills.sh registry, preview a skill's files before installing, install skills, and manage what's installed — at two scopes: per Clayspace project and global (user-level). Installs always go through the `npx skills` CLI and always target at least the `claude-code` and `codex` agents.
+Let users browse the skills.sh registry, preview a skill's files before installing, install skills, and manage what's installed — at two scopes: per Dreamux project and global (user-level). Installs always go through the `npx skills` CLI and always target at least the `claude-code` and `codex` agents.
 
 ## Verified facts this design depends on
 
@@ -16,12 +16,12 @@ Let users browse the skills.sh registry, preview a skill's files before installi
   - `find <query>` — works non-interactively but outputs ANSI text (not used; see Registry API)
 - **Registry API:** the full `skills.sh/api/v1/*` API requires Vercel OIDC auth (unusable from a desktop app). The CLI itself uses a **public** endpoint: `GET https://skills.sh/api/search?q=<query>&limit=<n>` → JSON `{skills: [{id, skillId, name, source, installs}], ...}`. Minimum query length 2. There is no public "list all / leaderboard" endpoint.
 - **CLI on-disk layout:** canonical skill copies go to `.agents/skills/<name>/` (project) or `~/.agents/skills/<name>/` (global, `-g`), with per-agent symlinks (e.g. `.claude/skills/<name>` → `../../.agents/skills/<name>`) and a `skills-lock.json` lockfile next to the canonical dir.
-- **Claude Code skill discovery:** project skills load from `.claude/skills/` in the starting directory and parent directories **up to the repository root** (plus nested dirs on demand). Discovery does **not** continue above the repo root. Since Clayspace agents start inside repos/worktrees, skills placed only at the Clayspace project root would never be discovered — this forces the symlink fan-out below.
+- **Claude Code skill discovery:** project skills load from `.claude/skills/` in the starting directory and parent directories **up to the repository root** (plus nested dirs on demand). Discovery does **not** continue above the repo root. Since Dreamux agents start inside repos/worktrees, skills placed only at the Dreamux project root would never be discovered — this forces the symlink fan-out below.
 - **Node dependency:** `npx` requires a working node. Failure mode observed on this machine: asdf shims on PATH but no global nodejs version set → `npx` exits with "No version is set for command npx".
 
 ## Decisions (user-approved)
 
-1. **Local scope = Clayspace project.** One install covers every repo and feature worktree under the project. No per-repo installs.
+1. **Local scope = Dreamux project.** One install covers every repo and feature worktree under the project. No per-repo installs.
 2. **Browse = search + topic shelf.** Search field backed by the public search API; front page shows topic chips that run seeded searches (initial set: React, Next.js, Testing, Design, Docs, Git, Security) and a pinned shelf of known-good sources (initial set: `vercel-labs/agent-skills`, `anthropics/skills`; both lists are plain constants, trivially editable later). No scraping.
 3. **Agents: claude-code + codex locked on**, with optional checkboxes for additional CLI-supported agents per install.
 4. **Node: detect + guide.** Probe for a working node; clear fix-it UI if absent. No bundled runtime.
@@ -36,28 +36,28 @@ Three independent data paths:
 | Operation | Mechanism |
 |---|---|
 | Browse / search | `URLSession` → `https://skills.sh/api/search` (public JSON) |
-| File preview | depth-1 git clone of the skill's source repo (existing `GitOperations`) into `~/Library/Caches/Clayspace/skill-previews/<owner>-<repo>/` |
+| File preview | depth-1 git clone of the skill's source repo (existing `GitOperations`) into `~/Library/Caches/Dreamux/skill-previews/<owner>-<repo>/` |
 | Install / list / remove / update | `npx -y skills …` via detected node, `Process` + continuation pattern (as in `GitOperations`) |
 
 ### Scope mechanics
 
-**Global:** `npx skills add … -g`. The CLI manages `~/.agents/skills` + `~/.claude/skills` symlinks; agents pick these up everywhere. Nothing for Clayspace to wire.
+**Global:** `npx skills add … -g`. The CLI manages `~/.agents/skills` + `~/.claude/skills` symlinks; agents pick these up everywhere. Nothing for Dreamux to wire.
 
-**Project:** `npx skills add …` with cwd = project root. Canonical copy lands in `<project>/.agents/skills/`, lockfile at `<project>/skills-lock.json`. Because agent skill discovery stops at the repository root, Clayspace then **fans out symlinks** into every repo working copy and every feature worktree:
+**Project:** `npx skills add …` with cwd = project root. Canonical copy lands in `<project>/.agents/skills/`, lockfile at `<project>/skills-lock.json`. Because agent skill discovery stops at the repository root, Dreamux then **fans out symlinks** into every repo working copy and every feature worktree:
 
 ```
 <project>/
 ├── .agents/skills/<skill>/          ← canonical (CLI-managed)
 ├── .claude/skills/<skill>           ← symlink (CLI-created)
 ├── skills-lock.json
-├── repos/<repo>/.claude/skills/<skill>   ← symlink (Clayspace)
-│   repos/<repo>/.agents/skills/<skill>   ← symlink (Clayspace)
-│   repos/<repo>/.git/info/exclude        ← + per-skill entries (Clayspace)
+├── repos/<repo>/.claude/skills/<skill>   ← symlink (Dreamux)
+│   repos/<repo>/.agents/skills/<skill>   ← symlink (Dreamux)
+│   repos/<repo>/.git/info/exclude        ← + per-skill entries (Dreamux)
 └── features/<feature>/<repo>/…           ← same links in each worktree
 ```
 
 - Links use `.git/info/exclude` (local-only) so worktrees and repos stay free of git status noise; tracked files are never modified.
-- Worktree creation (already Clayspace-controlled) runs the same linking step, so new features inherit project skills automatically.
+- Worktree creation (already Dreamux-controlled) runs the same linking step, so new features inherit project skills automatically.
 - Reconciliation is idempotent: repairs stale links, removes orphans after uninstall, and **never overwrites a repo-owned (committed) skill of the same name** — it skips and reports instead.
 
 ## Components
@@ -67,8 +67,8 @@ Three independent data paths:
 - `Models/SkillTypes.swift` — `RegistrySkill` (from search API), `InstalledSkill` (from `list --json`: name, source, agents, scope, canonical path), `SkillScope` (`.global` / `.project(URL)`).
 
 ### Shell
-- `Shell/SkillsRegistryClient.swift` — search API client. Base URL from `CLAYSPACE_SKILLS_API_BASE` when set (e2e), else `https://skills.sh`.
-- `Shell/SkillsCLI.swift` — builds and runs `npx -y skills …` (binary overridable via `CLAYSPACE_SKILLS_BIN`); async, cancellable, streams output lines. Contains `NodeDetector`.
+- `Shell/SkillsRegistryClient.swift` — search API client. Base URL from `DREAMUX_SKILLS_API_BASE` when set (e2e), else `https://skills.sh`.
+- `Shell/SkillsCLI.swift` — builds and runs `npx -y skills …` (binary overridable via `DREAMUX_SKILLS_BIN`); async, cancellable, streams output lines. Contains `NodeDetector`.
 - `Shell/SkillPreviewCache.swift` — clone-or-reuse (24h TTL, manual refresh), returns file tree + file contents.
 - `Shell/SkillLinker.swift` — project-scope fan-out + `.git/info/exclude` maintenance; called after every mutation and from worktree creation.
 
@@ -91,7 +91,7 @@ Three independent data paths:
 
 - **Unit:** `SkillLinker` reconcile on temp project trees (creation, idempotency, exclude maintenance, repo-owned skip, orphan cleanup); `list --json` parsing fixtures; `NodeDetector` ordering incl. broken-shim case; `SkillsRegistryClient` via `URLProtocol` stub.
 - **Integration:** `SkillsCLI` against a fake `skills` executable in `Tests/Fixtures/bin/` (records argv, fabricates skill dirs + lockfile) — asserts exact flags/cwd. Preview cache against a local bare repo fixture.
-- **E2E:** local HTTP stub for the search API (`CLAYSPACE_SKILLS_API_BASE`) + fake CLI (`CLAYSPACE_SKILLS_BIN`); script in `Scripts/e2e/`: open project → Skills section → search → preview files → install → assert links + excludes on disk → screenshots at each stage. New `E2ECommands`: `skillsSearch`, `skillsInstall`, `skillsList`, `skillsRemove`.
+- **E2E:** local HTTP stub for the search API (`DREAMUX_SKILLS_API_BASE`) + fake CLI (`DREAMUX_SKILLS_BIN`); script in `Scripts/e2e/`: open project → Skills section → search → preview files → install → assert links + excludes on disk → screenshots at each stage. New `E2ECommands`: `skillsSearch`, `skillsInstall`, `skillsList`, `skillsRemove`.
 
 ## Out of scope
 

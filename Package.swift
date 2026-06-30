@@ -2,36 +2,41 @@
 import PackageDescription
 
 let package = Package(
-    name: "Clayspace",
+    name: "Dreamux",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Clayspace", targets: ["Clayspace"]),
+        .executable(name: "Dreamux", targets: ["Dreamux"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Lakr233/libghostty-spm.git", exact: "1.0.1777879537"),
+        // Upstream deleted the `1.0.1777879537` version tag (the repo was
+        // retagged to 1.2.x), so an `exact:` version pin no longer resolves
+        // from a clean checkout. Pin the same commit by revision instead —
+        // identical bytes, and the GhosttyKit.xcframework binary artifact
+        // (keyed by URL + checksum) is unaffected.
+        .package(url: "https://github.com/Lakr233/libghostty-spm.git", revision: "f10e02dd829271be3e361dcde56a6e33a79fa080"),
         // Vendored at vendor/bonsplit so we can patch dropZoneAtEnd to
         // absorb the trailing run-off (see TabBarView.swift).
         .package(path: "vendor/bonsplit"),
     ],
     targets: [
         .executableTarget(
-            name: "Clayspace",
+            name: "Dreamux",
             dependencies: [
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
                 .product(name: "GhosttyTheme", package: "libghostty-spm"),
                 .product(name: "Bonsplit", package: "bonsplit"),
-                "ClayspacePTY",
+                "DreamuxPTY",
             ],
-            path: "Sources/Clayspace",
+            path: "Sources/Dreamux",
             exclude: ["Resources/Info.plist"]
         ),
         .target(
-            name: "ClayspacePTY",
-            path: "Sources/ClayspacePTY",
+            name: "DreamuxPTY",
+            path: "Sources/DreamuxPTY",
             publicHeadersPath: "include"
         ),
         // Test targets can depend on executable targets on macOS (Swift
-        // 5.5+); `@testable import Clayspace` works because debug builds
+        // 5.5+); `@testable import Dreamux` works because debug builds
         // compile with testability enabled. Fixture data (sample apps,
         // the fake `claude` shim) lives in Tests/Fixtures, outside this
         // target's path, so tests reference it by repo-relative path
@@ -42,9 +47,9 @@ let package = Package(
         // and excluding keeps SwiftPM from warning about unhandled
         // files while preserving exact bytes (CRLF cases, etc.).
         .testTarget(
-            name: "ClayspaceTests",
-            dependencies: ["Clayspace"],
-            path: "Tests/ClayspaceTests",
+            name: "DreamuxTests",
+            dependencies: ["Dreamux"],
+            path: "Tests/DreamuxTests",
             exclude: ["Fixtures"]
         ),
     ]
