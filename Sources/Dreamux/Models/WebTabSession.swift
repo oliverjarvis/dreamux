@@ -79,21 +79,22 @@ final class WebTabSession: Identifiable {
     // MARK: - Navigation observation
 
     private func observeNavigation(_ view: WKWebView) {
+        // WKWebView KVO is delivered on the main thread, so hop straight
+        // onto the main actor to read its isolated properties and update
+        // our observable state with no runloop delay.
+        let sync: @Sendable (WKWebView) -> Void = { [weak self] webView in
+            MainActor.assumeIsolated {
+                self?.apply(
+                    url: webView.url,
+                    back: webView.canGoBack,
+                    forward: webView.canGoForward
+                )
+            }
+        }
         observations = [
-            view.observe(\.url, options: [.new]) { [weak self] webView, _ in
-                let url = webView.url
-                let back = webView.canGoBack
-                let forward = webView.canGoForward
-                Task { @MainActor in self?.apply(url: url, back: back, forward: forward) }
-            },
-            view.observe(\.canGoBack, options: [.new]) { [weak self] webView, _ in
-                let back = webView.canGoBack
-                Task { @MainActor in self?.canGoBack = back }
-            },
-            view.observe(\.canGoForward, options: [.new]) { [weak self] webView, _ in
-                let forward = webView.canGoForward
-                Task { @MainActor in self?.canGoForward = forward }
-            },
+            view.observe(\.url, options: [.new]) { webView, _ in sync(webView) },
+            view.observe(\.canGoBack, options: [.new]) { webView, _ in sync(webView) },
+            view.observe(\.canGoForward, options: [.new]) { webView, _ in sync(webView) },
         ]
     }
 
