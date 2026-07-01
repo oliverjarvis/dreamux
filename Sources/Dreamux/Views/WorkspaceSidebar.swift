@@ -122,7 +122,7 @@ struct WorkspaceSidebar: View {
             PinnedTileGrid(
                 tiles: $layout.tiles,
                 isSelected: { $0 == .signals && sidebarMode == .signals },
-                isEnabled: { tile in tile == .browser ? !store.workspaces.isEmpty : true },
+                isEnabled: { _ in true },
                 onTap: handleTileTap,
                 onReorder: { layout.persistTiles() }
             )
@@ -172,14 +172,14 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// Open the workspace's browser tab at the hardcoded homepage,
-    /// switching to it. `openWebTab` dedups by the tab's home URL, so a
-    /// workspace keeps a single browser tab that this re-focuses rather
-    /// than stacking duplicates. Web tabs live inside a feature's Bonsplit
-    /// pane, so this needs a workspace to land in — the grid tile is
-    /// disabled when there are none.
+    /// Open a browser tab at the hardcoded homepage, switching to it.
+    /// `openWebTab` dedups by the tab's home URL, so a workspace keeps a
+    /// single browser tab that this re-focuses rather than stacking
+    /// duplicates. Web tabs live inside a workspace's Bonsplit pane, so if
+    /// there's no workspace yet we spin up a scratch one (same as ⌘⇧T)
+    /// rather than leaving the tile inert.
     private func openBrowserTab() {
-        guard let workspace = store.activeWorkspace ?? store.workspaces.first else { return }
+        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
         store.activate(workspace.id)
         sidebarMode = .workspace
         store.session(for: workspace).openWebTab(url: Self.browserHomepage, title: "Browser")
