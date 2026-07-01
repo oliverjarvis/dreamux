@@ -2,9 +2,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Work Items column of a project window (the `content` column of the
-/// window's NavigationSplitView). Rendered in a grouped "inset card" style:
-/// Signals, Features, and Repositories each live in their own rounded card,
-/// feature rows are divided by hairlines and led by a soft tinted badge.
+/// window's NavigationSplitView). Top: an Arc-style `PinnedTileGrid` of
+/// pinned tiles (Signals + Web Browser), drag-reorderable. Below: the
+/// Features list as flat, drag-reorderable rows led by a soft tinted badge,
+/// then the Repositories card.
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
@@ -171,15 +172,17 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// Open a fresh browser tab (hardcoded homepage) in the active
-    /// feature's pane, switching to it. Web tabs live inside a feature's
-    /// Bonsplit pane, so this needs a workspace to land in — the grid
-    /// tile is disabled when there are none.
+    /// Open the workspace's browser tab at the hardcoded homepage,
+    /// switching to it. `openWebTab` dedups by the tab's home URL, so a
+    /// workspace keeps a single browser tab that this re-focuses rather
+    /// than stacking duplicates. Web tabs live inside a feature's Bonsplit
+    /// pane, so this needs a workspace to land in — the grid tile is
+    /// disabled when there are none.
     private func openBrowserTab() {
         guard let workspace = store.activeWorkspace ?? store.workspaces.first else { return }
         store.activate(workspace.id)
         sidebarMode = .workspace
-        store.session(for: workspace).openWebTab(url: Self.browserHomepage, title: "New Tab")
+        store.session(for: workspace).openWebTab(url: Self.browserHomepage, title: "Browser")
     }
 
     private func featureRowBody(_ workspace: Workspace) -> some View {
