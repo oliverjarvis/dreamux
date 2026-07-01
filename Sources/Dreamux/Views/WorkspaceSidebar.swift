@@ -130,7 +130,13 @@ struct WorkspaceSidebar: View {
                                 }
                                 featureRow(workspace) { featureRowBody(workspace) }
                             }
-                            Divider().padding(.leading, 46)
+                            // Separator between the feature rows and the
+                            // Add Feature button — only when there are rows
+                            // above it, otherwise it renders as an orphaned
+                            // inset line at the top of the card.
+                            if !store.workspaces.isEmpty {
+                                Divider().padding(.leading, 46)
+                            }
                             addFeatureButton
                                 .padding(.horizontal, 2)
                                 .padding(.vertical, 2)
