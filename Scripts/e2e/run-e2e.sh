@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end harness entry point for Clayspace.
+# End-to-end harness entry point for Dreamux.
 #
 # Builds the app bundle, prepares a throwaway sandbox (projects root,
 # state dir, seeded git repos from the fixture sample apps), then hands
@@ -28,7 +28,7 @@ mkdir -p "$ARTIFACTS"
 
 # The unix socket path must stay short (Darwin caps sun_path at ~103
 # bytes), so it lives in /tmp rather than inside the mktemp sandbox.
-SOCKET="/tmp/clayspace-e2e-$$.sock"
+SOCKET="/tmp/dreamux-e2e-$$.sock"
 
 PROJECT_NAME="demo-project"
 mkdir -p "$SANDBOX/projects/$PROJECT_NAME" "$SANDBOX/state" "$SANDBOX/seed"
@@ -42,24 +42,24 @@ seed_repo() {
     local src="$ROOT/Tests/Fixtures/sample-apps/$name"
     local dst="$SANDBOX/seed/$name"
     mkdir -p "$dst"
-    cp "$src/server.py" "$src/clayspace-runner.snippet.toml" "$dst/"
+    cp "$src/server.py" "$src/dreamux-runner.snippet.toml" "$dst/"
     git -C "$dst" init --quiet --initial-branch=main
     git -C "$dst" add -A
     git -C "$dst" \
-        -c user.name='Clayspace E2E' \
-        -c user.email='e2e@clayspace.local' \
+        -c user.name='Dreamux E2E' \
+        -c user.email='e2e@dreamux.local' \
         commit --quiet -m "seed $name fixture"
 }
 seed_repo portenv-server
 seed_repo fixedport-server
 
 export ARTIFACTS
-export E2E_APP_BINARY="$ROOT/Clayspace.app/Contents/MacOS/Clayspace"
+export E2E_APP_BINARY="$ROOT/Dreamux.app/Contents/MacOS/Dreamux"
 export E2E_SANDBOX="$SANDBOX"
 export E2E_SOCKET="$SOCKET"
 export E2E_SEED_DIR="$SANDBOX/seed"
 export E2E_PROJECT_NAME="$PROJECT_NAME"
-export CLAYSPACE_CLAUDE_BIN="$ROOT/Tests/Fixtures/bin/claude"
-export CLAYSPACE_GH_BIN="$ROOT/Tests/Fixtures/bin/gh"
+export DREAMUX_CLAUDE_BIN="$ROOT/Tests/Fixtures/bin/claude"
+export DREAMUX_GH_BIN="$ROOT/Tests/Fixtures/bin/gh"
 
 exec python3 "$ROOT/Scripts/e2e/driver.py"

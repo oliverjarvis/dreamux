@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clayspace test fixture: an HTTP server that reads its port from
+"""Dreamux test fixture: an HTTP server that reads its port from
 PORTENV_SERVER_PORT (default 4600). Counterpart to fixedport-server,
 which hardcodes its port — together they exercise both sides of the
 Run pane's port-isolation story.

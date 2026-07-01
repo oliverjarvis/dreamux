@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""fake skills — Clayspace's test stand-in for `npx -y skills`.
+"""fake skills — Dreamux's test stand-in for `npx -y skills`.
 
-Pointed at via CLAYSPACE_SKILLS_BIN so SkillsCLI/SkillsStore tests and
+Pointed at via DREAMUX_SKILLS_BIN so SkillsCLI/SkillsStore tests and
 the e2e harness exercise install/list/remove/update with no network
 and no node. Maintains real `.agents/skills/<name>/SKILL.md` dirs under
 a "scope root": the cwd for project scope, $SKILLS_FAKE_GLOBAL_DIR for

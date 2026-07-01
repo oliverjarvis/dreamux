@@ -4,7 +4,7 @@
 
 **Goal:** A read-only in-app browser for the superpowers documents (`docs/superpowers/specs/*.md`, `docs/superpowers/plans/*.md`) across every worktree of every repo in a project, reached via a "Specs & Plans" sidebar tile.
 
-**Architecture:** A new `DocStore` model scans worktrees with plain FileManager calls (the worktree directory name is the branch name in the Clayspace bare-repo layout) and dedupes copies of the same file across worktrees. A new `DocsBrowserView` renders a master list + MarkdownUI detail pane, swapped in via a new `SidebarMode.docs` case — the exact pattern `SignalsView` uses. E2E support follows the existing registry/bridge conventions (`listDocs` command, `"docs"` sidebar mode).
+**Architecture:** A new `DocStore` model scans worktrees with plain FileManager calls (the worktree directory name is the branch name in the Dreamux bare-repo layout) and dedupes copies of the same file across worktrees. A new `DocsBrowserView` renders a master list + MarkdownUI detail pane, swapped in via a new `SidebarMode.docs` case — the exact pattern `SignalsView` uses. E2E support follows the existing registry/bridge conventions (`listDocs` command, `"docs"` sidebar mode).
 
 **Tech Stack:** Swift 6 / SwiftUI (macOS 14), swift-markdown-ui 2.4.1 (new SPM dependency), XCTest with `TestSandbox`/`GitFixtures` (real git repos, no mocks), Python e2e driver.
 
@@ -16,15 +16,15 @@
 
 | File | Status | Responsibility |
 |---|---|---|
-| `Sources/Clayspace/Models/DocStore.swift` | Create | `DocKind`/`DocProgress`/`DocEntry` types, parsing helpers, worktree scan + dedupe |
-| `Sources/Clayspace/Views/DocsBrowserView.swift` | Create | Master-detail browser UI (list + MarkdownUI rendering) |
-| `Tests/ClayspaceTests/DocStoreParsingTests.swift` | Create | Pure-parsing unit tests (no filesystem) |
-| `Tests/ClayspaceTests/DocStoreScanTests.swift` | Create | Scan/dedupe tests over real sandbox repos |
+| `Sources/Dreamux/Models/DocStore.swift` | Create | `DocKind`/`DocProgress`/`DocEntry` types, parsing helpers, worktree scan + dedupe |
+| `Sources/Dreamux/Views/DocsBrowserView.swift` | Create | Master-detail browser UI (list + MarkdownUI rendering) |
+| `Tests/DreamuxTests/DocStoreParsingTests.swift` | Create | Pure-parsing unit tests (no filesystem) |
+| `Tests/DreamuxTests/DocStoreScanTests.swift` | Create | Scan/dedupe tests over real sandbox repos |
 | `Package.swift` | Modify | Add swift-markdown-ui dependency |
-| `Sources/Clayspace/Views/ContentView.swift` | Modify | `SidebarMode.docs`, `DocStore` creation, main-pane case, registry call |
-| `Sources/Clayspace/Views/WorkspaceSidebar.swift` | Modify | "Specs & Plans" tile, exhaustive-switch update |
-| `Sources/Clayspace/E2E/E2ERegistry.swift` | Modify | `docs` handle on `E2EProjectHandles`, `registerRunStores` param |
-| `Sources/Clayspace/E2E/E2ECommands.swift` | Modify | `"docs"` mode name + `setSidebarMode` case, `listDocs` command |
+| `Sources/Dreamux/Views/ContentView.swift` | Modify | `SidebarMode.docs`, `DocStore` creation, main-pane case, registry call |
+| `Sources/Dreamux/Views/WorkspaceSidebar.swift` | Modify | "Specs & Plans" tile, exhaustive-switch update |
+| `Sources/Dreamux/E2E/E2ERegistry.swift` | Modify | `docs` handle on `E2EProjectHandles`, `registerRunStores` param |
+| `Sources/Dreamux/E2E/E2ECommands.swift` | Modify | `"docs"` mode name + `setSidebarMode` case, `listDocs` command |
 | `Scripts/e2e/PROTOCOL.md` | Modify | Document `"docs"` mode and `listDocs` |
 | `Scripts/e2e/driver.py` | Modify | `docs-browser` scenario |
 
@@ -35,16 +35,16 @@ All builds and tests run from the repo root: `/Users/olliejarvis/Development/cla
 ### Task 1: DocStore types and parsing helpers
 
 **Files:**
-- Create: `Sources/Clayspace/Models/DocStore.swift`
-- Test: `Tests/ClayspaceTests/DocStoreParsingTests.swift`
+- Create: `Sources/Dreamux/Models/DocStore.swift`
+- Test: `Tests/DreamuxTests/DocStoreParsingTests.swift`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `Tests/ClayspaceTests/DocStoreParsingTests.swift`:
+Create `Tests/DreamuxTests/DocStoreParsingTests.swift`:
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 /// Pure-parsing coverage for `DocStore`'s static helpers — no
 /// filesystem. Scan/dedupe behavior over real worktrees lives in
@@ -118,7 +118,7 @@ Expected: FAIL to compile with `cannot find 'DocStore' in scope`
 
 - [ ] **Step 3: Create DocStore.swift with types and parsing (no scan yet)**
 
-Create `Sources/Clayspace/Models/DocStore.swift`:
+Create `Sources/Dreamux/Models/DocStore.swift`:
 
 ```swift
 import Foundation
@@ -140,7 +140,7 @@ struct DocProgress: Hashable, Sendable {
 struct DocEntry: Identifiable, Hashable, Sendable {
     let kind: DocKind
     let repoName: String
-    /// Branch whose copy we surfaced — in the Clayspace layout a
+    /// Branch whose copy we surfaced — in the Dreamux layout a
     /// worktree directory is named after its branch.
     let branch: String
     /// True when `branch` is the repo's default branch; the UI only
@@ -170,7 +170,7 @@ struct DocEntry: Identifiable, Hashable, Sendable {
 @Observable
 final class DocStore {
     /// Folder conventions the superpowers skills write into. A future
-    /// `.clayspace` override would land here.
+    /// `.dreamux` override would land here.
     static let folders: [(kind: DocKind, relativePath: String)] = [
         (.spec, "docs/superpowers/specs"),
         (.plan, "docs/superpowers/plans"),
@@ -237,7 +237,7 @@ Expected: PASS, 8 tests
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Models/DocStore.swift Tests/ClayspaceTests/DocStoreParsingTests.swift
+git add Sources/Dreamux/Models/DocStore.swift Tests/DreamuxTests/DocStoreParsingTests.swift
 git commit -m "Add DocStore document parsing (title, date prefix, checkbox tally)" \
            -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -247,18 +247,18 @@ git commit -m "Add DocStore document parsing (title, date prefix, checkbox tally
 ### Task 2: Worktree scan and dedupe
 
 **Files:**
-- Modify: `Sources/Clayspace/Models/DocStore.swift` (add `refresh` between the `entries` property and the `// MARK: - Parsing` section)
-- Test: `Tests/ClayspaceTests/DocStoreScanTests.swift`
+- Modify: `Sources/Dreamux/Models/DocStore.swift` (add `refresh` between the `entries` property and the `// MARK: - Parsing` section)
+- Test: `Tests/DreamuxTests/DocStoreScanTests.swift`
 
-Background for the tests: `GitFixtures.makeBareLayoutRepo(in:name:files:)` builds the Clayspace `repos/<name>/{.bare, main}` layout and commits `files` (relative paths, intermediate dirs created) in the `main` worktree, returning a `Repository`. `GitOperations.addWorktree(in: repo.rootURL, branch:)` adds a worktree directory named after the branch, checked out from the default branch's tip — so its files start byte-identical to main's.
+Background for the tests: `GitFixtures.makeBareLayoutRepo(in:name:files:)` builds the Dreamux `repos/<name>/{.bare, main}` layout and commits `files` (relative paths, intermediate dirs created) in the `main` worktree, returning a `Repository`. `GitOperations.addWorktree(in: repo.rootURL, branch:)` adds a worktree directory named after the branch, checked out from the default branch's tip — so its files start byte-identical to main's.
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `Tests/ClayspaceTests/DocStoreScanTests.swift`:
+Create `Tests/DreamuxTests/DocStoreScanTests.swift`:
 
 ```swift
 import XCTest
-@testable import Clayspace
+@testable import Dreamux
 
 /// Scan/dedupe behavior over real bare-layout repos in a per-test
 /// `TestSandbox` — real worktrees, no mocks, mirroring
@@ -271,10 +271,10 @@ final class DocStoreScanTests: XCTestCase {
     override func setUp() async throws {
         // Keep fixture commits working on machines with no global git
         // identity (same env trick as FeatureProvisionerTests).
-        setenv("GIT_AUTHOR_NAME", "Clayspace Tests", 1)
-        setenv("GIT_AUTHOR_EMAIL", "tests@clayspace.local", 1)
-        setenv("GIT_COMMITTER_NAME", "Clayspace Tests", 1)
-        setenv("GIT_COMMITTER_EMAIL", "tests@clayspace.local", 1)
+        setenv("GIT_AUTHOR_NAME", "Dreamux Tests", 1)
+        setenv("GIT_AUTHOR_EMAIL", "tests@dreamux.local", 1)
+        setenv("GIT_COMMITTER_NAME", "Dreamux Tests", 1)
+        setenv("GIT_COMMITTER_EMAIL", "tests@dreamux.local", 1)
         sandbox = try TestSandbox()
         project = try sandbox.makeProject(named: "proj")
     }
@@ -425,7 +425,7 @@ Expected: FAIL to compile with `value of type 'DocStore' has no member 'refresh'
 
 - [ ] **Step 3: Add `refresh` to DocStore**
 
-In `Sources/Clayspace/Models/DocStore.swift`, insert between `private(set) var entries: [DocEntry] = []` and `// MARK: - Parsing`:
+In `Sources/Dreamux/Models/DocStore.swift`, insert between `private(set) var entries: [DocEntry] = []` and `// MARK: - Parsing`:
 
 ```swift
     /// Rescan the given repos. One entry per (repo, relative path):
@@ -521,7 +521,7 @@ Expected: still PASS, 8 tests
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Models/DocStore.swift Tests/ClayspaceTests/DocStoreScanTests.swift
+git add Sources/Dreamux/Models/DocStore.swift Tests/DreamuxTests/DocStoreScanTests.swift
 git commit -m "Scan worktrees for superpowers docs with cross-worktree dedupe" \
            -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -557,7 +557,7 @@ and the executable target's `dependencies` to:
                 .product(name: "GhosttyTheme", package: "libghostty-spm"),
                 .product(name: "Bonsplit", package: "bonsplit"),
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
-                "ClayspacePTY",
+                "DreamuxPTY",
             ],
 ```
 
@@ -579,13 +579,13 @@ git commit -m "Add swift-markdown-ui for in-app markdown rendering" \
 ### Task 4: DocsBrowserView
 
 **Files:**
-- Create: `Sources/Clayspace/Views/DocsBrowserView.swift`
+- Create: `Sources/Dreamux/Views/DocsBrowserView.swift`
 
 No unit test — it's pure SwiftUI layout; behavior is covered by the DocStore tests (Tasks 1–2) and the e2e scenario (Task 7) including a screenshot.
 
 - [ ] **Step 1: Create the view**
 
-Create `Sources/Clayspace/Views/DocsBrowserView.swift`:
+Create `Sources/Dreamux/Views/DocsBrowserView.swift`:
 
 ```swift
 import AppKit
@@ -789,7 +789,7 @@ Expected: `Build complete!` (the view compiles; nothing references it yet)
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/DocsBrowserView.swift
+git add Sources/Dreamux/Views/DocsBrowserView.swift
 git commit -m "Add DocsBrowserView master-detail markdown browser" \
            -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -801,14 +801,14 @@ git commit -m "Add DocsBrowserView master-detail markdown browser" \
 `SidebarMode` is switched exhaustively in three places (`WorkspaceSidebar.isWorkspaceActive`, `FeaturesDetail.mainPane`, `E2ECommands.sidebarModeName`), so the new case and all switch updates must land in one task or the build breaks.
 
 **Files:**
-- Modify: `Sources/Clayspace/Views/ContentView.swift:49-57` (SidebarMode), `:65-98` (FeaturesDetail init), `:117-126` (registry call), `:153-170` (mainPane)
-- Modify: `Sources/Clayspace/Views/WorkspaceSidebar.swift:18-27` (body), `:116-127` (tiles), `:176-183` (isWorkspaceActive)
-- Modify: `Sources/Clayspace/E2E/E2ERegistry.swift:39-52` (handles), `:92-103` (registerRunStores)
-- Modify: `Sources/Clayspace/E2E/E2ECommands.swift:195-201` (sidebarModeName), `:302-330` (setSidebarMode)
+- Modify: `Sources/Dreamux/Views/ContentView.swift:49-57` (SidebarMode), `:65-98` (FeaturesDetail init), `:117-126` (registry call), `:153-170` (mainPane)
+- Modify: `Sources/Dreamux/Views/WorkspaceSidebar.swift:18-27` (body), `:116-127` (tiles), `:176-183` (isWorkspaceActive)
+- Modify: `Sources/Dreamux/E2E/E2ERegistry.swift:39-52` (handles), `:92-103` (registerRunStores)
+- Modify: `Sources/Dreamux/E2E/E2ECommands.swift:195-201` (sidebarModeName), `:302-330` (setSidebarMode)
 
 - [ ] **Step 1: Add the SidebarMode case**
 
-In `Sources/Clayspace/Views/ContentView.swift`, replace the `SidebarMode` enum and its doc comment:
+In `Sources/Dreamux/Views/ContentView.swift`, replace the `SidebarMode` enum and its doc comment:
 
 ```swift
 /// Sidebar-pane swap inside the Features section. `.workspace` shows the
@@ -849,7 +849,7 @@ In `FeaturesDetail.mainPane`, add after the `.signals` case:
 
 - [ ] **Step 4: Register the store with the e2e registry**
 
-In `Sources/Clayspace/E2E/E2ERegistry.swift`, add to `E2EProjectHandles` below `weak var signals: SignalStore?`:
+In `Sources/Dreamux/E2E/E2ERegistry.swift`, add to `E2EProjectHandles` below `weak var signals: SignalStore?`:
 
 ```swift
     weak var docs: DocStore?
@@ -888,7 +888,7 @@ Then in `ContentView.swift`'s `FeaturesDetail.body.onAppear`, update the call:
 
 - [ ] **Step 5: Update the two switches in E2ECommands**
 
-In `Sources/Clayspace/E2E/E2ECommands.swift`, `sidebarModeName`:
+In `Sources/Dreamux/E2E/E2ECommands.swift`, `sidebarModeName`:
 
 ```swift
     private static func sidebarModeName(_ mode: SidebarMode) -> String {
@@ -916,7 +916,7 @@ and update the `default:` error message to:
 
 - [ ] **Step 6: Add the sidebar tile**
 
-In `Sources/Clayspace/Views/WorkspaceSidebar.swift`, in `body`'s `VStack`, add `docsTile` directly under `signalsTile`:
+In `Sources/Dreamux/Views/WorkspaceSidebar.swift`, in `body`'s `VStack`, add `docsTile` directly under `signalsTile`:
 
 ```swift
                 signalsTile
@@ -956,10 +956,10 @@ Expected: PASS — all existing tests plus the 14 DocStore tests
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/ContentView.swift \
-        Sources/Clayspace/Views/WorkspaceSidebar.swift \
-        Sources/Clayspace/E2E/E2ERegistry.swift \
-        Sources/Clayspace/E2E/E2ECommands.swift
+git add Sources/Dreamux/Views/ContentView.swift \
+        Sources/Dreamux/Views/WorkspaceSidebar.swift \
+        Sources/Dreamux/E2E/E2ERegistry.swift \
+        Sources/Dreamux/E2E/E2ECommands.swift
 git commit -m "Wire the Specs & Plans pane behind a new SidebarMode.docs" \
            -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -969,7 +969,7 @@ git commit -m "Wire the Specs & Plans pane behind a new SidebarMode.docs" \
 ### Task 6: `listDocs` e2e command and protocol doc
 
 **Files:**
-- Modify: `Sources/Clayspace/E2E/E2ECommands.swift:50-91` (dispatch) and the `// MARK: - Repos & features` area
+- Modify: `Sources/Dreamux/E2E/E2ECommands.swift:50-91` (dispatch) and the `// MARK: - Repos & features` area
 - Modify: `Scripts/e2e/PROTOCOL.md:206-217` (setSidebarMode section) plus a new section after it
 
 - [ ] **Step 1: Add the command**
@@ -1061,7 +1061,7 @@ Expected: `Build complete!`
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Sources/Clayspace/E2E/E2ECommands.swift Scripts/e2e/PROTOCOL.md
+git add Sources/Dreamux/E2E/E2ECommands.swift Scripts/e2e/PROTOCOL.md
 git commit -m "Add listDocs automation command" \
            -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```

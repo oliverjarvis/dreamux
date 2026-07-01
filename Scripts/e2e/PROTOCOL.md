@@ -1,42 +1,42 @@
-# Clayspace e2e automation protocol
+# Dreamux e2e automation protocol
 
-Clayspace ships an in-app automation server for end-to-end testing. It
+Dreamux ships an in-app automation server for end-to-end testing. It
 is compiled into every build but is **completely inert** unless the
-`CLAYSPACE_E2E_SOCKET` environment variable is set at launch. It uses
+`DREAMUX_E2E_SOCKET` environment variable is set at launch. It uses
 **zero system permissions** — no Accessibility, no Screen Recording —
 because every command runs inside the app process against its own
 stores, and screenshots are rendered in-process via AppKit's
 `cacheDisplay`.
 
-Implementation lives in `Sources/Clayspace/E2E/` (`E2EServer.swift`
+Implementation lives in `Sources/Dreamux/E2E/` (`E2EServer.swift`
 for the socket, `E2ECommands.swift` for command semantics,
 `E2ERegistry.swift` for the store registry + UI bridge). Keep this
 document in lockstep with `E2ECommands.swift`.
 
 ## Environment contract
 
-Set these on the app process (e.g. when launching `Clayspace.app`'s
+Set these on the app process (e.g. when launching `Dreamux.app`'s
 executable directly, or via `open --env`):
 
 | Variable | Effect |
 | --- | --- |
-| `CLAYSPACE_E2E_SOCKET` | **The master switch.** Absolute path for the Unix domain socket the server binds. When set: the server starts before any window appears, and the launch-time notification-permission prompt is skipped (no dialogs mid-run). When unset, no e2e code runs at all. Keep the path short (Darwin caps `sun_path` at ~103 bytes — use `/tmp/...`, not a deep `$TMPDIR`). A stale socket file at this path is unlinked at startup. |
-| `CLAYSPACE_E2E_AUTOOPEN` | Folder name of a project to open a window for right after launch. The launch gate looks the name up in the projects root and opens that project's window directly, so drivers don't have to script project selection. Must match the project's directory name exactly. |
-| `CLAYSPACE_PROJECTS_ROOT` | Replaces `~/Documents/Clayspace` as the directory projects are discovered in / created under. Created on demand. Point it at a per-run sandbox so the user's real projects are never touched. |
-| `CLAYSPACE_STATE_DIR` | Replaces `~/Library/Application Support/Clayspace` as the home of `projects.json`. Point it at a per-run sandbox. |
-| `CLAYSPACE_CLAUDE_BIN` | Absolute path to the `claude` binary the Run pane's Detect / Isolate / Diagnose buttons paste into their embedded terminal (it is shell-quoted for you). Point it at `Tests/Fixtures/bin/claude` for deterministic agent behavior regardless of the user's PATH/zshrc. When unset, the bare word `claude` is used. |
-| `CLAYSPACE_GH_BIN` | Absolute path to the `gh` binary used by the merge sheet's "Create PR" path (`publishFeature`, `featurePRStatus`, and the sheet's own PR pre-check/polling). Point it at `Tests/Fixtures/bin/gh` — a fake that works against a **local bare repo as origin**, storing PR records inside the remote under `fake-prs/<branch>.json` and deriving MERGED from ref ancestry — so PR scenarios run with no network and no GitHub account. When unset, `gh` from PATH is used. |
+| `DREAMUX_E2E_SOCKET` | **The master switch.** Absolute path for the Unix domain socket the server binds. When set: the server starts before any window appears, and the launch-time notification-permission prompt is skipped (no dialogs mid-run). When unset, no e2e code runs at all. Keep the path short (Darwin caps `sun_path` at ~103 bytes — use `/tmp/...`, not a deep `$TMPDIR`). A stale socket file at this path is unlinked at startup. |
+| `DREAMUX_E2E_AUTOOPEN` | Folder name of a project to open a window for right after launch. The launch gate looks the name up in the projects root and opens that project's window directly, so drivers don't have to script project selection. Must match the project's directory name exactly. |
+| `DREAMUX_PROJECTS_ROOT` | Replaces `~/Documents/Dreamux` as the directory projects are discovered in / created under. Created on demand. Point it at a per-run sandbox so the user's real projects are never touched. |
+| `DREAMUX_STATE_DIR` | Replaces `~/Library/Application Support/Dreamux` as the home of `projects.json`. Point it at a per-run sandbox. |
+| `DREAMUX_CLAUDE_BIN` | Absolute path to the `claude` binary the Run pane's Detect / Isolate / Diagnose buttons paste into their embedded terminal (it is shell-quoted for you). Point it at `Tests/Fixtures/bin/claude` for deterministic agent behavior regardless of the user's PATH/zshrc. When unset, the bare word `claude` is used. |
+| `DREAMUX_GH_BIN` | Absolute path to the `gh` binary used by the merge sheet's "Create PR" path (`publishFeature`, `featurePRStatus`, and the sheet's own PR pre-check/polling). Point it at `Tests/Fixtures/bin/gh` — a fake that works against a **local bare repo as origin**, storing PR records inside the remote under `fake-prs/<branch>.json` and deriving MERGED from ref ancestry — so PR scenarios run with no network and no GitHub account. When unset, `gh` from PATH is used. |
 
 A typical harness launch:
 
 ```sh
-CLAYSPACE_E2E_SOCKET=/tmp/clayspace-e2e.sock \
-CLAYSPACE_E2E_AUTOOPEN=demo \
-CLAYSPACE_PROJECTS_ROOT=/tmp/clayspace-e2e/projects \
-CLAYSPACE_STATE_DIR=/tmp/clayspace-e2e/state \
-CLAYSPACE_CLAUDE_BIN="$REPO/Tests/Fixtures/bin/claude" \
-CLAYSPACE_GH_BIN="$REPO/Tests/Fixtures/bin/gh" \
-  ./Clayspace.app/Contents/MacOS/Clayspace
+DREAMUX_E2E_SOCKET=/tmp/dreamux-e2e.sock \
+DREAMUX_E2E_AUTOOPEN=demo \
+DREAMUX_PROJECTS_ROOT=/tmp/dreamux-e2e/projects \
+DREAMUX_STATE_DIR=/tmp/dreamux-e2e/state \
+DREAMUX_CLAUDE_BIN="$REPO/Tests/Fixtures/bin/claude" \
+DREAMUX_GH_BIN="$REPO/Tests/Fixtures/bin/gh" \
+  ./Dreamux.app/Contents/MacOS/Dreamux
 ```
 
 The socket is bound very early (in the SwiftUI `App` initializer), but
@@ -45,7 +45,7 @@ spawning the process before declaring failure.
 
 ## Wire format
 
-- Unix domain stream socket at `$CLAYSPACE_E2E_SOCKET`.
+- Unix domain stream socket at `$DREAMUX_E2E_SOCKET`.
 - **Newline-delimited JSON**, one command per line: the client writes
   a single-line JSON object terminated by `\n`, the server writes back
   a single-line JSON object terminated by `\n`. No length prefixes, no
@@ -67,7 +67,7 @@ Python one-liner smoke test:
 
 ```python
 import socket, json
-s = socket.socket(socket.AF_UNIX); s.connect("/tmp/clayspace-e2e.sock")
+s = socket.socket(socket.AF_UNIX); s.connect("/tmp/dreamux-e2e.sock")
 s.sendall(json.dumps({"cmd": "ping"}).encode() + b"\n")
 print(s.makefile().readline())   # -> {"ok":true}
 ```
@@ -77,7 +77,7 @@ print(s.makefile().readline())   # -> {"ok":true}
 Commands that touch project state operate on **the most recently
 opened project window** (registered when its window appears,
 unregistered when it disappears). Single-window runs — the normal e2e
-shape, via `CLAYSPACE_E2E_AUTOOPEN` — never notice. Commands fail with
+shape, via `DREAMUX_E2E_AUTOOPEN` — never notice. Commands fail with
 `ok:false` and a descriptive `error` when no project window has been
 registered yet, so the driver can poll `state` (or just `ping` +
 retry) until the auto-opened window is up.
@@ -105,7 +105,7 @@ Snapshot of everything a scenario typically asserts on.
 ← {
     "ok": true,
     "projects": [
-      {"id":"4B5C…","name":"demo","path":"/tmp/clayspace-e2e/projects/demo"}
+      {"id":"4B5C…","name":"demo","path":"/tmp/dreamux-e2e/projects/demo"}
     ],
     "activeProject": {"id":"4B5C…","name":"demo","path":"…/demo"},
     "workspaces": [
@@ -173,8 +173,8 @@ UI chrome and its state (badges, rows, buttons), not pixel-perfect
 window compositing or terminal contents.
 
 ```
-→ {"cmd":"screenshot","path":"/tmp/clayspace-e2e/shots/01-sidebar.png"}
-← {"ok":true,"path":"/tmp/clayspace-e2e/shots/01-sidebar.png","width":2456,"height":1234}
+→ {"cmd":"screenshot","path":"/tmp/dreamux-e2e/shots/01-sidebar.png"}
+← {"ok":true,"path":"/tmp/dreamux-e2e/shots/01-sidebar.png","width":2456,"height":1234}
 ```
 
 ### `addLocalRepo`
@@ -277,7 +277,7 @@ runner on `RunnerManager.pendingIsolation` and switches the sidebar to
 Run mode (scoped to the workspace matching the runner's current
 branch when one exists). The Run pane consumes the pending isolation
 on appearance and sends the isolate prompt to the `claude` CLI
-(`CLAYSPACE_CLAUDE_BIN`) in its embedded terminal. The reply does
+(`DREAMUX_CLAUDE_BIN`) in its embedded terminal. The reply does
 **not** wait for the agent — poll the repo/`run.toml` on disk (or
 `reloadRunConfig` + `state`) for the isolation to land.
 
@@ -291,7 +291,7 @@ on appearance and sends the isolate prompt to the `claude` CLI
 Click the Run pane's **Detect Run Config** button: switches the
 sidebar to Run mode and has the pane send the detect prompt to the
 `claude` CLI in its embedded terminal. Like `isolateRunner`, the reply
-does not wait for the agent — poll for `.clayspace/run.toml`, then
+does not wait for the agent — poll for `.dreamux/run.toml`, then
 call `reloadRunConfig`.
 
 ```
@@ -301,7 +301,7 @@ call `reloadRunConfig`.
 
 ### `reloadRunConfig`
 
-Re-read `<project>/.clayspace/run.toml` from disk and re-parse the
+Re-read `<project>/.dreamux/run.toml` from disk and re-parse the
 runner list (the Run pane's refresh button).
 
 ```
@@ -342,7 +342,7 @@ as idempotent as re-clicking the button after a sheet re-open.
 
 Fails on the same verdicts that hide/disable the sheet's button: the
 repo has no `origin` remote, or no `gh` CLI is reachable (point
-`CLAYSPACE_GH_BIN` at `Tests/Fixtures/bin/gh`). Also fails when there
+`DREAMUX_GH_BIN` at `Tests/Fixtures/bin/gh`). Also fails when there
 is nothing to publish (zero commits ahead of base), when the worktree
 is missing, or when the push/PR creation itself errors.
 
@@ -436,7 +436,7 @@ The connection stays usable after an error.
 
 ## Driver checklist
 
-1. Make per-run sandbox dirs; seed `$CLAYSPACE_PROJECTS_ROOT/<project>`
+1. Make per-run sandbox dirs; seed `$DREAMUX_PROJECTS_ROOT/<project>`
    (an empty dir is a valid project) and any local repos to import.
 2. Launch the app with the env vars above; retry-connect to the
    socket; `ping` until ok.

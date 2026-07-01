@@ -10,7 +10,7 @@ The superpowers plugin writes design specs to
 plans to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md` inside each
 repo (this repo itself follows the convention). Plans carry a rigid,
 parseable structure: `### Task N:` sections with `- [ ]` checkbox
-steps. Today Clayspace has no way to see these documents — reading a
+steps. Today Dreamux has no way to see these documents — reading a
 spec means finding the right worktree in Finder and opening an editor.
 
 This is phase 1 of a three-phase superpowers integration:
@@ -43,7 +43,7 @@ Approaches considered:
   GitHub-flavored markdown including task-list checkboxes (the plan
   format), code blocks, and tables; follows dark mode for free.
 - **Rendering B — WKWebView + vendored marked.js:** avoids the SPM
-  dependency (Clayspace is deliberately dependency-lean) but costs HTML
+  dependency (Dreamux is deliberately dependency-lean) but costs HTML
   theming, JS bundling, and a heavier view for a text pane.
 - **Rendering C — `AttributedString(markdown:)`:** no dependency but no
   task lists, tables, or heading hierarchy — too weak for plan files.
@@ -55,7 +55,7 @@ Approaches considered:
 - Scans every worktree of every repo in the project for
   `docs/superpowers/specs/*.md` and `docs/superpowers/plans/*.md`. The
   two relative paths are constants in `DocStore` — superpowers' own
-  skills declare them as defaults, and a future `.clayspace` override
+  skills declare them as defaults, and a future `.dreamux` override
   can land in one place.
 - Produces `DocEntry` values:
   - `kind` — `.spec` or `.plan`, from the containing folder

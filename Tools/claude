@@ -1,21 +1,21 @@
 #!/bin/sh
-# claude — Clayspace's PATH shim. Bundled at
-# Clayspace.app/Contents/Resources/bin/ and prepended to spawned shells'
-# PATH, so typing `claude` in a Clayspace tab hits us first instead of
+# claude — Dreamux's PATH shim. Bundled at
+# Dreamux.app/Contents/Resources/bin/ and prepended to spawned shells'
+# PATH, so typing `claude` in a Dreamux tab hits us first instead of
 # the real binary.
 #
 # Each invocation we:
 #   1. Resolve the real `claude` (walking PATH, skipping our own dir).
 #   2. Build an inline `--settings` JSON pointing Stop/Notification
-#      hooks at `clayspace-hook` (the sibling script).
+#      hooks at `dreamux-hook` (the sibling script).
 #   3. exec the real claude with --settings <json> "$@".
 #
-# Result: notifications work in any Clayspace tab without writing a
+# Result: notifications work in any Dreamux tab without writing a
 # single byte to ~/.claude/settings.json or any project's .claude/.
-# Outside Clayspace, vanilla `claude` keeps working as normal.
+# Outside Dreamux, vanilla `claude` keeps working as normal.
 #
 # Opt-out:
-#   CLAYSPACE_CLAUDE_INTEGRATION=0  →  pass through unmodified.
+#   DREAMUX_CLAUDE_INTEGRATION=0  →  pass through unmodified.
 #
 # Fallbacks: any unexpected condition (real claude missing, hook script
 # missing, opt-out flag set) reverts to a clean exec of real claude.
@@ -40,7 +40,7 @@ IFS="$OLD_IFS"
 
 if [ -z "$REAL_CLAUDE" ]; then
     cat >&2 <<MSG
-clayspace: 'claude' isn't installed.
+dreamux: 'claude' isn't installed.
 
 Install it (https://docs.anthropic.com/claude-code) and try again, e.g.:
 
@@ -51,11 +51,11 @@ MSG
 fi
 
 # Opt-out
-if [ "${CLAYSPACE_CLAUDE_INTEGRATION:-1}" = "0" ]; then
+if [ "${DREAMUX_CLAUDE_INTEGRATION:-1}" = "0" ]; then
     exec "$REAL_CLAUDE" "$@"
 fi
 
-HOOK="$SELF_DIR/clayspace-hook"
+HOOK="$SELF_DIR/dreamux-hook"
 if [ ! -x "$HOOK" ]; then
     # Hook script missing → nothing to inject, pass through.
     exec "$REAL_CLAUDE" "$@"
@@ -64,7 +64,7 @@ fi
 # Build inline hooks JSON.
 #
 # We wire both Stop and Notification. Stop fires at the end of every
-# assistant turn — including on Ctrl+C — but `clayspace-hook stop`
+# assistant turn — including on Ctrl+C — but `dreamux-hook stop`
 # inspects the transcript and skips empty / interrupted turns, so only
 # real task completions ping. Notification fires when the agent asks
 # for permission or idles waiting on the user.

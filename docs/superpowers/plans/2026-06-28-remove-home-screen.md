@@ -13,7 +13,7 @@
 - Platform floor: macOS 14 (`Package.swift`). Swift tools 6.0.
 - SwiftUI view-layer tasks are verified by **compile (`swift build`) + manual run**, not unit tests — there is no testable seam inside these views. Only `LaunchDestination` (pure logic) gets a real red/green unit cycle.
 - Concurrent-session hygiene: stage only the exact files named in each task's commit (`git add <paths>`), never `git add -A`. The working tree has unrelated pre-existing edits to `WorkspaceSidebar.swift` and others that must not be swept into these commits.
-- Preserve the e2e contract: `CLAYSPACE_E2E_AUTOOPEN=<folder name>` must still open that project's window at launch. The driver waits on `project window for <name>`.
+- Preserve the e2e contract: `DREAMUX_E2E_AUTOOPEN=<folder name>` must still open that project's window at launch. The driver waits on `project window for <name>`.
 - `CreateProjectSheet` init is `CreateProjectSheet(store: ProjectStore, onCreated: (Project) -> Void)` — note `onCreated`, not `onCreate`.
 
 ---
@@ -21,8 +21,8 @@
 ### Task 1: Rename `LaunchDestination.home` → `.welcome`
 
 **Files:**
-- Modify: `Sources/Clayspace/Models/LaunchDestination.swift:7-18`
-- Test: `Tests/ClayspaceTests/LaunchDestinationTests.swift:15-17`
+- Modify: `Sources/Dreamux/Models/LaunchDestination.swift:7-18`
+- Test: `Tests/DreamuxTests/LaunchDestinationTests.swift:15-17`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -32,7 +32,7 @@
 
 - [ ] **Step 1: Update the test to expect `.welcome` (failing)**
 
-In `Tests/ClayspaceTests/LaunchDestinationTests.swift`, rename the method and assertions:
+In `Tests/DreamuxTests/LaunchDestinationTests.swift`, rename the method and assertions:
 
 ```swift
     func testEmptyStoreLandsOnWelcome() {
@@ -48,7 +48,7 @@ Expected: build error — `type 'LaunchDestination' has no member 'welcome'`.
 
 - [ ] **Step 3: Rename the enum case**
 
-In `Sources/Clayspace/Models/LaunchDestination.swift`, change the case and its doc comment:
+In `Sources/Dreamux/Models/LaunchDestination.swift`, change the case and its doc comment:
 
 ```swift
 /// Where a fresh launch should land. `welcome` (the create-your-first-
@@ -78,7 +78,7 @@ Expected: all `LaunchDestinationTests` pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Sources/Clayspace/Models/LaunchDestination.swift Tests/ClayspaceTests/LaunchDestinationTests.swift
+git add Sources/Dreamux/Models/LaunchDestination.swift Tests/DreamuxTests/LaunchDestinationTests.swift
 git commit -m "Rename LaunchDestination.home to .welcome"
 ```
 
@@ -87,7 +87,7 @@ git commit -m "Rename LaunchDestination.home to .welcome"
 ### Task 2: Add `WelcomeView`
 
 **Files:**
-- Create: `Sources/Clayspace/Views/WelcomeView.swift`
+- Create: `Sources/Dreamux/Views/WelcomeView.swift`
 
 **Interfaces:**
 - Consumes: `ProjectStore`, `CreateProjectSheet(store:onCreated:)`.
@@ -97,7 +97,7 @@ This is a leaf view; the verification is that the package still compiles with it
 
 - [ ] **Step 1: Create the file**
 
-Create `Sources/Clayspace/Views/WelcomeView.swift`:
+Create `Sources/Dreamux/Views/WelcomeView.swift`:
 
 ```swift
 import SwiftUI
@@ -148,7 +148,7 @@ Expected: `Build complete!` (a warning that `WelcomeView` is unused is acceptabl
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/WelcomeView.swift
+git add Sources/Dreamux/Views/WelcomeView.swift
 git commit -m "Add WelcomeView for the zero-projects landing"
 ```
 
@@ -157,7 +157,7 @@ git commit -m "Add WelcomeView for the zero-projects landing"
 ### Task 3: Replace the standalone Home window with an in-WindowGroup launch gate
 
 **Files:**
-- Modify: `Sources/Clayspace/ClayspaceApp.swift:22-105`
+- Modify: `Sources/Dreamux/DreamuxApp.swift:22-105`
 
 **Interfaces:**
 - Consumes: `WelcomeView(store:onOpenProject:)` (Task 2), `LaunchDestination.resolve` / `.welcome` (Task 1), `LastOpenedProject.load()`, `E2EMode.autoOpenProjectName`, `ProjectWindow(project:onSwitchProject:)`.
@@ -165,7 +165,7 @@ git commit -m "Add WelcomeView for the zero-projects landing"
 
 After this task the `id:"home"` window and ⇧⌘0 are gone; launch routes through `LaunchGate`. The in-window Home row still works (removed in Task 4) — that's expected mid-flight.
 
-- [ ] **Step 1: Rewrite the `body` scene and helpers in `ClayspaceApp.swift`**
+- [ ] **Step 1: Rewrite the `body` scene and helpers in `DreamuxApp.swift`**
 
 Replace the `var body: some Scene { ... }` block (lines 22-47) with a single scene that delegates to `ProjectRootView`:
 
@@ -184,7 +184,7 @@ Replace the `var body: some Scene { ... }` block (lines 22-47) with a single sce
 
 - [ ] **Step 2: Add `ProjectRootView` and `LaunchGate`**
 
-Add these to `ClayspaceApp.swift` (e.g. just below the `ClayspaceApp` struct):
+Add these to `DreamuxApp.swift` (e.g. just below the `DreamuxApp` struct):
 
 ```swift
 // MARK: - Window root
@@ -318,14 +318,14 @@ Expected: `Build complete!`. (`openWindow(id: "home")` calls still in `ProjectsR
 
 Run:
 ```bash
-./Scripts/make-app.sh debug && open ./Clayspace.app
+./Scripts/make-app.sh debug && open ./Dreamux.app
 ```
-Expected: the app opens **directly** into a project window (your last-opened project) — no standalone "Clayspace" Home window. Confirm the **⇧⌘0** shortcut no longer opens anything (the menu item is gone). Quit the app afterward.
+Expected: the app opens **directly** into a project window (your last-opened project) — no standalone "Dreamux" Home window. Confirm the **⇧⌘0** shortcut no longer opens anything (the menu item is gone). Quit the app afterward.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/Clayspace/ClayspaceApp.swift
+git add Sources/Dreamux/DreamuxApp.swift
 git commit -m "Replace standalone Home window with an in-WindowGroup launch gate"
 ```
 
@@ -334,9 +334,9 @@ git commit -m "Replace standalone Home window with an in-WindowGroup launch gate
 ### Task 4: Remove the in-window Home and widen project selection to `UUID?`
 
 **Files:**
-- Modify: `Sources/Clayspace/Views/ContentView.swift:14-185`
-- Modify: `Sources/Clayspace/Views/ProjectsRail.swift:1-189`
-- Modify: `Sources/Clayspace/Views/ProjectWindow.swift:11-89`
+- Modify: `Sources/Dreamux/Views/ContentView.swift:14-185`
+- Modify: `Sources/Dreamux/Views/ProjectsRail.swift:1-189`
+- Modify: `Sources/Dreamux/Views/ProjectWindow.swift:11-89`
 
 **Interfaces:**
 - Consumes: `onSelect`/`onSwitchProject` widen to `(UUID?) -> Void` so the rail can clear the window after the last project is deleted.
@@ -346,7 +346,7 @@ These three files must change together: the signature widening and the removal o
 
 - [ ] **Step 1: Simplify `ContentView`**
 
-In `Sources/Clayspace/Views/ContentView.swift`:
+In `Sources/Dreamux/Views/ContentView.swift`:
 
 a) Widen the stored closure (line 19): `let onSwitchProject: (UUID?) -> Void` and the `init` parameter (line 35): `onSwitchProject: @escaping (UUID?) -> Void`.
 
@@ -384,7 +384,7 @@ g) Replace `detail: { detailColumn }` (line 91) with `detail: { mainPane }`, and
 
 - [ ] **Step 2: Simplify `ProjectsRail`**
 
-In `Sources/Clayspace/Views/ProjectsRail.swift`:
+In `Sources/Dreamux/Views/ProjectsRail.swift`:
 
 a) Delete the `SidebarItem` enum (lines 7-10).
 
@@ -450,7 +450,7 @@ e) In `deleteProject` (lines 152-167), replace the empty-list branch so it clear
 
 - [ ] **Step 3: Simplify `ProjectWindow`**
 
-In `Sources/Clayspace/Views/ProjectWindow.swift`:
+In `Sources/Dreamux/Views/ProjectWindow.swift`:
 
 a) Widen `onSwitchProject` everywhere it appears in this file (lines 13, 31, 33, 41) from `(UUID) -> Void` to `(UUID?) -> Void` — the `ProjectWindow` property, `ProjectWindowContents` property, and the `init` parameter.
 
@@ -465,14 +465,14 @@ Expected: `Build complete!`.
 
 Run:
 ```bash
-./Scripts/make-app.sh debug && open ./Clayspace.app
+./Scripts/make-app.sh debug && open ./Dreamux.app
 ```
 Expected: the project sidebar shows **no "Home" row** — only the "Projects" section and the "New Project" bar. Clicking another project still switches the window. Quit afterward.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/ContentView.swift Sources/Clayspace/Views/ProjectsRail.swift Sources/Clayspace/Views/ProjectWindow.swift
+git add Sources/Dreamux/Views/ContentView.swift Sources/Dreamux/Views/ProjectsRail.swift Sources/Dreamux/Views/ProjectWindow.swift
 git commit -m "Remove the in-window Home and clear-to-Welcome on last delete"
 ```
 
@@ -481,8 +481,8 @@ git commit -m "Remove the in-window Home and clear-to-Welcome on last delete"
 ### Task 5: Delete `HomeView`, update docs, and verify end-to-end
 
 **Files:**
-- Delete: `Sources/Clayspace/Views/HomeView.swift`
-- Modify: `Scripts/e2e/PROTOCOL.md` (the `CLAYSPACE_E2E_AUTOOPEN` row)
+- Delete: `Sources/Dreamux/Views/HomeView.swift`
+- Modify: `Scripts/e2e/PROTOCOL.md` (the `DREAMUX_E2E_AUTOOPEN` row)
 
 **Interfaces:**
 - Consumes: nothing references `HomeView` after Task 4.
@@ -496,12 +496,12 @@ Expected: no matches.
 - [ ] **Step 2: Delete the file**
 
 ```bash
-git rm Sources/Clayspace/Views/HomeView.swift
+git rm Sources/Dreamux/Views/HomeView.swift
 ```
 
 - [ ] **Step 3: Update the e2e protocol doc**
 
-In `Scripts/e2e/PROTOCOL.md`, update the `CLAYSPACE_E2E_AUTOOPEN` description so it no longer references the Home view. Replace the sentence "The Home view looks the name up in the projects root and opens that project's window (dismissing Home), so drivers don't script the project grid." with:
+In `Scripts/e2e/PROTOCOL.md`, update the `DREAMUX_E2E_AUTOOPEN` description so it no longer references the Home view. Replace the sentence "The Home view looks the name up in the projects root and opens that project's window (dismissing Home), so drivers don't script the project grid." with:
 
 ```
 The launch gate looks the name up in the projects root and opens that project's window directly, so drivers don't have to script project selection.
@@ -516,7 +516,7 @@ Expected: `Build complete!` and all tests pass (no `HomeView`-related failures).
 
 Run:
 ```bash
-./Scripts/make-app.sh debug && open ./Clayspace.app
+./Scripts/make-app.sh debug && open ./Dreamux.app
 ```
 Expected: app opens directly into a project window; no Home window, no Home sidebar row, ⇧⌘0 does nothing. Quit afterward.
 
@@ -528,7 +528,7 @@ Expected: the suite passes — in particular the launch scenario that waits for 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add Sources/Clayspace/Views/HomeView.swift Scripts/e2e/PROTOCOL.md
+git add Sources/Dreamux/Views/HomeView.swift Scripts/e2e/PROTOCOL.md
 git commit -m "Delete HomeView and update the e2e auto-open doc"
 ```
 

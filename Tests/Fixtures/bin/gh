@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""fake gh — Clayspace's test stand-in for the GitHub CLI.
+"""fake gh — Dreamux's test stand-in for the GitHub CLI.
 
-Pointed at via CLAYSPACE_GH_BIN so PublishFlow tests and the e2e
+Pointed at via DREAMUX_GH_BIN so PublishFlow tests and the e2e
 harness can exercise the push-feature-as-PR path against an on-disk
 bare repo acting as "origin", with no network and no GitHub account.
 
@@ -118,7 +118,7 @@ def main():
     if not args:
         fail("fake-gh: no arguments")
     if args[0] == "--version":
-        print("fake-gh 1.0.0 (Clayspace test fixture)")
+        print("fake-gh 1.0.0 (Dreamux test fixture)")
         return
     if args[0] == "pr" and len(args) >= 2:
         opts, positional = parse_opts(args[2:])
