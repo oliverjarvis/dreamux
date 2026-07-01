@@ -27,6 +27,8 @@ struct WorkspaceSidebar: View {
     /// Workspace whose Customize sheet is open. Hoisted to the sidebar (one
     /// sheet, not per-row) like `pendingMerge`/`pendingClose`.
     @State private var customizing: Workspace?
+    /// Feature currently being dragged for reorder.
+    @State private var draggingWorkspace: Workspace?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -124,30 +126,26 @@ struct WorkspaceSidebar: View {
                 onReorder: { layout.persistTiles() }
             )
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 sectionLabel("Features")
                 switchNoticeIfAny
+                addFeatureButton
                 if hasNoFeaturesOrRepos {
                     emptyFeaturesText
                 } else {
-                    card {
-                        VStack(spacing: 0) {
-                            ForEach(Array(store.workspaces.enumerated()), id: \.element.id) { index, workspace in
-                                if index > 0 {
-                                    Divider().padding(.leading, 46)
+                    VStack(spacing: 2) {
+                        ForEach(store.workspaces) { workspace in
+                            featureRow(workspace) { featureRowBody(workspace) }
+                                .onDrag {
+                                    draggingWorkspace = workspace
+                                    return NSItemProvider(object: workspace.id.uuidString as NSString)
                                 }
-                                featureRow(workspace) { featureRowBody(workspace) }
-                            }
-                            // Separator between the feature rows and the
-                            // Add Feature button — only when there are rows
-                            // above it, otherwise it renders as an orphaned
-                            // inset line at the top of the card.
-                            if !store.workspaces.isEmpty {
-                                Divider().padding(.leading, 46)
-                            }
-                            addFeatureButton
-                                .padding(.horizontal, 2)
-                                .padding(.vertical, 2)
+                                .onDrop(of: [.text], delegate: ReorderDropDelegate(
+                                    item: workspace,
+                                    items: workspacesBinding,
+                                    dragging: $draggingWorkspace,
+                                    onReorder: { store.persistFeatureOrder() }
+                                ))
                         }
                     }
                 }
@@ -370,6 +368,10 @@ struct WorkspaceSidebar: View {
 
     private var hasNoFeaturesOrRepos: Bool {
         store.workspaces.isEmpty && repoStore.repositories.isEmpty
+    }
+
+    private var workspacesBinding: Binding<[Workspace]> {
+        Binding(get: { store.workspaces }, set: { store.workspaces = $0 })
     }
 
     private func sectionLabel(_ text: String) -> some View {
