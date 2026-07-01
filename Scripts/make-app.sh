@@ -8,6 +8,7 @@ CONFIG="${1:-debug}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/Dreamux.app"
 PLIST="$ROOT/Sources/Dreamux/Resources/Info.plist"
+ICON="$ROOT/Sources/Dreamux/Resources/AppIcon.icns"
 
 cd "$ROOT"
 swift build -c "$CONFIG"
@@ -24,6 +25,10 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Dreamux"
 cp "$PLIST" "$APP/Contents/Info.plist"
+
+# App icon: CFBundleIconFile in Info.plist points at "AppIcon", so the
+# compiled .icns must land at Contents/Resources/AppIcon.icns.
+cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 
 # Bundle SwiftPM resource bundles next to the executable so they're found.
 for bundle in "$BIN_DIR"/*.bundle; do
