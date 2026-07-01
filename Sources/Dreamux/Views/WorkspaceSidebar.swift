@@ -1,13 +1,16 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Work Items column of a project window (the `content` column of the
-/// window's NavigationSplitView). Rendered in a grouped "inset card" style:
-/// Signals, Features, and Repositories each live in their own rounded card,
-/// feature rows are divided by hairlines and led by a soft tinted badge.
+/// window's NavigationSplitView). Top: an Arc-style `PinnedTileGrid` of
+/// pinned tiles (Signals + Web Browser), drag-reorderable. Below: the
+/// Features list as flat, drag-reorderable rows led by a soft tinted badge,
+/// then the Repositories card.
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
     @Bindable var runners: RunnerManager
+    @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
 
     @State private var showAddFeature = false
@@ -25,6 +28,8 @@ struct WorkspaceSidebar: View {
     /// Workspace whose Customize sheet is open. Hoisted to the sidebar (one
     /// sheet, not per-row) like `pendingMerge`/`pendingClose`.
     @State private var customizing: Workspace?
+    /// Feature currently being dragged for reorder.
+    @State private var draggingWorkspace: Workspace?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -114,32 +119,34 @@ struct WorkspaceSidebar: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
-            card { signalsRow }
+            PinnedTileGrid(
+                tiles: $layout.tiles,
+                isSelected: { $0 == .signals && sidebarMode == .signals },
+                isEnabled: { _ in true },
+                onTap: handleTileTap,
+                onReorder: { layout.persistTiles() }
+            )
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 sectionLabel("Features")
                 switchNoticeIfAny
+                addFeatureButton
                 if hasNoFeaturesOrRepos {
                     emptyFeaturesText
                 } else {
-                    card {
-                        VStack(spacing: 0) {
-                            ForEach(Array(store.workspaces.enumerated()), id: \.element.id) { index, workspace in
-                                if index > 0 {
-                                    Divider().padding(.leading, 46)
+                    VStack(spacing: 2) {
+                        ForEach(store.workspaces) { workspace in
+                            featureRow(workspace) { featureRowBody(workspace) }
+                                .onDrag {
+                                    draggingWorkspace = workspace
+                                    return NSItemProvider(object: workspace.id.uuidString as NSString)
                                 }
-                                featureRow(workspace) { featureRowBody(workspace) }
-                            }
-                            // Separator between the feature rows and the
-                            // Add Feature button — only when there are rows
-                            // above it, otherwise it renders as an orphaned
-                            // inset line at the top of the card.
-                            if !store.workspaces.isEmpty {
-                                Divider().padding(.leading, 46)
-                            }
-                            addFeatureButton
-                                .padding(.horizontal, 2)
-                                .padding(.vertical, 2)
+                                .onDrop(of: [.text], delegate: ReorderDropDelegate(
+                                    item: workspace,
+                                    items: workspacesBinding,
+                                    dragging: $draggingWorkspace,
+                                    onReorder: { store.persistFeatureOrder() }
+                                ))
                         }
                     }
                 }
@@ -154,30 +161,28 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    private var signalsRow: some View {
-        let selected = sidebarMode == .signals
-        return Button { sidebarMode = .signals } label: {
-            HStack(spacing: 10) {
-                softBadge(symbol: "waveform.path.ecg", tint: .purple)
-                Text("Signals")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                if selected {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.14))
-                        .padding(.horizontal, 4)
-                }
-            }
-            .contentShape(Rectangle())
+    private static let browserHomepage = URL(string: "https://www.google.com")!
+
+    private func handleTileTap(_ tile: SidebarTile) {
+        switch tile {
+        case .signals:
+            sidebarMode = .signals
+        case .browser:
+            openBrowserTab()
         }
-        .buttonStyle(.plain)
-        .help("View log streams from running services")
+    }
+
+    /// Open a browser tab at the hardcoded homepage, switching to it.
+    /// `openWebTab` dedups by the tab's home URL, so a workspace keeps a
+    /// single browser tab that this re-focuses rather than stacking
+    /// duplicates. Web tabs live inside a workspace's Bonsplit pane, so if
+    /// there's no workspace yet we spin up a scratch one (same as ⌘⇧T)
+    /// rather than leaving the tile inert.
+    private func openBrowserTab() {
+        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        store.session(for: workspace).openWebTab(url: Self.browserHomepage, title: "Browser")
     }
 
     private func featureRowBody(_ workspace: Workspace) -> some View {
@@ -366,6 +371,10 @@ struct WorkspaceSidebar: View {
 
     private var hasNoFeaturesOrRepos: Bool {
         store.workspaces.isEmpty && repoStore.repositories.isEmpty
+    }
+
+    private var workspacesBinding: Binding<[Workspace]> {
+        Binding(get: { store.workspaces }, set: { store.workspaces = $0 })
     }
 
     private func sectionLabel(_ text: String) -> some View {

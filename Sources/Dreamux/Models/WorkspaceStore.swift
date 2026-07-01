@@ -6,6 +6,9 @@ import CryptoKit
 @Observable
 final class WorkspaceStore {
     var workspaces: [Workspace]
+    /// Per-project sidebar arrangement. Set by the window at startup;
+    /// drives feature ordering on reload and persistence on drag-reorder.
+    var layout: SidebarLayoutStore?
     var activeID: UUID? {
         didSet {
             guard oldValue != activeID else { return }
@@ -147,7 +150,8 @@ final class WorkspaceStore {
         // Keep orphan workspaces (no linked repos) — they're transient
         // shells the user opened that don't correspond to any worktree.
         let orphans = workspaces.filter { $0.linkedRepoIDs.isEmpty }
-        let merged = discovered + orphans
+        let ordered = layout?.ordered(discovered) ?? discovered
+        let merged = ordered + orphans
         workspaces = merged
 
         // Sync active session metadata for survivors.
@@ -161,6 +165,13 @@ final class WorkspaceStore {
         } else if activeID == nil {
             activeID = workspaces.first?.id
         }
+    }
+
+    /// Persist the current feature order after a drag-reorder. Only
+    /// linked features are recorded; orphan shells stay session-only and
+    /// always render after the linked features.
+    func persistFeatureOrder() {
+        layout?.setFeatureOrder(workspaces.filter { !$0.linkedRepoIDs.isEmpty }.map(\.name))
     }
 
     /// Free-floating workspace with no repo. Used by ⌘⇧T as a fallback

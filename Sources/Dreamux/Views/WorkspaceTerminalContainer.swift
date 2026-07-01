@@ -62,35 +62,38 @@ private struct TabContentView: View {
     }
 }
 
-/// An in-app browser tab: slim chrome (URL, reload, escape hatch to the
-/// external browser) over a WKWebView. Hosts the `open` target of a
-/// running worktree so the app-under-development lives next to the
-/// terminals working on it.
+/// An in-app browser tab: a working browser bar (back/forward, reload,
+/// editable address field, escape hatch to the external browser) over a
+/// WKWebView. Hosts the `open` target of a running worktree so the
+/// app-under-development lives next to the terminals working on it.
 private struct WebTabView: View {
-    let session: WebTabSession
+    @Bindable var session: WebTabSession
+    @State private var address: String = ""
+    @FocusState private var addressFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
+                navButton("chevron.left", enabled: session.canGoBack) { session.goBack() }
+                    .help("Back")
+                navButton("chevron.right", enabled: session.canGoForward) { session.goForward() }
+                    .help("Forward")
+                navButton("arrow.clockwise", enabled: true) { session.reload() }
+                    .help("Reload")
+
                 Image(systemName: "globe")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
-                Text(session.url.absoluteString)
+                TextField("Search or enter address", text: $address)
+                    .textFieldStyle(.plain)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                Spacer()
-                Button {
-                    session.reload()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Reload")
+                    .foregroundStyle(.primary)
+                    .focused($addressFocused)
+                    .onSubmit {
+                        session.navigate(to: address)
+                        addressFocused = false
+                    }
+
                 Button {
                     session.openExternally()
                 } label: {
@@ -109,6 +112,25 @@ private struct WebTabView: View {
 
             WebViewRepresentable(webView: session.webView)
         }
+        .onAppear { address = session.currentURL.absoluteString }
+        .onChange(of: session.currentURL) { _, newURL in
+            // Track the live page, but don't fight the user mid-edit.
+            if !addressFocused { address = newURL.absoluteString }
+        }
+    }
+
+    private func navButton(
+        _ symbol: String,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? .secondary : .tertiary)
+        .disabled(!enabled)
     }
 }
 
