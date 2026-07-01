@@ -34,6 +34,7 @@ private struct ProjectWindowContents: View {
 
     @State private var store: WorkspaceStore
     @State private var repoStore: RepoStore
+    @State private var layout: SidebarLayoutStore
 
     init(
         project: Project,
@@ -47,17 +48,20 @@ private struct ProjectWindowContents: View {
             initialValue: WorkspaceStore(defaultWorkingDirectory: project.rootPath.path)
         )
         _repoStore = State(initialValue: RepoStore(project: project))
+        _layout = State(initialValue: SidebarLayoutStore(project: project))
     }
 
     var body: some View {
         ContentView(
             store: store,
             repoStore: repoStore,
+            layout: layout,
             projects: projects,
             currentProjectID: project.id,
             onSwitchProject: onSwitchProject
         )
         .onAppear {
+            store.layout = layout
             // Remember where the user was so the next launch can land
             // here instead of the Home grid.
             LastOpenedProject.record(project.id)

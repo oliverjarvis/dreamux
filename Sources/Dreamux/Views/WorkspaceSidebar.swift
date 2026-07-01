@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Work Items column of a project window (the `content` column of the
 /// window's NavigationSplitView). Rendered in a grouped "inset card" style:
@@ -8,6 +9,7 @@ struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
     @Bindable var runners: RunnerManager
+    @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
 
     @State private var showAddFeature = false
@@ -114,7 +116,13 @@ struct WorkspaceSidebar: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
-            card { signalsRow }
+            PinnedTileGrid(
+                tiles: $layout.tiles,
+                isSelected: { $0 == .signals && sidebarMode == .signals },
+                isEnabled: { tile in tile == .browser ? !store.workspaces.isEmpty : true },
+                onTap: handleTileTap,
+                onReorder: { layout.persistTiles() }
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 sectionLabel("Features")
@@ -154,30 +162,26 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    private var signalsRow: some View {
-        let selected = sidebarMode == .signals
-        return Button { sidebarMode = .signals } label: {
-            HStack(spacing: 10) {
-                softBadge(symbol: "waveform.path.ecg", tint: .purple)
-                Text("Signals")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                if selected {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.accentColor.opacity(0.14))
-                        .padding(.horizontal, 4)
-                }
-            }
-            .contentShape(Rectangle())
+    private static let browserHomepage = URL(string: "https://www.google.com")!
+
+    private func handleTileTap(_ tile: SidebarTile) {
+        switch tile {
+        case .signals:
+            sidebarMode = .signals
+        case .browser:
+            openBrowserTab()
         }
-        .buttonStyle(.plain)
-        .help("View log streams from running services")
+    }
+
+    /// Open a fresh browser tab (hardcoded homepage) in the active
+    /// feature's pane, switching to it. Web tabs live inside a feature's
+    /// Bonsplit pane, so this needs a workspace to land in — the grid
+    /// tile is disabled when there are none.
+    private func openBrowserTab() {
+        guard let workspace = store.activeWorkspace ?? store.workspaces.first else { return }
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        store.session(for: workspace).openWebTab(url: Self.browserHomepage, title: "New Tab")
     }
 
     private func featureRowBody(_ workspace: Workspace) -> some View {

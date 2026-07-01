@@ -14,6 +14,7 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
+    let layout: SidebarLayoutStore
     let projects: ProjectStore
     let currentProjectID: UUID
     let onSwitchProject: (UUID?) -> Void
@@ -27,12 +28,14 @@ struct ContentView: View {
     init(
         store: WorkspaceStore,
         repoStore: RepoStore,
+        layout: SidebarLayoutStore,
         projects: ProjectStore,
         currentProjectID: UUID,
         onSwitchProject: @escaping (UUID?) -> Void
     ) {
         self.store = store
         self.repoStore = repoStore
+        self.layout = layout
         self.projects = projects
         self.currentProjectID = currentProjectID
         self.onSwitchProject = onSwitchProject
@@ -79,6 +82,7 @@ struct ContentView: View {
                 store: store,
                 repoStore: repoStore,
                 runners: runners,
+                layout: layout,
                 sidebarMode: $sidebarMode
             )
             .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 380)
