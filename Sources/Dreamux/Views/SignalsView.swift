@@ -244,11 +244,18 @@ struct SignalsView: View {
             Image(systemName: "waveform.path.ecg")
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
+            // Bound the width so the message wraps into a readable
+            // column. NOTE: do NOT use `.fixedSize(horizontal: false,
+            // vertical: true)` here — combined with the enclosing
+            // `.frame(maxWidth: .infinity)` inside a NavigationSplitView
+            // detail column it drives SwiftUI's layout negotiation to a
+            // degenerate state that blanks the entire window (rails and
+            // all) the moment the Signals pane appears.
             Text(emptyStateMessage)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 360)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
