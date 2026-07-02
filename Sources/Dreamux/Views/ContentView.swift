@@ -80,31 +80,30 @@ struct ContentView: View {
                 onSelect: onSwitchProject
             )
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
-        } content: {
-            WorkspaceSidebar(
-                store: store,
-                repoStore: repoStore,
-                runners: runners,
-                layout: layout,
-                sidebarMode: $sidebarMode
-            )
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 380)
         } detail: {
-            mainPane
-        }
-        .navigationTitle(currentProject?.name ?? "")
-        .navigationSubtitle(currentProject?.rootPath.path ?? "")
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    showFileTree.toggle()
-                } label: {
-                    Image(systemName: "sidebar.right")
+            // The project rail stays the native, full-height split-view
+            // sidebar. The bold header and the Work-Items/content split sit
+            // to its right, so the header begins right of the rail.
+            VStack(spacing: 0) {
+                heroBand
+                HSplitView {
+                    WorkspaceSidebar(
+                        store: store,
+                        repoStore: repoStore,
+                        runners: runners,
+                        layout: layout,
+                        sidebarMode: $sidebarMode
+                    )
+                    .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
+
+                    mainPane
+                        .frame(maxWidth: .infinity)
                 }
-                .keyboardShortcut("e", modifiers: [.option, .command])
-                .help("Toggle file explorer (⌥⌘E)")
             }
         }
+        // The project identity lives in `heroBand` at the top of the detail
+        // area (right of the rail), so the macOS titlebar title is blanked.
+        .navigationTitle("")
         .inspector(isPresented: $showFileTree) {
             FileTreePanel(
                 store: store,
@@ -114,6 +113,14 @@ struct ContentView: View {
             )
             .inspectorColumnWidth(min: 220, ideal: 280, max: 480)
         }
+        // The file explorer is toggled from the View menu (⌥⌘E, see
+        // `FileExplorerCommands`) rather than a toolbar-item shortcut: a
+        // `.keyboardShortcut` on a toolbar item isn't dispatched when the
+        // Ghostty terminal NSView is first responder (it just rings the
+        // bell). Publishing the binding here lets the menu command reach
+        // this window's state via `@FocusedBinding`, the same way
+        // `ProjectCommands` reaches the active store.
+        .focusedSceneValue(\.fileTreeVisible, $showFileTree)
         .onAppear {
             // e2e only (no-op otherwise): hand the run-layer stores to the
             // automation server and sync the bridge with this window's
@@ -160,6 +167,72 @@ struct ContentView: View {
         }
     }
 
+    /// The bold "hero" header pinned full-width to the top of the window:
+    /// an accent-tinted gradient carrying a gradient project glyph, the
+    /// project name in a heavy rounded face, and the file-explorer toggle
+    /// on the right. Replaces the flat titlebar title + Finder-path
+    /// subtitle.
+    private var heroBand: some View {
+        let name = currentProject?.name ?? ""
+        return HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.accentColor, Color.accentColor.opacity(0.55)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Text(String(name.prefix(1)).uppercased())
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 30, height: 30)
+            .shadow(color: Color.accentColor.opacity(0.4), radius: 5, y: 2)
+
+            Text(name)
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .kerning(0.4)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+
+            Spacer(minLength: 8)
+
+            Button {
+                showFileTree.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(showFileTree ? Color.accentColor : .secondary)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(showFileTree ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06))
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Toggle file explorer (⌥⌘E)")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            ZStack {
+                LinearGradient(
+                    colors: [Color.accentColor.opacity(0.38), Color.accentColor.opacity(0.14)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                VStack {
+                    Spacer()
+                    Divider()
+                }
+            }
+        )
+    }
+
     /// Open a file (clicked in the tree) as a Monaco tab in the active
     /// feature's pane. Flips to the terminal/tab view so the new tab is
     /// visible, mirroring `openBrowserTab`'s behavior.
@@ -194,3 +267,22 @@ enum SidebarMode: Hashable {
     case run(workspaceID: UUID)
     case signals
 }
+
+// MARK: - File-explorer focused value
+
+/// Binding to the focused project window's file-explorer visibility. The
+/// window publishes it via `.focusedSceneValue(\.fileTreeVisible, …)`, and
+/// the View-menu command (`FileExplorerCommands`) toggles it through
+/// `@FocusedBinding` — the same focused-value bridge `ProjectCommands`
+/// uses to reach the active `WorkspaceStore`.
+private struct FileTreeVisibleKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+extension FocusedValues {
+    var fileTreeVisible: Binding<Bool>? {
+        get { self[FileTreeVisibleKey.self] }
+        set { self[FileTreeVisibleKey.self] = newValue }
+    }
+}
+

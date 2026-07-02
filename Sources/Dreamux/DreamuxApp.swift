@@ -25,6 +25,7 @@ struct DreamuxApp: App {
         }
         .commands {
             ProjectCommands()
+            FileExplorerCommands()
             IntegrationCommands()
             NotificationCommands()
         }
@@ -100,6 +101,31 @@ private struct LaunchGate: View {
             projectID = id
         case .welcome:
             break // WelcomeView is already on screen.
+        }
+    }
+}
+
+// MARK: - View commands
+
+/// The View-menu toggle for the right-side file explorer, carrying the
+/// ⌥⌘E shortcut. This lives in `.commands` (rather than a toolbar-item
+/// shortcut) on purpose: a `.keyboardShortcut` attached to a toolbar item
+/// is not dispatched while the Ghostty terminal NSView is first responder
+/// — it just rings the system bell. Menu key equivalents are resolved by
+/// the main menu ahead of the responder chain, so they fire regardless of
+/// focus. It reaches the focused window's `showFileTree` state via
+/// `@FocusedBinding`, mirroring how `ProjectCommands` reaches the active
+/// `WorkspaceStore`.
+private struct FileExplorerCommands: Commands {
+    @FocusedBinding(\.fileTreeVisible) private var fileTreeVisible: Bool?
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Button((fileTreeVisible ?? false) ? "Hide File Explorer" : "Show File Explorer") {
+                fileTreeVisible?.toggle()
+            }
+            .keyboardShortcut("e", modifiers: [.option, .command])
+            .disabled(fileTreeVisible == nil)
         }
     }
 }
