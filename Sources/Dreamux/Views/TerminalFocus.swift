@@ -29,7 +29,11 @@ enum TerminalFocus {
     }
 
     private static func attemptFocus() {
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+        // `NSApplication.shared` (not the `NSApp` global) — `NSApp` stays
+        // nil until something reads `.shared`, which never happens in a
+        // headless `swift test` process (no app lifecycle runs), so
+        // `NSApp.keyWindow` would force-unwrap a nil `NSApp` and crash.
+        guard let window = NSApplication.shared.keyWindow ?? NSApplication.shared.mainWindow else {
             logger.info("no key window")
             return
         }
