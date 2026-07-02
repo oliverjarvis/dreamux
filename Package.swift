@@ -17,6 +17,9 @@ let package = Package(
         // Vendored at vendor/bonsplit so we can patch dropZoneAtEnd to
         // absorb the trailing run-off (see TabBarView.swift).
         .package(path: "vendor/bonsplit"),
+        // Markdown rendering for file tabs and (later) plan/spec docs.
+        // GitHub-flavored: tables, fenced code, task-list checkboxes.
+        .package(url: "https://github.com/gonzalezreal/swift-markdown-ui.git", from: "2.4.0"),
     ],
     targets: [
         .executableTarget(
@@ -25,6 +28,7 @@ let package = Package(
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
                 .product(name: "GhosttyTheme", package: "libghostty-spm"),
                 .product(name: "Bonsplit", package: "bonsplit"),
+                .product(name: "MarkdownUI", package: "swift-markdown-ui"),
                 "DreamuxPTY",
             ],
             path: "Sources/Dreamux",

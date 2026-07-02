@@ -149,7 +149,9 @@ private struct FileEditorView: View {
     @Bindable var session: FileEditorTabSession
 
     var body: some View {
-        if session.isSupported {
+        if session.kind == .markdown && session.isSupported {
+            MarkdownTabView(session: session)
+        } else if session.isSupported {
             FileEditorWebView(webView: session.webView)
         } else {
             VStack(spacing: 12) {
@@ -172,6 +174,62 @@ private struct FileEditorWebView: NSViewRepresentable {
     let webView: WKWebView
     func makeNSView(context: Context) -> WKWebView { webView }
     func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+
+/// Segmented mode switch shown in a slim bar above multi-mode viewers
+/// (markdown Rendered|Raw, tabular Table|Text).
+struct ViewerModeToggle: View {
+    @Bindable var session: FileEditorTabSession
+    /// (label, mode) pairs, in display order.
+    let options: [(String, FileTabViewMode)]
+
+    var body: some View {
+        HStack {
+            Picker("", selection: $session.viewMode) {
+                ForEach(options, id: \.1) { option in
+                    Text(option.0).tag(option.1)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Spacer()
+            if session.isDirty {
+                Text("Unsaved changes — ⌘S in Raw to save")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.bar)
+        .onChange(of: session.viewMode) { _, newMode in
+            // Entering a read view: sync the live Monaco buffer so the
+            // render reflects unsaved edits (spec: re-render from the
+            // current buffer, not disk).
+            if newMode != .source { session.refreshCurrentTextFromEditor() }
+        }
+    }
+}
+
+/// A markdown tab: rendered preview by default, Monaco behind a toggle.
+/// The webview (and its model/undo stack) is retained by the session,
+/// so flipping modes never loses editor state.
+private struct MarkdownTabView: View {
+    @Bindable var session: FileEditorTabSession
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ViewerModeToggle(session: session,
+                             options: [("Rendered", .rendered), ("Raw", .source)])
+            Divider()
+            if session.viewMode == .rendered {
+                MarkdownPreviewView(text: session.currentText)
+            } else {
+                FileEditorWebView(webView: session.webView)
+            }
+        }
+    }
 }
 
 private struct EmptyPaneView: View {
