@@ -61,6 +61,12 @@ require(['vs/editor/editor.main'], function () {
     },
   });
 
+  // The vendored registry misses a few extensions we care about:
+  // shell omits .zsh, markdown omits .mdx. Registering the same id
+  // again merges the extra extensions into the existing language.
+  monaco.languages.register({ id: 'shell', extensions: ['.zsh'] });
+  monaco.languages.register({ id: 'markdown', extensions: ['.mdx'] });
+
   var editor = monaco.editor.create(document.getElementById('container'), {
     value: '',
     language: 'plaintext',

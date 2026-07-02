@@ -152,13 +152,9 @@ private struct CSVGrid: NSViewRepresentable {
             rows.sort { a, b in
                 let lhs = index < a.count ? a[index] : ""
                 let rhs = index < b.count ? b[index] : ""
-                let result: Bool
-                if let ln = Double(lhs), let rn = Double(rhs) {
-                    result = ln < rn
-                } else {
-                    result = lhs.localizedStandardCompare(rhs) == .orderedAscending
-                }
-                return ascending ? result : !result
+                let (x, y) = ascending ? (lhs, rhs) : (rhs, lhs)
+                if let xn = Double(x), let yn = Double(y) { return xn < yn }
+                return x.localizedStandardCompare(y) == .orderedAscending
             }
             tableView.reloadData()
         }

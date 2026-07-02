@@ -197,7 +197,7 @@ private struct UnsupportedFileView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Text(fileSizeLabel.map { "It's binary or too large to edit (\($0), 2 MB cap)." }
-                 ?? "It's binary or larger than 2 MB.")
+                 ?? "It's binary, larger than 2 MB, or missing from disk.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             HStack(spacing: 10) {

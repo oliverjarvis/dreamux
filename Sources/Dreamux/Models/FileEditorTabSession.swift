@@ -23,8 +23,11 @@ final class FileEditorTabSession: Identifiable {
     let fileURL: URL
     var title: String
     var isDirty = false
-    /// False when the file can't be shown in a text editor (binary or
-    /// larger than the cap); the view shows a placeholder instead.
+    /// Whether the tab can render its file. Monaco-backed kinds (code/
+    /// markdown/tabular): the file decodes as UTF-8 under the 2 MB cap.
+    /// Media kinds (image/video/audio/pdf/officePreview): the file
+    /// exists — contents are never read into memory here. False shows
+    /// the placeholder view.
     let isSupported: Bool
 
     let kind: FileTabKind
