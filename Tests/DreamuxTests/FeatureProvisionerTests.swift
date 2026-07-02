@@ -169,6 +169,45 @@ final class FeatureProvisionerTests: XCTestCase {
         ))
     }
 
+    // MARK: - docs symlink
+
+    func testProvisionLinksProjectDocsIntoAggregationDir() async throws {
+        let repo = try await GitFixtures.makeBareLayoutRepo(
+            in: project.rootPath, name: "api", files: ["api.txt": "a\n"]
+        )
+        let dir = try await FeatureProvisioner.provision(
+            featureName: "docs-link", in: project, across: [repo])
+
+        let link = dir.appendingPathComponent("docs")
+        let dest = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+        XCTAssertEqual(dest, "../../docs")
+        var isDir: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: project.rootPath.appendingPathComponent("docs/plans").path,
+            isDirectory: &isDir) && isDir.boolValue,
+            "provision ensures the docs home exists")
+
+        let readme = try String(
+            contentsOf: dir.appendingPathComponent("DREAMUX.md"), encoding: .utf8)
+        XCTAssertTrue(readme.contains("docs/specs/"))
+        XCTAssertTrue(readme.contains("docs/plans/"))
+    }
+
+    func testDocsSymlinkRenamedWhenRepoNamedDocs() async throws {
+        let repo = try await GitFixtures.makeBareLayoutRepo(
+            in: project.rootPath, name: "docs", files: ["docs.txt": "a\n"]
+        )
+        let dir = try await FeatureProvisioner.provision(
+            featureName: "collide", in: project, across: [repo])
+        let dest = try FileManager.default.destinationOfSymbolicLink(
+            atPath: dir.appendingPathComponent("project-docs").path)
+        XCTAssertEqual(dest, "../../docs")
+        // The repo's own symlink keeps its name.
+        let repoDest = try FileManager.default.destinationOfSymbolicLink(
+            atPath: dir.appendingPathComponent("docs").path)
+        XCTAssertEqual(repoDest, "../../repos/docs/collide")
+    }
+
     // MARK: - ensureFeatureDirectory
 
     func testEnsureFeatureDirectoryRestoresAndRepairsLinks() async throws {

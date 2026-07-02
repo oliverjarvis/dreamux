@@ -37,6 +37,31 @@ enum FeatureProvisioner {
         featuresDirectory(for: project).appendingPathComponent(name, isDirectory: true)
     }
 
+    /// Name of the project-docs symlink inside a feature dir: `docs`,
+    /// unless a linked repo claims that name — then `project-docs`.
+    static func docsLinkName(repoNames: [String]) -> String {
+        repoNames.contains("docs") ? "project-docs" : "docs"
+    }
+
+    /// Link the shared project docs home into the aggregation dir so
+    /// every agent session reads and writes the same specs/plans (and
+    /// checkbox ticks are visible to the app instantly).
+    private static func linkProjectDocs(
+        into featureDir: URL,
+        project: Project,
+        repos: [Repository]
+    ) {
+        DocStore.ensureDocsHome(at: project.rootPath)
+        let linkURL = featureDir.appendingPathComponent(
+            docsLinkName(repoNames: repos.map(\.name)))
+        let target = "../../docs"
+        if let existing = try? FileManager.default.destinationOfSymbolicLink(atPath: linkURL.path),
+           existing == target { return }
+        try? FileManager.default.removeItem(at: linkURL)
+        try? FileManager.default.createSymbolicLink(
+            atPath: linkURL.path, withDestinationPath: target)
+    }
+
     /// Provision worktrees in each repo and rewire the
     /// `features/<name>/` aggregation directory. Idempotent for the
     /// aggregation dir but fails if a worktree at this name already
@@ -98,6 +123,7 @@ enum FeatureProvisioner {
             throw error
         }
 
+        linkProjectDocs(into: featureDir, project: project, repos: provisionedRepos)
         writeReadme(in: featureDir, featureName: featureName, repos: provisionedRepos)
         // New worktrees must see project-scope skills immediately —
         // discovery stops at the repo root, so links are the bridge.
@@ -116,6 +142,7 @@ enum FeatureProvisioner {
     ) {
         let url = featureDir.appendingPathComponent("DREAMUX.md")
         let entries = repos.map { "- `\($0.name)/` — worktree on branch `\(featureName)` of repo `\($0.name)`" }.joined(separator: "\n")
+        let docsName = docsLinkName(repoNames: repos.map(\.name))
         let body = """
         # Feature: \(featureName)
 
@@ -147,6 +174,20 @@ enum FeatureProvisioner {
         subfolders. They share only the branch name. Dreamux's Merge
         action will merge each branch into its own repo's default
         branch, in parallel.
+
+        ## Project docs — specs & plans
+
+        `\(docsName)/` here is a symlink to the PROJECT-level docs home shared
+        by every feature (it is not part of any repo). When you write design
+        specs or implementation plans (e.g. via brainstorming/writing-plans
+        skills), save them there instead of any per-repo docs folder:
+
+        - specs → `\(docsName)/specs/YYYY-MM-DD-<topic>-design.md`
+        - plans → `\(docsName)/plans/YYYY-MM-DD-<topic>.md`
+
+        Dreamux's sidebar lists these files and tracks plan progress from
+        their `- [ ]` checkboxes — tick each step's checkbox in the plan file
+        as you complete it.
         """
         try? body.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -186,6 +227,7 @@ enum FeatureProvisioner {
                 withDestinationPath: target
             )
         }
+        linkProjectDocs(into: featureDir, project: project, repos: repos)
         // Idempotent rebuild includes the README — covers features that
         // were created by a pre-readme build of Dreamux, or where the
         // file got deleted.
