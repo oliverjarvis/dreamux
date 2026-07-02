@@ -141,8 +141,7 @@ enum E2ECommands {
                     // port.
                     "webTabs": store.session(for: workspace).webTabURLs
                         .map(\.absoluteString),
-                    "fileTabs": store.session(for: workspace).openFileTabURLs
-                        .map(\.path),
+                    "fileTabs": store.session(for: workspace).fileTabSummaries,
                 ] as [String: Any]
             }
         } else {

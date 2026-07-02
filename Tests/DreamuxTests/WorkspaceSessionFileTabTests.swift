@@ -28,4 +28,21 @@ final class WorkspaceSessionFileTabTests: XCTestCase {
         session.openFileTab(at: b)
         XCTAssertEqual(session.openFileTabURLs.count, 2)
     }
+
+    @MainActor
+    func testFileTabSummariesExposeKindAndMode() throws {
+        let md = sandbox.root.appendingPathComponent("plan.md")
+        try "# t\n".write(to: md, atomically: true, encoding: .utf8)
+        let session = WorkspaceSession(
+            workspace: Workspace(name: "f", workingDirectory: sandbox.root.path)
+        )
+        session.openFileTab(at: md)
+
+        let summaries = session.fileTabSummaries
+        XCTAssertEqual(summaries.count, 1)
+        XCTAssertEqual(summaries[0]["path"], md.resolvingSymlinksInPath().path)
+        XCTAssertEqual(summaries[0]["kind"], "markdown")
+        XCTAssertEqual(summaries[0]["mode"], "rendered")
+        XCTAssertEqual(summaries[0]["dirty"], "false")
+    }
 }

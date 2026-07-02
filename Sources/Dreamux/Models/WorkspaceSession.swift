@@ -99,6 +99,19 @@ final class WorkspaceSession {
         fileTabSessions.values.map(\.fileURL)
     }
 
+    /// Per-tab viewer facts for the e2e state dump: path, kind, active
+    /// view mode, dirty flag. String-valued so it serializes as-is.
+    var fileTabSummaries: [[String: String]] {
+        fileTabSessions.values.map { session in
+            [
+                "path": session.fileURL.path,
+                "kind": session.kind.rawValue,
+                "mode": session.viewMode.rawValue,
+                "dirty": session.isDirty ? "true" : "false",
+            ]
+        }
+    }
+
     // MARK: - Commands
 
     func createTab() {

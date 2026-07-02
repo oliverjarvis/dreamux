@@ -418,8 +418,11 @@ Show/hide the right-side file explorer inspector.
 Request: `{"cmd":"setFileTree","visible":true}`
 Response: `{"ok":true}`
 
-`state` now reports `fileTabs` (absolute paths of open editor tabs) beside
-`webTabs` in each `workspaces[]` entry.
+`state`'s `workspaces[].fileTabs` reports open editor tabs, one object per tab:
+`{"path": "<resolved absolute path>", "kind": "code|markdown|image|video|audio|pdf|officePreview|tabular", "mode": "rendered|source|table", "dirty": "true|false"}`.
+`kind` is decided from the file extension at open; `mode` is the
+active face of multi-mode viewers (markdown rendered/raw, tabular
+table/text).
 
 ### `quit`
 
