@@ -28,7 +28,9 @@ final class WorkspaceSession {
     /// Tab id of the most recently created tab — set by
     /// `handleDidCreateTab` (which Bonsplit calls synchronously inside
     /// `createTab`), so `open…` methods can look up the session they
-    /// just caused to exist.
+    /// just caused to exist. Cleared by `openAgentTab` before each
+    /// creation so a vetoed/deduped creation reads as nil rather than a
+    /// stale id.
     private(set) var lastCreatedTabID: TabID?
 
     /// True when this workspace is the one currently visible in its window.
@@ -260,6 +262,7 @@ final class WorkspaceSession {
     @discardableResult
     func openAgentTab(at path: String, title: String, icon: String) -> TabSession? {
         nextTabCwdOverride = path
+        lastCreatedTabID = nil
         controller.createTab(title: title, icon: icon)
         nextTabCwdOverride = nil
         guard let id = lastCreatedTabID else { return nil }
