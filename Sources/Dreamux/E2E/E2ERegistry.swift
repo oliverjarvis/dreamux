@@ -22,6 +22,10 @@ final class E2EBridge {
     /// `WorkspaceSidebar`, which owns the sheet's presentation state.
     var pendingMergeWorkspaceID: UUID?
 
+    /// Desired visibility of the right-side file explorer, parked by the
+    /// `setFileTree` command and consumed by `ContentView`.
+    var pendingFileTreeVisible: Bool?
+
     /// When true, the Run pane kicks off its Detect flow (sending the
     /// detect prompt to the `claude` CLI in its embedded terminal) the
     /// moment it's on screen. Consumed by `RunSetupView`.

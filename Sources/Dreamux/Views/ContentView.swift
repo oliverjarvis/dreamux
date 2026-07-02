@@ -133,6 +133,12 @@ struct ContentView: View {
         .onChange(of: sidebarMode) { _, newValue in
             e2eBridge?.currentSidebarMode = newValue
         }
+        .onChange(of: e2eBridge?.pendingFileTreeVisible) { _, _ in
+            if let bridge = e2eBridge, let visible = bridge.pendingFileTreeVisible {
+                bridge.pendingFileTreeVisible = nil
+                showFileTree = visible
+            }
+        }
     }
 
     @ViewBuilder

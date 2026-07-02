@@ -408,6 +408,19 @@ the remotely merged work, same as after a local merge.
 ← {"ok":true}
 ```
 
+### `openFile`
+Open a file as a Monaco editor tab in the active (or named) workspace.
+Request: `{"cmd":"openFile","path":"/abs/path/to/file","workspace":"<name?>"}`
+Response: `{"ok":true}`
+
+### `setFileTree`
+Show/hide the right-side file explorer inspector.
+Request: `{"cmd":"setFileTree","visible":true}`
+Response: `{"ok":true}`
+
+`state` now reports `fileTabs` (absolute paths of open editor tabs) beside
+`webTabs` in each `workspaces[]` entry.
+
 ### `quit`
 
 Reply, then terminate the app (`NSApp.terminate`, with a forced

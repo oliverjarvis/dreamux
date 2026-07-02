@@ -83,6 +83,10 @@ enum E2ECommands {
             return try openMergeSheet(request: request)
         case "cleanupFeature":
             return try await cleanupFeature(request: request)
+        case "openFile":
+            return try openFile(request: request)
+        case "setFileTree":
+            return try setFileTree(request: request)
         case "quit":
             return ["ok": true]
         default:
@@ -137,6 +141,8 @@ enum E2ECommands {
                     // port.
                     "webTabs": store.session(for: workspace).webTabURLs
                         .map(\.absoluteString),
+                    "fileTabs": store.session(for: workspace).openFileTabURLs
+                        .map(\.path),
                 ] as [String: Any]
             }
         } else {
@@ -326,6 +332,37 @@ enum E2ECommands {
         default:
             throw CommandError(message: "mode must be \"workspace\", \"run\", or \"signals\"")
         }
+        return ["ok": true]
+    }
+
+    /// Open a file as a Monaco editor tab in the active (or named)
+    /// workspace — the same path the file tree's click uses.
+    private static func openFile(request: [String: Any]) throws -> [String: Any] {
+        let path = try string("path", in: request)
+        guard path.hasPrefix("/") else {
+            throw CommandError(message: "\"path\" must be an absolute path")
+        }
+        let (_, store, _) = try projectStores()
+        let workspace: Workspace
+        if let name = request["workspace"] as? String {
+            workspace = try self.workspace(named: name)
+        } else if let active = store.activeWorkspace ?? store.workspaces.first {
+            workspace = active
+        } else {
+            throw CommandError(message: "no workspace to open the file in")
+        }
+        store.activate(workspace.id)
+        store.session(for: workspace).openFileTab(at: URL(fileURLWithPath: path))
+        return ["ok": true]
+    }
+
+    /// Toggle the right-side file explorer inspector.
+    private static func setFileTree(request: [String: Any]) throws -> [String: Any] {
+        guard let visible = request["visible"] as? Bool else {
+            throw CommandError(message: "missing boolean \"visible\" parameter")
+        }
+        let (handles, _, _) = try projectStores()
+        handles.bridge.pendingFileTreeVisible = visible
         return ["ok": true]
     }
 
