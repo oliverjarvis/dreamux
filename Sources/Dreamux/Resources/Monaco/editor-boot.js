@@ -16,6 +16,51 @@ self.MonacoEnvironment = {
 function post(msg) { window.webkit.messageHandlers.bridge.postMessage(msg); }
 
 require(['vs/editor/editor.main'], function () {
+  // Monaco ships ~80 languages but not TOML; register a small Monarch
+  // tokenizer so run.toml / Cargo.toml / pyproject.toml highlight.
+  monaco.languages.register({ id: 'toml', extensions: ['.toml'] });
+  monaco.languages.setLanguageConfiguration('toml', {
+    comments: { lineComment: '#' },
+    brackets: [['[', ']'], ['{', '}']],
+  });
+  monaco.languages.setMonarchTokensProvider('toml', {
+    tokenizer: {
+      root: [
+        [/^\s*\[\[?[^\]]*\]\]?/, 'keyword'],            // [table] / [[array of tables]]
+        [/^\s*[A-Za-z0-9_"'.-]+(?=\s*=)/, 'variable'],  // key =
+        [/#.*$/, 'comment'],
+        [/"""/, 'string', '@tripleString'],
+        [/"/, 'string', '@string'],
+        [/'''/, 'string', '@tripleLiteral'],
+        [/'/, 'string', '@literalString'],
+        [/\b(true|false)\b/, 'constant'],
+        // Dates before numbers so 2026-07-02 isn't three numbers.
+        [/\d{4}-\d{2}-\d{2}([Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?/, 'number'],
+        [/\d{2}:\d{2}:\d{2}(\.\d+)?/, 'number'],
+        [/[+-]?(0x[0-9A-Fa-f_]+|0o[0-7_]+|0b[01_]+|inf|nan|\d[\d_]*(\.[\d_]+)?([eE][+-]?\d+)?)/, 'number'],
+        [/[,={}\[\]]/, 'delimiter'],
+      ],
+      string: [
+        [/[^"\\]+/, 'string'],
+        [/\\./, 'string.escape'],
+        [/"/, 'string', '@pop'],
+      ],
+      tripleString: [
+        [/"""/, 'string', '@pop'],
+        [/\\./, 'string.escape'],
+        [/./, 'string'],
+      ],
+      literalString: [
+        [/[^']+/, 'string'],
+        [/'/, 'string', '@pop'],
+      ],
+      tripleLiteral: [
+        [/'''/, 'string', '@pop'],
+        [/./, 'string'],
+      ],
+    },
+  });
+
   var editor = monaco.editor.create(document.getElementById('container'), {
     value: '',
     language: 'plaintext',
