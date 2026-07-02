@@ -8,6 +8,11 @@ import GhosttyTerminal
 final class TabSession: Identifiable {
     let id = UUID()
     let viewState: TerminalViewState
+    /// The working directory the shell was started in — nil means the
+    /// caller's environment default. Exposed so callers that programmatically
+    /// open a tab (e.g. `WorkspaceSession.openAgentTab`) can confirm where
+    /// it landed.
+    let cwd: String?
     /// True when this tab has had agent activity (terminal bell) since the
     /// user last looked at it. Drives the badge on the workspace tile.
     var hasUnread: Bool = false
@@ -19,6 +24,7 @@ final class TabSession: Identifiable {
         cwd: String? = nil,
         onActivity: @escaping @Sendable (String?) -> Void = { _ in }
     ) {
+        self.cwd = cwd
         self.shell = PTYShellSession(cwd: cwd, onActivity: onActivity)
 
         // Ghostty ships with default `super+<letter>` keybinds (super+t,

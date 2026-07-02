@@ -25,6 +25,12 @@ final class WorkspaceSession {
     private var titleObservers: [TabID: TitleObserver] = [:]
     private var didBootstrap = false
 
+    /// Tab id of the most recently created tab — set by
+    /// `handleDidCreateTab` (which Bonsplit calls synchronously inside
+    /// `createTab`), so `open…` methods can look up the session they
+    /// just caused to exist.
+    private(set) var lastCreatedTabID: TabID?
+
     /// True when this workspace is the one currently visible in its window.
     /// The store flips this on selection changes; while false, bell events
     /// always mark tabs unread (the user can't see them yet). While true,
@@ -154,6 +160,8 @@ final class WorkspaceSession {
               webTabSessions[tab.id] == nil,
               fileTabSessions[tab.id] == nil else { return }
 
+        lastCreatedTabID = tab.id
+
         // File tab: the pending file URL (set by openFileTab just before
         // createTab) claims this tab id.
         if let fileURL = nextTabFileURL {
@@ -244,6 +252,18 @@ final class WorkspaceSession {
         // The didCreateTab delegate fires synchronously inside
         // createTab and consumes the override; just in case, clear here.
         nextTabCwdOverride = nil
+    }
+
+    /// Open a terminal tab cwd'd at `path` and hand back its TabSession
+    /// so the caller can type into it (plan execution, planning
+    /// kickoffs). Same mechanics as `openTab`, plus the return value.
+    @discardableResult
+    func openAgentTab(at path: String, title: String, icon: String) -> TabSession? {
+        nextTabCwdOverride = path
+        controller.createTab(title: title, icon: icon)
+        nextTabCwdOverride = nil
+        guard let id = lastCreatedTabID else { return nil }
+        return tabSessions[id]
     }
 
     /// URL claimed by the next created tab — the web analog of

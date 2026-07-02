@@ -45,4 +45,15 @@ final class WorkspaceSessionFileTabTests: XCTestCase {
         XCTAssertEqual(summaries[0]["mode"], "rendered")
         XCTAssertEqual(summaries[0]["dirty"], "false")
     }
+
+    @MainActor
+    func testOpenAgentTabReturnsItsTabSession() {
+        let session = WorkspaceSession(
+            workspace: Workspace(name: "f", workingDirectory: sandbox.root.path)
+        )
+        let returned = session.openAgentTab(
+            at: sandbox.root.path, title: "plan: x", icon: "text.badge.checkmark")
+        XCTAssertNotNil(returned)
+        XCTAssertEqual(returned?.cwd, sandbox.root.path)
+    }
 }
