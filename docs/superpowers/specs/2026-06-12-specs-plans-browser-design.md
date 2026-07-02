@@ -1,7 +1,7 @@
 # Specs & Plans Browser
 
 **Date:** 2026-06-12
-**Status:** Approved
+**Status:** Superseded by `2026-07-02-plans-specs-orchestration-design.md`
 
 ## Problem
 
