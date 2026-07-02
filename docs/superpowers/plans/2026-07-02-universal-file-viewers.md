@@ -33,7 +33,7 @@
 - Consumes: nothing (leaf).
 - Produces: `enum FileTabKind: String, Sendable` with cases `code, markdown, image, video, audio, pdf, officePreview, tabular`; `static func kind(forPathExtension:) -> FileTabKind`; `var tabIcon: String`; `var isMonacoBacked: Bool`. Later tasks switch on exactly these case names.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `Tests/DreamuxTests/FileTabKindTests.swift`:
 
@@ -82,12 +82,12 @@ final class FileTabKindTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter FileTabKindTests 2>&1 | tail -5`
 Expected: FAIL — `cannot find 'FileTabKind' in scope` (compile error counts as the failing state).
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `Sources/Dreamux/Models/FileTabKind.swift`:
 
@@ -165,12 +165,12 @@ enum FileTabKind: String, Sendable {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `swift test --filter FileTabKindTests 2>&1 | tail -5`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/FileTabKind.swift Tests/DreamuxTests/FileTabKindTests.swift
@@ -190,11 +190,11 @@ git commit -m "Add FileTabKind classifier for per-type file viewers"
 - Consumes: nothing new.
 - Produces: JS `window.__setContents(text, ext, theme)` — second parameter is now the **file extension** (e.g. `"swift"`, `""`), not a language id; JS `window.__getValue()` returning the editor's current text (used by Task 5's `refreshCurrentTextFromEditor`). Swift: `FileEditorTabSession.language(forExtension:)` no longer exists.
 
-- [ ] **Step 1: Delete the obsolete Swift test**
+- [x] **Step 1: Delete the obsolete Swift test**
 
 In `Tests/DreamuxTests/FileEditorTabSessionTests.swift`, delete the whole `testLanguageForExtension` method (lines 10–15). Coverage for classification now lives in `FileTabKindTests`; language resolution moves into Monaco itself where the registry lives.
 
-- [ ] **Step 2: Rewrite `editor-boot.js` language handling**
+- [x] **Step 2: Rewrite `editor-boot.js` language handling**
 
 In `Sources/Dreamux/Resources/Monaco/editor-boot.js`, inside the `require(['vs/editor/editor.main'], function () { … })` callback, add a resolver above `window.__setContents` and change `__setContents` to take an extension. The full callback becomes:
 
@@ -247,7 +247,7 @@ require(['vs/editor/editor.main'], function () {
 });
 ```
 
-- [ ] **Step 3: Update `handleReady` and delete `language(forExtension:)`**
+- [x] **Step 3: Update `handleReady` and delete `language(forExtension:)`**
 
 In `Sources/Dreamux/Models/FileEditorTabSession.swift`:
 
@@ -267,12 +267,12 @@ Replace `handleReady()` with:
 
 (`contents` is still the stored property at this point; Task 5 renames it.)
 
-- [ ] **Step 4: Build and run the full test suite**
+- [x] **Step 4: Build and run the full test suite**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: build succeeds; all tests pass (the deleted test no longer runs; nothing else referenced `language(forExtension:)`).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Resources/Monaco/editor-boot.js Sources/Dreamux/Models/FileEditorTabSession.swift Tests/DreamuxTests/FileEditorTabSessionTests.swift
@@ -290,7 +290,7 @@ git commit -m "Resolve Monaco language from extension via the language registry"
 - Consumes: Task 2's `languageForExtension` (picks up the registration automatically because it walks `monaco.languages.getLanguages()`).
 - Produces: a registered `toml` Monaco language with tokenizer + comment config; `.toml` files highlight.
 
-- [ ] **Step 1: Register the language + Monarch tokenizer**
+- [x] **Step 1: Register the language + Monarch tokenizer**
 
 In `Sources/Dreamux/Resources/Monaco/editor-boot.js`, inside the `require([...])` callback, immediately **before** `var editor = monaco.editor.create(...)`, insert:
 
@@ -341,14 +341,14 @@ In `Sources/Dreamux/Resources/Monaco/editor-boot.js`, inside the `require([...])
   });
 ```
 
-- [ ] **Step 2: Verify by launching the app**
+- [x] **Step 2: Verify by launching the app**
 
 Run: `swift build 2>&1 | tail -3`
 Expected: build succeeds.
 
 Then launch (`swift run Dreamux` or the usual dev launch), open any feature's file tree (⌥⌘E), open `.dreamux/run.toml` or any `*.toml` file, and confirm: table headers, keys, strings, and comments are colorized (not uniform plaintext), and `#` comments are dimmed. There is no JS unit-test harness for the vendored Monaco bundle — the e2e state dump can't see token colors, so this visual check plus the resolver test in Task 10's e2e scenario is the verification.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add Sources/Dreamux/Resources/Monaco/editor-boot.js
@@ -371,7 +371,7 @@ git commit -m "Register TOML Monarch tokenizer in Monaco"
   - `static func looksLikeHeader(_ records: [[String]]) -> Bool`
   - `static func table(from text: String, delimiter: Character, treatFirstRowAsHeader: Bool?, displayLimit: Int) -> CSVTable?` — nil when parsing fails or the content isn't tabular (fewer than 2 records AND fewer than 2 columns). `treatFirstRowAsHeader: nil` means "use the heuristic".
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/DreamuxTests/CSVTableTests.swift`:
 
@@ -476,12 +476,12 @@ final class CSVTableTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter CSVTableTests 2>&1 | tail -5`
 Expected: FAIL — `cannot find 'CSVTable' in scope`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `Sources/Dreamux/Models/CSVTable.swift`:
 
@@ -596,12 +596,12 @@ struct CSVTable: Equatable {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --filter CSVTableTests 2>&1 | tail -5`
 Expected: PASS (12 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/CSVTable.swift Tests/DreamuxTests/CSVTableTests.swift
@@ -629,7 +629,7 @@ git commit -m "Add RFC 4180 CSVTable parser with header heuristic"
   - `nonisolated static func defaultViewMode(for kind: FileTabKind) -> FileTabViewMode`
   - `isSupported` semantics: Monaco-backed kinds → decodable-under-cap text; media kinds → file exists.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `Tests/DreamuxTests/FileEditorTabSessionTests.swift` (inside the class):
 
@@ -676,12 +676,12 @@ Append to `Tests/DreamuxTests/FileEditorTabSessionTests.swift` (inside the class
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter FileEditorTabSessionTests 2>&1 | tail -5`
 Expected: FAIL — `type 'FileEditorTabSession' has no member 'defaultViewMode'` (and friends).
 
-- [ ] **Step 3: Implement on the session**
+- [x] **Step 3: Implement on the session**
 
 In `Sources/Dreamux/Models/FileEditorTabSession.swift`:
 
@@ -782,12 +782,12 @@ In `Sources/Dreamux/Models/WorkspaceSession.swift`, in `openFileTab(at:)`, repla
         nextTabFileURL = nil
 ```
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run: `swift test 2>&1 | tail -3`
 Expected: PASS — including the pre-existing `testSupportedFlagReflectsReadability` (unchanged semantics for `.swift`/`.bin`) and `WorkspaceSessionFileTabTests`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/FileEditorTabSession.swift Sources/Dreamux/Models/WorkspaceSession.swift Tests/DreamuxTests/FileEditorTabSessionTests.swift
@@ -807,7 +807,7 @@ git commit -m "Session-level file kind, view mode, and live text plumbing"
 - Consumes: Task 5's `viewMode`, `currentText`, `refreshCurrentTextFromEditor()`; the existing `FileEditorWebView`.
 - Produces: `MarkdownPreviewView(text:)` (also consumed later by the plans work); `ViewerModeToggle` — a reusable segmented toggle used by Task 8's table view.
 
-- [ ] **Step 1: Add the dependency**
+- [x] **Step 1: Add the dependency**
 
 In `Package.swift` `dependencies:` array, after the bonsplit entry, add:
 
@@ -826,7 +826,7 @@ In the `Dreamux` target's `dependencies:`, after the Bonsplit product line, add:
 Run: `swift build 2>&1 | tail -3`
 Expected: resolves and builds. (First resolve rewrites `Package.resolved` — commit it with this task.)
 
-- [ ] **Step 2: Create the preview view**
+- [x] **Step 2: Create the preview view**
 
 Create `Sources/Dreamux/Views/Viewers/MarkdownPreviewView.swift`:
 
@@ -853,7 +853,7 @@ struct MarkdownPreviewView: View {
 }
 ```
 
-- [ ] **Step 3: Add the toggle + markdown container in the tab content**
+- [x] **Step 3: Add the toggle + markdown container in the tab content**
 
 In `Sources/Dreamux/Views/WorkspaceTerminalContainer.swift`, add below `FileEditorWebView`:
 
@@ -929,14 +929,14 @@ Then in `FileEditorView`'s `body`, route markdown tabs to it (the full dispatche
     }
 ```
 
-- [ ] **Step 4: Build, test, and verify by hand**
+- [x] **Step 4: Build, test, and verify by hand**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass.
 
 Launch the app, open a `.md` file from the file tree: it renders (headings, checkboxes, code blocks); toggle Raw → Monaco with markdown highlighting; edit without saving, toggle Rendered → the edit is reflected; ⌘S in Raw saves.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Package.swift Package.resolved Sources/Dreamux/Views/Viewers/MarkdownPreviewView.swift Sources/Dreamux/Views/WorkspaceTerminalContainer.swift
@@ -957,7 +957,7 @@ git commit -m "Render markdown tabs with MarkdownUI behind a Rendered|Raw toggle
 - Consumes: only Foundation/AppKit/AVKit/PDFKit/Quartz and a `fileURL: URL`.
 - Produces: `ImageViewerView(fileURL:)`, `MediaPlayerView(fileURL:)`, `PDFViewerView(fileURL:)`, `QuickLookPreviewView(fileURL:)` — all plain SwiftUI views, wired by Task 9.
 
-- [ ] **Step 1: Image viewer**
+- [x] **Step 1: Image viewer**
 
 Create `Sources/Dreamux/Views/Viewers/ImageViewerView.swift`:
 
@@ -1102,7 +1102,7 @@ private struct ZoomableImage: NSViewRepresentable {
 }
 ```
 
-- [ ] **Step 2: AV player, PDF, and Quick Look wrappers**
+- [x] **Step 2: AV player, PDF, and Quick Look wrappers**
 
 Create `Sources/Dreamux/Views/Viewers/MediaPlayerView.swift`:
 
@@ -1205,12 +1205,12 @@ private struct QLRepresentable: NSViewRepresentable {
 }
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Run: `swift build 2>&1 | tail -3`
 Expected: builds clean (views are not yet reachable — Task 9 wires them; unreferenced types are fine).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/Viewers/ImageViewerView.swift Sources/Dreamux/Views/Viewers/MediaPlayerView.swift Sources/Dreamux/Views/Viewers/PDFViewerView.swift Sources/Dreamux/Views/Viewers/QuickLookPreviewView.swift
@@ -1229,7 +1229,7 @@ git commit -m "Add native image/AV/PDF/QuickLook viewer views"
 - Consumes: Task 4's `CSVTable`; Task 5's `currentText`/`viewMode`; Task 6's `ViewerModeToggle`.
 - Produces: `TabularTabView(session:)` — wired by Task 9's dispatcher.
 
-- [ ] **Step 1: The table view**
+- [x] **Step 1: The table view**
 
 Create `Sources/Dreamux/Views/Viewers/CSVTableView.swift`:
 
@@ -1402,7 +1402,7 @@ private struct CSVGrid: NSViewRepresentable {
 }
 ```
 
-- [ ] **Step 2: The tabular tab container**
+- [x] **Step 2: The tabular tab container**
 
 In `Sources/Dreamux/Views/WorkspaceTerminalContainer.swift`, next to `MarkdownTabView`, add:
 
@@ -1430,12 +1430,12 @@ private struct TabularTabView: View {
 }
 ```
 
-- [ ] **Step 3: Build and verify by hand**
+- [x] **Step 3: Build and verify by hand**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass (TabularTabView is wired in Task 9; for a hand-check now, temporarily route `.tabular` in `FileEditorView` the same way Task 6 routed markdown — or defer the hand-check to Task 9).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/Viewers/CSVTableView.swift Sources/Dreamux/Views/WorkspaceTerminalContainer.swift
@@ -1453,7 +1453,7 @@ git commit -m "Add sortable CSV/TSV table view with Table|Text toggle"
 - Consumes: everything above.
 - Produces: final `FileEditorView` shape; `UnsupportedFileView` with size info, Reveal in Finder, and Try Quick Look.
 
-- [ ] **Step 1: Rewrite `FileEditorView` and the placeholder**
+- [x] **Step 1: Rewrite `FileEditorView` and the placeholder**
 
 In `Sources/Dreamux/Views/WorkspaceTerminalContainer.swift`, replace the whole `FileEditorView` struct (keep `FileEditorWebView` as is) with:
 
@@ -1530,14 +1530,14 @@ private struct UnsupportedFileView: View {
 
 If Task 8's hand-check added a temporary `.tabular` route in the old `FileEditorView`, this rewrite subsumes it.
 
-- [ ] **Step 2: Build, test, and walk every kind by hand**
+- [x] **Step 2: Build, test, and walk every kind by hand**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass.
 
 Launch the app and from a feature's file tree open one of each: `.swift` (Monaco, highlighted), `.toml` (Monaco, TOML colors), `.md` (rendered + toggle), `.csv` (table + sort + toggle), `.png` (zoom, Fit/100%, double-click), `.mp4` or `.mov` (plays), `.pdf` (pages), `.xlsx` (Quick Look cells), and a binary (placeholder → Try Quick Look → Reveal in Finder). Confirm tab chips show per-kind icons.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/WorkspaceTerminalContainer.swift
@@ -1558,7 +1558,7 @@ git commit -m "Dispatch file tabs to per-kind viewers; richer unsupported placeh
 - Consumes: Task 5's session fields.
 - Produces: state dump `workspaces[].fileTabs` becomes `[{path, kind, mode, dirty}]` (was `[path]`). Nothing in `scripts/e2e/driver.py` consumes `fileTabs` yet — verified — so the shape change is safe.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `Tests/DreamuxTests/WorkspaceSessionFileTabTests.swift` (match the existing test style in that file — it drives `openFileTab` against a real `WorkspaceSession`; reuse its setup helpers):
 
@@ -1580,12 +1580,12 @@ Append to `Tests/DreamuxTests/WorkspaceSessionFileTabTests.swift` (match the exi
 
 (If that test file's fixture names differ — e.g. the session variable is created per-test — adapt the body to its local conventions; the assertion set is what matters.)
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter WorkspaceSessionFileTabTests 2>&1 | tail -5`
 Expected: FAIL — `value of type 'WorkspaceSession' has no member 'fileTabSummaries'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `Sources/Dreamux/Models/WorkspaceSession.swift`, replace the `openFileTabURLs` property with:
 
@@ -1625,12 +1625,12 @@ In `scripts/e2e/PROTOCOL.md`, find the `state` response documentation for `works
   table/text).
 ```
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run: `swift test 2>&1 | tail -3`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/WorkspaceSession.swift Sources/Dreamux/E2E/E2ECommands.swift scripts/e2e/PROTOCOL.md Tests/DreamuxTests/WorkspaceSessionFileTabTests.swift
