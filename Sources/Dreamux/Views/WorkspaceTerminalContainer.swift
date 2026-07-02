@@ -143,30 +143,72 @@ private struct WebViewRepresentable: NSViewRepresentable {
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
-/// A Monaco editor tab: the session's Monaco-hosting `WKWebView`, or a
-/// placeholder when the file is binary/oversized.
+/// Dispatch a file tab to its kind's viewer. Monaco-backed kinds can
+/// still be unsupported (binary/oversized text); media kinds were
+/// existence-checked at open.
 private struct FileEditorView: View {
     @Bindable var session: FileEditorTabSession
 
     var body: some View {
-        if session.kind == .markdown && session.isSupported {
-            MarkdownTabView(session: session)
-        } else if session.isSupported {
-            FileEditorWebView(webView: session.webView)
-        } else {
-            VStack(spacing: 12) {
-                Image(systemName: "doc.questionmark")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.tertiary)
-                Text("Can't display \(session.title)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text("It's binary or larger than 2 MB.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+        if !session.isSupported || session.useQuickLookFallback {
+            if session.useQuickLookFallback {
+                QuickLookPreviewView(fileURL: session.fileURL)
+            } else {
+                UnsupportedFileView(session: session)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            switch session.kind {
+            case .markdown:
+                MarkdownTabView(session: session)
+            case .tabular:
+                TabularTabView(session: session)
+            case .image:
+                ImageViewerView(fileURL: session.fileURL)
+            case .video, .audio:
+                MediaPlayerView(fileURL: session.fileURL)
+            case .pdf:
+                PDFViewerView(fileURL: session.fileURL)
+            case .officePreview:
+                QuickLookPreviewView(fileURL: session.fileURL)
+            case .code:
+                FileEditorWebView(webView: session.webView)
+            }
         }
+    }
+}
+
+/// Placeholder for text files that are binary or over the 2 MB cap,
+/// with escape hatches: Quick Look often renders what Monaco can't.
+private struct UnsupportedFileView: View {
+    @Bindable var session: FileEditorTabSession
+
+    private var fileSizeLabel: String? {
+        guard let values = try? session.fileURL.resourceValues(forKeys: [.fileSizeKey]),
+              let size = values.fileSize else { return nil }
+        return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "doc.questionmark")
+                .font(.system(size: 36))
+                .foregroundStyle(.tertiary)
+            Text("Can't display \(session.title)")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text(fileSizeLabel.map { "It's binary or too large to edit (\($0), 2 MB cap)." }
+                 ?? "It's binary or larger than 2 MB.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            HStack(spacing: 10) {
+                Button("Try Quick Look") { session.useQuickLookFallback = true }
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([session.fileURL])
+                }
+            }
+            .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
