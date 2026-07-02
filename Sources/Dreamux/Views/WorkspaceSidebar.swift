@@ -86,13 +86,13 @@ struct WorkspaceSidebar: View {
             )
         }
         .sheet(item: $runningPlan) { plan in
+            let record = docStore.ledger.recordForPlan(docStore.relativePath(of: plan))
             RunPlanSheet(
                 plan: plan,
+                initialBranch: record?.featureName
+                    ?? PlanDoc.branchName(forFileName: plan.fileURL.lastPathComponent),
                 availableRepos: repoStore.repositories,
-                isResume: docStore.status(
-                    for: plan,
-                    featureExists: { name in store.workspaces.contains { $0.name == name } }
-                ) == .running,
+                isResume: record != nil,
                 onSubmit: { branch, repoIDs in
                     runningPlan = nil
                     executePlan(plan, branch: branch, repoIDs: repoIDs)

@@ -287,7 +287,7 @@ struct RunPlanSheet: View {
     @State private var branchName: String
     @State private var selected: Set<String>
 
-    init(plan: PlanDoc, availableRepos: [Repository], isResume: Bool,
+    init(plan: PlanDoc, initialBranch: String, availableRepos: [Repository], isResume: Bool,
          onSubmit: @escaping (_ branchName: String, _ repoIDs: [String]) -> Void,
          onCancel: @escaping () -> Void) {
         self.plan = plan
@@ -295,8 +295,7 @@ struct RunPlanSheet: View {
         self.isResume = isResume
         self.onSubmit = onSubmit
         self.onCancel = onCancel
-        _branchName = State(initialValue: PlanDoc.branchName(
-            forFileName: plan.fileURL.lastPathComponent))
+        _branchName = State(initialValue: initialBranch)
         _selected = State(initialValue: Set(availableRepos.map(\.name)))
     }
 
