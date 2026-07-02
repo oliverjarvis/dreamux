@@ -2,17 +2,29 @@ import SwiftUI
 import AppKit
 
 /// Zoomable image viewer: NSScrollView magnification (pinch + smart
-/// zoom) around an NSImageView, with Fit / 100% controls and a live
-/// zoom readout. Double-click toggles fit ↔ actual size.
+/// zoom) around an NSImageView, with Fit / 100% controls and a zoom
+/// readout (updated when a gesture ends). Double-click toggles fit ↔
+/// actual size.
 struct ImageViewerView: View {
     let fileURL: URL
+    @State private var loadState: LoadState = .loading
     @State private var zoomPercent: Int = 100
     @State private var command: ZoomCommand? = nil
 
     enum ZoomCommand: Equatable { case fit, actualSize }
+    enum LoadState { case loading, loaded(NSImage), failed }
 
     var body: some View {
-        if let image = NSImage(contentsOf: fileURL) {
+        switch loadState {
+        case .loading:
+            Color.clear.task {
+                if let image = NSImage(contentsOf: fileURL) {
+                    loadState = .loaded(image)
+                } else {
+                    loadState = .failed
+                }
+            }
+        case .loaded(let image):
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Button("Fit") { command = .fit }
@@ -32,7 +44,7 @@ struct ImageViewerView: View {
                 Divider()
                 ZoomableImage(image: image, zoomPercent: $zoomPercent, command: $command)
             }
-        } else {
+        case .failed:
             ContentUnavailableView(
                 "Can't display \(fileURL.lastPathComponent)",
                 systemImage: "photo.badge.exclamationmark",
