@@ -59,9 +59,9 @@ final class DocStore {
         // a spec even without the -design suffix.
         let referencedSpecs = Set(found
             .filter { $0.kind == .plan }
-            .compactMap { $0.specReference.map { ref in resolve(ref) } })
+            .compactMap { $0.specReference.map { ref in resolve(ref).standardizedFileURL } })
         docs = found.map { doc in
-            if doc.kind == .doc, referencedSpecs.contains(canonical(doc.fileURL)) {
+            if doc.kind == .doc, referencedSpecs.contains(doc.fileURL.standardizedFileURL) {
                 return PlanDoc(
                     fileURL: doc.fileURL, kind: .spec, title: doc.title, date: doc.date,
                     goal: doc.goal, specReference: doc.specReference,
@@ -89,8 +89,8 @@ final class DocStore {
     /// the filename convention (plan name + `-design`).
     func pairedSpec(for plan: PlanDoc) -> PlanDoc? {
         if let ref = plan.specReference {
-            let target = resolve(ref)
-            if let match = docs.first(where: { canonical($0.fileURL) == target }) {
+            let target = resolve(ref).standardizedFileURL
+            if let match = docs.first(where: { $0.fileURL.standardizedFileURL == target }) {
                 return match
             }
         }
@@ -102,8 +102,8 @@ final class DocStore {
     }
 
     func relativePath(of doc: PlanDoc) -> String {
-        canonical(doc.fileURL).path.replacingOccurrences(
-            of: canonical(projectRoot).path + "/", with: "")
+        doc.fileURL.standardizedFileURL.path.replacingOccurrences(
+            of: projectRoot.standardizedFileURL.path + "/", with: "")
     }
 
     func status(for doc: PlanDoc, featureExists: (String) -> Bool) -> PlanStatus {
@@ -163,24 +163,8 @@ final class DocStore {
     }
 
     private func resolve(_ reference: String) -> URL {
-        let raw = reference.hasPrefix("/")
+        reference.hasPrefix("/")
             ? URL(fileURLWithPath: reference)
             : projectRoot.appendingPathComponent(reference)
-        return canonical(raw)
-    }
-
-    /// `URL.standardizedFileURL` doesn't resolve macOS's `/var` →
-    /// `/private/var`-style symlinks, but `FileManager`'s recursive
-    /// enumerator does for any file reached by descending into a
-    /// subdirectory — so a URL built by hand (`projectRoot.appending(...)`)
-    /// can silently diverge from the same file's `doc.fileURL` two levels
-    /// down (exactly the shape of `docs/plans/*.md`). Route every path
-    /// comparison through `realpath(3)` so both sides land on the same
-    /// canonical string; fall back to `standardizedFileURL` when the path
-    /// doesn't exist yet (nothing on disk to resolve against).
-    private func canonical(_ url: URL) -> URL {
-        var buffer = [Int8](repeating: 0, count: Int(PATH_MAX))
-        guard realpath(url.path, &buffer) != nil else { return url.standardizedFileURL }
-        return URL(fileURLWithPath: String(cString: buffer))
     }
 }
