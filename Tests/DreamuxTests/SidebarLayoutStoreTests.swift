@@ -69,4 +69,13 @@ final class SidebarLayoutStoreTests: XCTestCase {
         let store = SidebarLayoutStore(project: project)
         XCTAssertEqual(store.tiles, [.signals, .browser])
     }
+
+    @MainActor
+    func testPlansExpandedPersists() throws {
+        let store = SidebarLayoutStore(project: project)
+        XCTAssertTrue(store.plansExpanded, "expanded by default")
+        store.plansExpanded = false
+        let reloaded = SidebarLayoutStore(project: project)
+        XCTAssertFalse(reloaded.plansExpanded)
+    }
 }

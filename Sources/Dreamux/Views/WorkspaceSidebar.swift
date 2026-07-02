@@ -12,6 +12,9 @@ struct WorkspaceSidebar: View {
     @Bindable var runners: RunnerManager
     @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
+    @Bindable var docStore: DocStore
+    let planRunner: PlanRunCoordinator
+    let onOpenDoc: (URL) -> Void
 
     @State private var showAddFeature = false
     @State private var showAddRepo = false
@@ -21,6 +24,8 @@ struct WorkspaceSidebar: View {
     @State private var pendingMerge: Workspace?
     @State private var repositoriesExpanded = false
     @State private var switchNotice: SwitchNotice?
+    @State private var runningPlan: PlanDoc?
+    @State private var showNewPlan = false
     /// Feature row currently under the pointer — drives hover-reveal of the
     /// run controls without giving every row its own `@State` (so the rows
     /// can stay lightweight builder methods).
@@ -80,6 +85,30 @@ struct WorkspaceSidebar: View {
                 onDismiss: { customizing = nil }
             )
         }
+        .sheet(item: $runningPlan) { plan in
+            RunPlanSheet(
+                plan: plan,
+                availableRepos: repoStore.repositories,
+                isResume: docStore.status(
+                    for: plan,
+                    featureExists: { name in store.workspaces.contains { $0.name == name } }
+                ) == .running,
+                onSubmit: { branch, repoIDs in
+                    runningPlan = nil
+                    executePlan(plan, branch: branch, repoIDs: repoIDs)
+                },
+                onCancel: { runningPlan = nil }
+            )
+        }
+        .sheet(isPresented: $showNewPlan) {
+            NewPlanSheet(
+                onSubmit: { idea in
+                    showNewPlan = false
+                    openPlanningSession(prompt: PlanPrompts.brainstormKickoff(idea: idea))
+                },
+                onCancel: { showNewPlan = false }
+            )
+        }
         .alert(
             "Close \(pendingClose?.name ?? "feature")?",
             isPresented: Binding(
@@ -125,6 +154,20 @@ struct WorkspaceSidebar: View {
                 isEnabled: { _ in true },
                 onTap: handleTileTap,
                 onReorder: { layout.persistTiles() }
+            )
+
+            PlansSpecsSection(
+                docStore: docStore,
+                layout: layout,
+                featureExists: { name in store.workspaces.contains { $0.name == name } },
+                onOpenDoc: onOpenDoc,
+                onRunPlan: { runningPlan = $0 },
+                onNewPlan: { showNewPlan = true },
+                onWritePlan: { spec in
+                    openPlanningSession(
+                        prompt: PlanPrompts.writePlanKickoff(
+                            specRelativePath: docStore.relativePath(of: spec)))
+                }
             )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -545,6 +588,39 @@ struct WorkspaceSidebar: View {
     }
 
     // MARK: - Actions
+
+    private func executePlan(_ plan: PlanDoc, branch: String, repoIDs: [String]) {
+        isWorking = true
+        Task {
+            do {
+                let workspace = try await planRunner.runPlan(
+                    plan, branchName: branch, repoNames: repoIDs)
+                sidebarMode = .workspace
+                store.activate(workspace.id)
+            } catch {
+                addError = error.localizedDescription
+            }
+            isWorking = false
+        }
+    }
+
+    /// One planning terminal per project, cwd at the project root where
+    /// `repos/<repo>/<default>/` checkouts and `docs/` are visible.
+    /// Reuses the existing tab when it's still open (tracked on the
+    /// session — see `planningTabID` below); the kickoff prompt is typed
+    /// via the shared driver either way.
+    private func openPlanningSession(prompt: String) {
+        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        let session = store.session(for: workspace)
+        DocStore.ensureDocsHome(at: repoStore.project.rootPath)
+        if let tab = session.reuseOrOpenPlanningTab(
+            at: repoStore.project.rootPath.path) {
+            tab.startIfNeeded()
+            ClaudePromptDriver.send(prompt, into: tab)
+        }
+    }
 
     private func handleCreateFeature(name: String, repoIDs: [String]) {
         showAddFeature = false

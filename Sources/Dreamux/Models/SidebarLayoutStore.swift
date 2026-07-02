@@ -10,6 +10,9 @@ import Observation
 final class SidebarLayoutStore {
     var tiles: [SidebarTile]
     private(set) var featureOrder: [String]
+    var plansExpanded: Bool {
+        didSet { if plansExpanded != oldValue { save() } }
+    }
 
     @ObservationIgnored private let configURL: URL
 
@@ -20,6 +23,7 @@ final class SidebarLayoutStore {
         let loaded = Self.load(from: configURL)
         tiles = Self.reconcile(loaded?.tiles ?? SidebarTile.allCases)
         featureOrder = loaded?.features ?? []
+        plansExpanded = loaded?.plansExpanded ?? true
     }
 
     /// Order discovered features by the saved list: known names first in
@@ -54,6 +58,7 @@ final class SidebarLayoutStore {
     private struct Payload: Codable {
         var tiles: [SidebarTile]
         var features: [String]
+        var plansExpanded: Bool?
     }
 
     /// Keep saved tile order but guarantee every built-in tile is present
@@ -72,7 +77,7 @@ final class SidebarLayoutStore {
     }
 
     private func save() {
-        let payload = Payload(tiles: tiles, features: featureOrder)
+        let payload = Payload(tiles: tiles, features: featureOrder, plansExpanded: plansExpanded)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(payload) else { return }

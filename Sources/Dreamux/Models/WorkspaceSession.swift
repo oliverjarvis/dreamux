@@ -209,6 +209,7 @@ final class WorkspaceSession {
         fileTabSessions.removeValue(forKey: tabId)
         fileDirtyObservers.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
+        if planningTabID == tabId { planningTabID = nil }
     }
 
     private func handleDidSplitPane(newPane: PaneID) {
@@ -267,6 +268,23 @@ final class WorkspaceSession {
         nextTabCwdOverride = nil
         guard let id = lastCreatedTabID else { return nil }
         return tabSessions[id]
+    }
+
+    /// Tab id of this session's planning terminal, if one was opened.
+    /// Cleared when the tab closes (`handleDidCloseTab`).
+    private var planningTabID: TabID?
+
+    /// Re-select the live planning tab, or open a fresh one cwd'd at
+    /// `path`. One planning terminal per session keeps kickoffs from
+    /// stacking tabs.
+    func reuseOrOpenPlanningTab(at path: String) -> TabSession? {
+        if let id = planningTabID, let existing = tabSessions[id] {
+            controller.selectTab(id)
+            return existing
+        }
+        let tab = openAgentTab(at: path, title: "planning", icon: "lightbulb")
+        planningTabID = lastCreatedTabID
+        return tab
     }
 
     /// URL claimed by the next created tab — the web analog of

@@ -26,6 +26,8 @@ struct ContentView: View {
     @State private var signals: SignalStore
     @State private var runners: RunnerManager
     @State private var fileTree: FileTreeStore
+    @State private var docStore: DocStore
+    @State private var planRunner: PlanRunCoordinator
 
     init(
         store: WorkspaceStore,
@@ -68,6 +70,15 @@ struct ContentView: View {
         _signals = State(initialValue: signals)
         _runners = State(initialValue: runners)
         _fileTree = State(initialValue: FileTreeStore())
+
+        let docStore = DocStore(project: repoStore.project)
+        docStore.refresh()
+        _docStore = State(initialValue: docStore)
+        _planRunner = State(initialValue: PlanRunCoordinator(
+            project: repoStore.project,
+            workspaceStore: store,
+            repoStore: repoStore,
+            docStore: docStore))
     }
 
     private var currentProject: Project? { projects.project(id: currentProjectID) }
@@ -92,7 +103,10 @@ struct ContentView: View {
                         repoStore: repoStore,
                         runners: runners,
                         layout: layout,
-                        sidebarMode: $sidebarMode
+                        sidebarMode: $sidebarMode,
+                        docStore: docStore,
+                        planRunner: planRunner,
+                        onOpenDoc: openFile
                     )
                     .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 
@@ -237,7 +251,8 @@ struct ContentView: View {
     /// feature's pane. Flips to the terminal/tab view so the new tab is
     /// visible, mirroring `openBrowserTab`'s behavior.
     private func openFile(_ url: URL) {
-        guard let workspace = store.activeWorkspace else { return }
+        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
+        store.activate(workspace.id)
         sidebarMode = .workspace
         store.session(for: workspace).openFileTab(at: url)
     }
