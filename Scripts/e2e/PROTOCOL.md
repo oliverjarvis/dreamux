@@ -127,7 +127,11 @@ Snapshot of everything a scenario typically asserts on.
     "runTomlExists": true,
     "runToml": "[[runners]]\nname = …",
     "sidebarMode": "workspace",
-    "openedTargets": ["http://localhost:4600/"]
+    "openedTargets": ["http://localhost:4600/"],
+    "plans": [
+      {"path":"docs/plans/2026-07-02-x.md","status":"ready",
+       "checkedSteps":0,"totalSteps":4}
+    ]
   }
 ```
 
@@ -156,6 +160,9 @@ Field notes:
   `workspaces[].webTabs`); in e2e mode the EXTERNAL fallbacks
   (browser/shell command) are suppressed, while in-app tabs stay
   enabled and observable.
+- `plans` mirrors `DocStore.plans` (docs classified as plans only,
+  i.e. not specs/plain docs): `status` is the same derived value
+  `listDocs` reports (ledger + checkboxes + feature existence).
 - Empty-but-registered states return empty arrays, never `null`.
 
 ### `screenshot`
@@ -423,6 +430,38 @@ Response: `{"ok":true}`
 `kind` is decided from the file extension at open; `mode` is the
 active face of multi-mode viewers (markdown rendered/raw, tabular
 table/text).
+
+### `listDocs`
+
+Rescan the project docs home (`<project>/docs/`) and return every
+markdown doc: `{"ok": true, "docs": [{"path", "kind": "plan|spec|doc",
+"title", "status": "specOnly|ready|inProgress|running|awaitingReview|merged",
+"checkedSteps", "totalSteps", "spec"?}]}`. `status` is derived (ledger +
+checkboxes + feature existence); only plans have meaningful statuses.
+
+```
+→ {"cmd":"listDocs"}
+← {"ok":true,"docs":[
+    {"path":"docs/plans/2026-07-02-x.md","kind":"plan","title":"X",
+     "status":"ready","checkedSteps":0,"totalSteps":4,
+     "spec":"docs/specs/2026-07-02-x-design.md"}
+  ]}
+```
+
+### `runPlan`
+
+`{"cmd": "runPlan", "path": "docs/plans/2026-07-02-x.md", "branch"?:
+"x", "repos"?: ["api"]}` — executes the plan through the same
+coordinator as the sidebar: provisions the feature worktrees (branch
+defaults to the filename minus its date prefix; repos default to all),
+records the run ledger entry, opens a `plan: <branch>` terminal tab,
+and types the claude invocation (`DREAMUX_CLAUDE_BIN` substitutes the
+fake). Replies `{"ok": true, "feature": "<branch>"}`.
+
+```
+→ {"cmd":"runPlan","path":"docs/plans/2026-07-02-x.md"}
+← {"ok":true,"feature":"x"}
+```
 
 ### `quit`
 

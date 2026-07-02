@@ -87,6 +87,10 @@ enum E2ECommands {
             return try openFile(request: request)
         case "setFileTree":
             return try setFileTree(request: request)
+        case "listDocs":
+            return handleListDocs()
+        case "runPlan":
+            return await handleRunPlan(request)
         case "quit":
             return ["ok": true]
         default:
@@ -183,6 +187,22 @@ enum E2ECommands {
             }
         } else {
             payload["runners"] = [Any]()
+        }
+
+        if let docStore = handles.docStore, let workspaceStore = handles.workspaceStore {
+            let featureExists: (String) -> Bool = { name in
+                workspaceStore.workspaces.contains { $0.name == name }
+            }
+            payload["plans"] = docStore.plans.map { plan -> [String: Any] in
+                [
+                    "path": docStore.relativePath(of: plan),
+                    "status": docStore.status(for: plan, featureExists: featureExists).rawValue,
+                    "checkedSteps": plan.checkedSteps,
+                    "totalSteps": plan.totalSteps,
+                ]
+            }
+        } else {
+            payload["plans"] = [Any]()
         }
 
         payload["runTomlExists"] = handles.runConfig?.exists ?? false
@@ -363,6 +383,69 @@ enum E2ECommands {
         let (handles, _, _) = try projectStores()
         handles.bridge.pendingFileTreeVisible = visible
         return ["ok": true]
+    }
+
+    // MARK: - Docs & plans
+
+    /// Fresh scan + one entry per doc: enough for scenarios to assert
+    /// classification, pairing, status, and live checkbox progress.
+    private static func handleListDocs() -> [String: Any] {
+        guard let handles = try? activeHandles(),
+              let docStore = handles.docStore,
+              let workspaceStore = handles.workspaceStore else {
+            return ["ok": false, "error": "no doc store registered"]
+        }
+        docStore.refresh()
+        let featureExists: (String) -> Bool = { name in
+            workspaceStore.workspaces.contains { $0.name == name }
+        }
+        let entries = docStore.docs.map { doc -> [String: Any] in
+            var entry: [String: Any] = [
+                "path": docStore.relativePath(of: doc),
+                "kind": doc.kind.rawValue,
+                "title": doc.title,
+                "checkedSteps": doc.checkedSteps,
+                "totalSteps": doc.totalSteps,
+            ]
+            entry["status"] = docStore.status(for: doc, featureExists: featureExists).rawValue
+            if let spec = doc.kind == .plan
+                ? docStore.pairedSpec(for: doc).map({ docStore.relativePath(of: $0) })
+                : nil {
+                entry["spec"] = spec
+            }
+            return entry
+        }
+        return ["ok": true, "docs": entries]
+    }
+
+    /// Execute a plan headlessly through the same coordinator the
+    /// sidebar uses. `branch` defaults to the filename derivation,
+    /// `repos` to every repo in the project.
+    private static func handleRunPlan(_ request: [String: Any]) async -> [String: Any] {
+        guard let handles = try? activeHandles(),
+              let docStore = handles.docStore,
+              let planRunner = handles.planRunner,
+              let repoStore = handles.repoStore else {
+            return ["ok": false, "error": "no plan runner registered"]
+        }
+        guard let path = request["path"] as? String else {
+            return ["ok": false, "error": "missing 'path'"]
+        }
+        docStore.refresh()
+        guard let doc = docStore.docs.first(where: { docStore.relativePath(of: $0) == path })
+        else { return ["ok": false, "error": "no doc at \(path)"] }
+
+        let branch = (request["branch"] as? String)
+            ?? PlanDoc.branchName(forFileName: doc.fileURL.lastPathComponent)
+        let repos = (request["repos"] as? [String])
+            ?? repoStore.repositories.map(\.name)
+        do {
+            let workspace = try await planRunner.runPlan(
+                doc, branchName: branch, repoNames: repos)
+            return ["ok": true, "feature": workspace.name]
+        } catch {
+            return ["ok": false, "error": error.localizedDescription]
+        }
     }
 
     /// Play semantics — worktree-centric, never a question. Flexible

@@ -145,6 +145,11 @@ struct ContentView: View {
                 runConfig: runConfig,
                 signals: signals
             )
+            E2ERegistry.shared.registerDocStores(
+                projectID: repoStore.project.id,
+                docStore: docStore,
+                planRunner: planRunner
+            )
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
         }

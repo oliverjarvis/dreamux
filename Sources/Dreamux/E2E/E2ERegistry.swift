@@ -48,6 +48,8 @@ final class E2EProjectHandles {
     weak var runners: RunnerManager?
     weak var runConfig: RunConfigStore?
     weak var signals: SignalStore?
+    weak var docStore: DocStore?
+    weak var planRunner: PlanRunCoordinator?
     let bridge = E2EBridge()
 
     init(projectID: UUID) {
@@ -104,6 +106,18 @@ final class E2ERegistry {
         handles.runners = runners
         handles.runConfig = runConfig
         handles.signals = signals
+    }
+
+    /// Called from ContentView.onAppear alongside the run stores.
+    func registerDocStores(
+        projectID: UUID,
+        docStore: DocStore,
+        planRunner: PlanRunCoordinator
+    ) {
+        guard E2EMode.isActive else { return }
+        let handles = handles(forProject: projectID)
+        handles.docStore = docStore
+        handles.planRunner = planRunner
     }
 
     func unregister(projectID: UUID) {
