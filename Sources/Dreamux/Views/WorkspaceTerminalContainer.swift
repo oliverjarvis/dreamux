@@ -54,6 +54,8 @@ private struct TabContentView: View {
         if let tabSession = session.tabSession(for: tabId) {
             TerminalSurfaceView(context: tabSession.viewState)
                 .onAppear { tabSession.startIfNeeded() }
+        } else if let fileTab = session.fileTabSession(for: tabId) {
+            FileEditorView(session: fileTab)
         } else if let webTab = session.webTabSession(for: tabId) {
             WebTabView(session: webTab)
         } else {
@@ -137,6 +139,37 @@ private struct WebTabView: View {
 private struct WebViewRepresentable: NSViewRepresentable {
     let webView: WKWebView
 
+    func makeNSView(context: Context) -> WKWebView { webView }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+}
+
+/// A Monaco editor tab: the session's Monaco-hosting `WKWebView`, or a
+/// placeholder when the file is binary/oversized.
+private struct FileEditorView: View {
+    @Bindable var session: FileEditorTabSession
+
+    var body: some View {
+        if session.isSupported {
+            FileEditorWebView(webView: session.webView)
+        } else {
+            VStack(spacing: 12) {
+                Image(systemName: "doc.questionmark")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.tertiary)
+                Text("Can't display \(session.title)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text("It's binary or larger than 2 MB.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct FileEditorWebView: NSViewRepresentable {
+    let webView: WKWebView
     func makeNSView(context: Context) -> WKWebView { webView }
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
