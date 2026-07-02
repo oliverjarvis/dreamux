@@ -13,8 +13,15 @@ final class WorkspaceSession {
 
     private var tabSessions: [TabID: TabSession] = [:]
     /// In-app browser tabs, keyed by the same Bonsplit tab ids as the
-    /// terminals — a tab id appears in exactly one of the two maps.
+    /// terminals — a tab id appears in exactly one of the three maps.
     private var webTabSessions: [TabID: WebTabSession] = [:]
+    /// In-app Monaco editor tabs, keyed by the same Bonsplit tab ids as
+    /// the terminals — a tab id appears in exactly one of the three maps.
+    private var fileTabSessions: [TabID: FileEditorTabSession] = [:]
+    /// Propagates each editor tab's `isDirty` to its Bonsplit tab chip,
+    /// so an unsaved file shows the dirty indicator (mirrors how
+    /// `titleObservers` propagates terminal titles).
+    private var fileDirtyObservers: [TabID: FileTabDirtyObserver] = [:]
     private var titleObservers: [TabID: TitleObserver] = [:]
     private var didBootstrap = false
 
@@ -78,9 +85,18 @@ final class WorkspaceSession {
         webTabSessions[tabId]
     }
 
+    func fileTabSession(for tabId: TabID) -> FileEditorTabSession? {
+        fileTabSessions[tabId]
+    }
+
     /// URLs of every in-app browser tab, for the e2e state dump.
     var webTabURLs: [URL] {
         webTabSessions.values.map(\.url)
+    }
+
+    /// Resolved paths of every open editor tab, for the e2e state dump.
+    var openFileTabURLs: [URL] {
+        fileTabSessions.values.map(\.fileURL)
     }
 
     // MARK: - Commands
@@ -121,7 +137,21 @@ final class WorkspaceSession {
     // MARK: - Delegate handling (called from main actor)
 
     private func handleDidCreateTab(_ tab: Tab) {
-        guard tabSessions[tab.id] == nil, webTabSessions[tab.id] == nil else { return }
+        guard tabSessions[tab.id] == nil,
+              webTabSessions[tab.id] == nil,
+              fileTabSessions[tab.id] == nil else { return }
+
+        // File tab: the pending file URL (set by openFileTab just before
+        // createTab) claims this tab id.
+        if let fileURL = nextTabFileURL {
+            nextTabFileURL = nil
+            let fileSession = FileEditorTabSession(fileURL: fileURL)
+            fileTabSessions[tab.id] = fileSession
+            fileDirtyObservers[tab.id] = FileTabDirtyObserver(
+                tabId: tab.id, session: fileSession, controller: controller
+            )
+            return
+        }
 
         // Web tab: the pending URL (set by openWebTab just before
         // createTab) claims this tab id instead of spawning a shell.
@@ -153,6 +183,8 @@ final class WorkspaceSession {
         tabSessions[tabId]?.stop()
         tabSessions.removeValue(forKey: tabId)
         webTabSessions.removeValue(forKey: tabId)
+        fileTabSessions.removeValue(forKey: tabId)
+        fileDirtyObservers.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
     }
 
@@ -217,6 +249,24 @@ final class WorkspaceSession {
         nextTabWebURL = url
         controller.createTab(title: title, icon: "globe")
         nextTabWebURL = nil
+    }
+
+    /// File claimed by the next created tab — the editor analog of
+    /// `nextTabWebURL`, read once in `handleDidCreateTab`.
+    private var nextTabFileURL: URL?
+
+    /// Open (or re-select) a Monaco editor tab for `fileURL`. Dedup is by
+    /// resolved absolute path so the same file re-focuses its existing
+    /// tab rather than stacking a duplicate (like `openWebTab`).
+    func openFileTab(at fileURL: URL) {
+        let resolved = fileURL.resolvingSymlinksInPath()
+        if let existing = fileTabSessions.first(where: { $0.value.fileURL == resolved }) {
+            controller.selectTab(existing.key)
+            return
+        }
+        nextTabFileURL = resolved
+        controller.createTab(title: resolved.lastPathComponent, icon: "doc.text")
+        nextTabFileURL = nil
     }
 
     /// Called by the store when this workspace becomes the visible one.
@@ -341,6 +391,39 @@ private final class TitleObserver {
     private func fire() {
         guard let tabSession, let controller else { return }
         controller.updateTab(tabId, title: tabSession.title)
+        arm()
+    }
+}
+
+// MARK: - File tab dirty observer
+
+/// Re-arms `withObservationTracking` so an editor tab's `isDirty` flows
+/// back into the Bonsplit controller and shows the tab's dirty indicator.
+@MainActor
+private final class FileTabDirtyObserver {
+    private let tabId: TabID
+    private weak var session: FileEditorTabSession?
+    private weak var controller: BonsplitController?
+
+    init(tabId: TabID, session: FileEditorTabSession, controller: BonsplitController) {
+        self.tabId = tabId
+        self.session = session
+        self.controller = controller
+        arm()
+    }
+
+    private func arm() {
+        guard let session else { return }
+        withObservationTracking {
+            _ = session.isDirty
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.fire() }
+        }
+    }
+
+    private func fire() {
+        guard let session, let controller else { return }
+        controller.updateTab(tabId, isDirty: session.isDirty)
         arm()
     }
 }
