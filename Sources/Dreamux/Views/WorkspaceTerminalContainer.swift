@@ -232,6 +232,28 @@ private struct MarkdownTabView: View {
     }
 }
 
+/// A CSV/TSV tab: parsed table by default, Monaco text behind a toggle.
+private struct TabularTabView: View {
+    @Bindable var session: FileEditorTabSession
+
+    private var delimiter: Character {
+        session.fileURL.pathExtension.lowercased() == "tsv" ? "\t" : ","
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ViewerModeToggle(session: session,
+                             options: [("Table", .table), ("Text", .source)])
+            Divider()
+            if session.viewMode == .table {
+                CSVTableView(text: session.currentText, delimiter: delimiter)
+            } else {
+                FileEditorWebView(webView: session.webView)
+            }
+        }
+    }
+}
+
 private struct EmptyPaneView: View {
     let onNewTab: () -> Void
 
