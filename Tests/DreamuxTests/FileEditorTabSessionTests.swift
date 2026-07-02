@@ -44,4 +44,45 @@ final class FileEditorTabSessionTests: XCTestCase {
         try Data([0xFF, 0xFE]).write(to: bin)
         XCTAssertFalse(FileEditorTabSession(fileURL: bin).isSupported)
     }
+
+    func testDefaultViewModes() {
+        XCTAssertEqual(FileEditorTabSession.defaultViewMode(for: .markdown), .rendered)
+        XCTAssertEqual(FileEditorTabSession.defaultViewMode(for: .tabular), .table)
+        XCTAssertEqual(FileEditorTabSession.defaultViewMode(for: .code), .source)
+        XCTAssertEqual(FileEditorTabSession.defaultViewMode(for: .image), .source)
+    }
+
+    @MainActor
+    func testKindAndCurrentTextAssignedAtInit() throws {
+        let url = sandbox.root.appendingPathComponent("notes.md")
+        try "# hi\n".write(to: url, atomically: true, encoding: .utf8)
+        let session = FileEditorTabSession(fileURL: url)
+        XCTAssertEqual(session.kind, .markdown)
+        XCTAssertEqual(session.viewMode, .rendered)
+        XCTAssertEqual(session.currentText, "# hi\n")
+        XCTAssertTrue(session.isSupported)
+    }
+
+    @MainActor
+    func testMediaKindsSkipTextReadAndUseExistence() throws {
+        // 3 MB of noise with a movie extension: over the text cap, but
+        // media kinds never read text — existence is enough.
+        let url = sandbox.root.appendingPathComponent("clip.mov")
+        try Data(count: 3 * 1024 * 1024).write(to: url)
+        let session = FileEditorTabSession(fileURL: url)
+        XCTAssertEqual(session.kind, .video)
+        XCTAssertTrue(session.isSupported)
+        XCTAssertEqual(session.currentText, "")
+
+        let missing = FileEditorTabSession(
+            fileURL: sandbox.root.appendingPathComponent("gone.mov"))
+        XCTAssertFalse(missing.isSupported)
+    }
+
+    @MainActor
+    func testOversizedTextStillUnsupported() throws {
+        let url = sandbox.root.appendingPathComponent("big.csv")
+        try Data(count: 3 * 1024 * 1024).write(to: url)
+        XCTAssertFalse(FileEditorTabSession(fileURL: url).isSupported)
+    }
 }

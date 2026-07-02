@@ -265,7 +265,8 @@ final class WorkspaceSession {
             return
         }
         nextTabFileURL = resolved
-        controller.createTab(title: resolved.lastPathComponent, icon: "doc.text")
+        let kind = FileTabKind.kind(forPathExtension: resolved.pathExtension)
+        controller.createTab(title: resolved.lastPathComponent, icon: kind.tabIcon)
         nextTabFileURL = nil
     }
 

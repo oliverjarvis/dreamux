@@ -3,6 +3,13 @@ import Foundation
 import Observation
 import WebKit
 
+/// Which face a multi-mode file tab is showing. `.rendered` and
+/// `.table` are the read views (MarkdownUI / NSTableView); `.source`
+/// is the Monaco editor and is the only mode that can produce edits.
+enum FileTabViewMode: String, Sendable {
+    case rendered, source, table
+}
+
 /// State behind one Monaco editor tab. Mirrors `WebTabSession`: a lazily
 /// built `WKWebView` (here hosting the vendored Monaco editor over the
 /// `app-monaco://` scheme) plus dirty tracking and ⌘S save back to the
@@ -20,7 +27,17 @@ final class FileEditorTabSession: Identifiable {
     /// larger than the cap); the view shows a placeholder instead.
     let isSupported: Bool
 
-    private let contents: String
+    let kind: FileTabKind
+    var viewMode: FileTabViewMode
+    /// The file's text as this session last knew it: disk contents at
+    /// init, updated on every save and by `refreshCurrentTextFromEditor`.
+    /// Read views (markdown preview, CSV table) render from this; empty
+    /// for media kinds, which never read the file into memory.
+    private(set) var currentText: String
+    /// Placeholder escape hatch: render an unsupported file with Quick
+    /// Look instead. Sticky per session so the choice survives redraws.
+    var useQuickLookFallback = false
+
     private nonisolated static let maxBytes = 2 * 1024 * 1024
 
     @ObservationIgnored private var _webView: WKWebView?
@@ -31,9 +48,38 @@ final class FileEditorTabSession: Identifiable {
         let resolved = fileURL.resolvingSymlinksInPath()
         self.fileURL = resolved
         self.title = resolved.lastPathComponent
-        let loaded = Self.readText(at: resolved)
-        self.contents = loaded ?? ""
-        self.isSupported = loaded != nil
+        let kind = FileTabKind.kind(forPathExtension: resolved.pathExtension)
+        self.kind = kind
+        self.viewMode = Self.defaultViewMode(for: kind)
+        if kind.isMonacoBacked {
+            let loaded = Self.readText(at: resolved)
+            self.currentText = loaded ?? ""
+            self.isSupported = loaded != nil
+        } else {
+            self.currentText = ""
+            self.isSupported = FileManager.default.fileExists(atPath: resolved.path)
+        }
+    }
+
+    nonisolated static func defaultViewMode(for kind: FileTabKind) -> FileTabViewMode {
+        switch kind {
+        case .markdown: return .rendered
+        case .tabular: return .table
+        default: return .source
+        }
+    }
+
+    /// Pull the live Monaco buffer into `currentText` so a rendered
+    /// view reflects unsaved edits. No-op when the editor was never
+    /// opened (nothing can have changed).
+    func refreshCurrentTextFromEditor() {
+        guard let _webView else { return }
+        _webView.evaluateJavaScript("window.__getValue()") { [weak self] result, _ in
+            MainActor.assumeIsolated {
+                guard let self, let text = result as? String else { return }
+                self.currentText = text
+            }
+        }
     }
 
     var webView: WKWebView {
@@ -76,7 +122,7 @@ final class FileEditorTabSession: Identifiable {
 
     private func handleReady() {
         let js = "window.__setContents("
-            + "\(Self.jsString(contents)), "
+            + "\(Self.jsString(currentText)), "
             + "\(Self.jsString(fileURL.pathExtension)), "
             + "\(Self.jsString(Self.currentTheme())));"
         _webView?.evaluateJavaScript(js)
@@ -85,6 +131,7 @@ final class FileEditorTabSession: Identifiable {
     private func handleSave(text: String) {
         do {
             try text.write(to: fileURL, atomically: true, encoding: .utf8)
+            currentText = text
             isDirty = false
         } catch {
             NSSound.beep()
