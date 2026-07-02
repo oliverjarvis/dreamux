@@ -7,13 +7,6 @@ final class FileEditorTabSessionTests: XCTestCase {
     override func setUpWithError() throws { sandbox = try TestSandbox() }
     override func tearDown() { sandbox?.destroy(); sandbox = nil }
 
-    func testLanguageForExtension() {
-        XCTAssertEqual(FileEditorTabSession.language(forExtension: "swift"), "swift")
-        XCTAssertEqual(FileEditorTabSession.language(forExtension: "TS"), "typescript")
-        XCTAssertEqual(FileEditorTabSession.language(forExtension: "md"), "markdown")
-        XCTAssertEqual(FileEditorTabSession.language(forExtension: "unknownext"), "plaintext")
-    }
-
     func testReadTextReturnsContentsForSmallUTF8File() throws {
         let url = sandbox.root.appendingPathComponent("a.swift")
         try "let x = 1\n".write(to: url, atomically: true, encoding: .utf8)

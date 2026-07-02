@@ -59,30 +59,6 @@ final class FileEditorTabSession: Identifiable {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Monaco language id for a file extension.
-    nonisolated static func language(forExtension ext: String) -> String {
-        switch ext.lowercased() {
-        case "swift": return "swift"
-        case "js", "mjs", "cjs": return "javascript"
-        case "ts", "tsx", "jsx": return "typescript"
-        case "json": return "json"
-        case "md", "markdown": return "markdown"
-        case "html", "htm": return "html"
-        case "css": return "css"
-        case "py": return "python"
-        case "rb": return "ruby"
-        case "go": return "go"
-        case "rs": return "rust"
-        case "c", "h": return "c"
-        case "cpp", "cc", "cxx", "hpp": return "cpp"
-        case "sh", "bash", "zsh": return "shell"
-        case "yml", "yaml": return "yaml"
-        case "toml": return "toml"
-        case "xml": return "xml"
-        default: return "plaintext"
-        }
-    }
-
     /// Encode a Swift string as a JS string literal (quotes + escapes) so
     /// it can be interpolated into an `evaluateJavaScript` call.
     nonisolated static func jsString(_ value: String) -> String {
@@ -101,7 +77,7 @@ final class FileEditorTabSession: Identifiable {
     private func handleReady() {
         let js = "window.__setContents("
             + "\(Self.jsString(contents)), "
-            + "\(Self.jsString(Self.language(forExtension: fileURL.pathExtension))), "
+            + "\(Self.jsString(fileURL.pathExtension)), "
             + "\(Self.jsString(Self.currentTheme())));"
         _webView?.evaluateJavaScript(js)
     }
