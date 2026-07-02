@@ -20,10 +20,12 @@ struct ContentView: View {
     let onSwitchProject: (UUID?) -> Void
 
     @State private var sidebarMode: SidebarMode = .workspace
+    @State private var showFileTree = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var runConfig: RunConfigStore
     @State private var signals: SignalStore
     @State private var runners: RunnerManager
+    @State private var fileTree: FileTreeStore
 
     init(
         store: WorkspaceStore,
@@ -65,6 +67,7 @@ struct ContentView: View {
         _runConfig = State(initialValue: runConfig)
         _signals = State(initialValue: signals)
         _runners = State(initialValue: runners)
+        _fileTree = State(initialValue: FileTreeStore())
     }
 
     private var currentProject: Project? { projects.project(id: currentProjectID) }
@@ -91,6 +94,26 @@ struct ContentView: View {
         }
         .navigationTitle(currentProject?.name ?? "")
         .navigationSubtitle(currentProject?.rootPath.path ?? "")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    showFileTree.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                }
+                .keyboardShortcut("e", modifiers: [.option, .command])
+                .help("Toggle file explorer (⌥⌘E)")
+            }
+        }
+        .inspector(isPresented: $showFileTree) {
+            FileTreePanel(
+                store: store,
+                repoStore: repoStore,
+                tree: fileTree,
+                onOpenFile: openFile
+            )
+            .inspectorColumnWidth(min: 220, ideal: 280, max: 480)
+        }
         .onAppear {
             // e2e only (no-op otherwise): hand the run-layer stores to the
             // automation server and sync the bridge with this window's
@@ -129,6 +152,15 @@ struct ContentView: View {
         case .signals:
             SignalsView(signals: signals, runners: runners)
         }
+    }
+
+    /// Open a file (clicked in the tree) as a Monaco tab in the active
+    /// feature's pane. Flips to the terminal/tab view so the new tab is
+    /// visible, mirroring `openBrowserTab`'s behavior.
+    private func openFile(_ url: URL) {
+        guard let workspace = store.activeWorkspace else { return }
+        sidebarMode = .workspace
+        store.session(for: workspace).openFileTab(at: url)
     }
 
     /// Bridge for this project window. `nil` whenever the e2e harness is
