@@ -183,14 +183,61 @@ final class PlanQueueControllerTests: XCTestCase {
         controller.enqueue("docs/plans/a.md")
         controller.start()
         await settle(until: { !ran.isEmpty })
+        // `!ran.isEmpty` only proves runPlan was entered. runPlan is a
+        // plain (non-MainActor-isolated) closure value, so the call hops
+        // off MainActor to invoke it and back on to run the launch Task's
+        // post-await tail (clearing launchInFlight, starting the poller) —
+        // that resumed continuation can land a beat after the closure body
+        // itself runs. Give it a few more turns so this test observes the
+        // launch as fully settled, not still mid-flight.
+        await settleLaunchTail()
         statuses["docs/plans/a.md"] = .ready
         controller.tick()
         XCTAssertEqual(controller.state, .attention)
         XCTAssertNotNil(controller.lastError)
     }
 
+    /// Extra scheduling turns beyond `settle`'s condition-based wait, for
+    /// spots that depend on a launch Task's post-`await runPlan` tail
+    /// (clearing `launchInFlight`, calling `startPolling()`) having fully
+    /// executed rather than merely having been entered.
+    private func settleLaunchTail() async {
+        for _ in 0..<20 { await Task.yield() }
+    }
+
     func testEnqueueRejectsEmptyPath() {
         controller.enqueue("")
         XCTAssertTrue(controller.entries.isEmpty)
+    }
+
+    func testInFlightLaunchIsNotRecordLoss() async {
+        var releaseA: CheckedContinuation<Void, Never>?
+        controller.runPlan = { [weak self] path in
+            self?.ran.append(path)
+            if path == "docs/plans/a.md" {
+                // Suspend (rather than busy-spin) until the test releases us,
+                // so the ledger record for a.md still hasn't been written
+                // when the poller ticks below — this is the launch window
+                // between runPlan starting and the worktree/ledger write.
+                await withCheckedContinuation { releaseA = $0 }
+                self?.ran.append("a-resumed")
+            }
+        }
+        controller.enqueue("docs/plans/a.md")
+        controller.start()
+        await settle(until: { releaseA != nil })  // a.md's launch is in flight, parked before the ledger write
+
+        statuses["docs/plans/a.md"] = .ready      // no record yet, but the launch hasn't failed
+        controller.tick()
+        XCTAssertEqual(controller.state, .running,
+                        "an in-flight launch must not be flagged as record loss")
+        XCTAssertNil(controller.lastError)
+
+        releaseA?.resume()
+        await settle(until: { ran.contains("a-resumed") })  // launch completes, launchInFlight clears
+
+        statuses["docs/plans/a.md"] = .running
+        controller.tick()
+        XCTAssertEqual(controller.state, .running)
     }
 }

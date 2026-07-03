@@ -35,6 +35,7 @@ final class PlanQueueController {
     static let stallThreshold: TimeInterval = 120
 
     @ObservationIgnored private var quiescentSince: Date?
+    @ObservationIgnored private var launchInFlight = false
     @ObservationIgnored private var poller: Task<Void, Never>?
     @ObservationIgnored private let fileURL: URL
 
@@ -78,6 +79,7 @@ final class PlanQueueController {
         state = .idle
         currentPlanPath = nil
         quiescentSince = nil
+        launchInFlight = false
         stopPolling()
         save()
     }
@@ -150,8 +152,9 @@ final class PlanQueueController {
             quiescentSince = nil
             save()
         case (.running, .ready):
-            // The run record vanished (feature closed under us, ledger
-            // pruned) — surface it rather than waiting forever.
+            // While a launch is in flight the ledger record simply
+            // hasn't been written yet — not a record loss.
+            if launchInFlight { break }
             lastError = "Run record lost (feature closed?)"
             state = .attention
             quiescentSince = nil
@@ -191,6 +194,7 @@ final class PlanQueueController {
 
     private func launch(_ path: String) {
         currentPlanPath = path
+        launchInFlight = true
         save()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -199,9 +203,11 @@ final class PlanQueueController {
                 // A skip/stop/advance while runPlan was in flight makes
                 // this completion stale — don't touch the queue's state.
                 guard self.currentPlanPath == path else { return }
+                self.launchInFlight = false
                 self.startPolling()
             } catch {
                 guard self.currentPlanPath == path else { return }
+                self.launchInFlight = false
                 self.lastError = error.localizedDescription
                 self.state = .attention
                 self.save()
