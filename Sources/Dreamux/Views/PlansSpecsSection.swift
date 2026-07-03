@@ -517,6 +517,7 @@ struct PlansSpecsSection: View {
                 plan,
                 canRun: status == .ready || status == .inProgress,
                 keepTrailingVisible: runnerRunning,
+                hasRunControls: workspace != nil,
                 trailing: {
                     if let feature = openableFeature {
                         Button { onOpenFeature(feature) } label: {
@@ -802,10 +803,16 @@ struct PlansSpecsSection: View {
     /// context items ahead of Reveal in Finder. `keepTrailingVisible` pins the
     /// trailing area open when not hovered — the plan row uses it so a live
     /// runner's controls stay on screen, matching the feature rows.
+    /// `hasRunControls` suppresses the hover Run circle when the caller already
+    /// renders the runner controls' play/stop circle for this row (a `.ready`
+    /// plan can still have a workspace during the ledger record-loss window),
+    /// so two near-identical circles don't sit side by side — the agent-run
+    /// action stays on the context menu, which `canRun` keeps.
     private func docRow<Body: View, Trailing: View, Menu: View>(
         _ doc: PlanDoc,
         canRun: Bool,
         keepTrailingVisible: Bool = false,
+        hasRunControls: Bool = false,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() },
         @ViewBuilder menu: () -> Menu = { EmptyView() },
         @ViewBuilder body: () -> Body
@@ -844,7 +851,7 @@ struct PlansSpecsSection: View {
             if hoveredDocURL == doc.fileURL || keepTrailingVisible {
                 HStack(spacing: 4) {
                     trailing()
-                    if canRun {
+                    if canRun && !hasRunControls {
                         Button { onRunPlan(doc) } label: {
                             Image(systemName: "play.fill")
                                 .font(.system(size: 10, weight: .bold))
