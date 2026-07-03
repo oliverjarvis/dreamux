@@ -74,10 +74,14 @@ print(s.makefile().readline())   # -> {"ok":true}
 
 ## Targeting model
 
-Commands that touch project state operate on **the most recently
-opened project window** (registered when its window appears,
-unregistered when it disappears). Single-window runs — the normal e2e
-shape, via `DREAMUX_E2E_AUTOOPEN` — never notice. Commands fail with
+Commands that touch project state operate on **the currently shown
+project** (each project registers when its window content appears and
+unregisters when it disappears — so after a `switchProject` the target
+follows the visible project). The underlying per-project state
+(terminals, runners, the plan queue) survives switches either way;
+only the harness's *target* moves. Single-window, single-project runs
+— the normal e2e shape, via `DREAMUX_E2E_AUTOOPEN` — never notice.
+Commands fail with
 `ok:false` and a descriptive `error` when no project window has been
 registered yet, so the driver can poll `state` (or just `ping` +
 retry) until the auto-opened window is up.
@@ -227,6 +231,50 @@ active workspace, then the first one — fails if there are none).
 ```
 → {"cmd":"setSidebarMode","mode":"run","workspace":"feature-x"}
 ← {"ok":true}
+```
+
+### `switchProject`
+
+Flip the project window to another project by name — the same binding
+write clicking it in the rail performs. Per-project state (terminals,
+runners, the plan queue) survives the switch; only the view layer is
+rebuilt. The switch settles asynchronously: poll `state` until
+`activeProject.name` matches before issuing project-scoped commands.
+
+```
+→ {"cmd":"switchProject","project":"proj-b"}
+← {"ok":true,"projectID":"<uuid>"}
+```
+
+### `terminalText`
+
+Visible-viewport text of every terminal tab in a workspace, read
+straight from libghostty (`texts`, one string per tab, lines joined
+with `\n`). This is the probe for terminal *contents* — the in-process
+`screenshot` renders GPU-composited surfaces blank. `feature` is
+optional and defaults to the active workspace. Tabs whose surface
+hasn't attached yet are omitted from `texts`.
+
+```
+→ {"cmd":"terminalText","feature":"feature-x"}
+← {"ok":true,"feature":"feature-x","texts":["% echo hi\nhi\n%"]}
+```
+
+### `sendTerminalText`
+
+Type into one of a workspace's terminal tabs as if the user did —
+deterministic only for single-tab workspaces (tab order is not
+defined; keep scenario workspaces to one shell tab, same as
+`terminalText`'s `texts` order). `"submit":true` appends a carriage
+return so the shell executes it.
+Fails with `ok:false` until the shell has been quiescent for ~0.8 s (a
+booting zsh flushes its input queue and would silently eat the send) —
+retry on error. `feature` is optional and defaults to the active
+workspace.
+
+```
+→ {"cmd":"sendTerminalText","feature":"feature-x","text":"echo hi","submit":true}
+← {"ok":true,"feature":"feature-x"}
 ```
 
 ### `startFeature`

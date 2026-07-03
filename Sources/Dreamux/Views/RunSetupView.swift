@@ -326,7 +326,7 @@ struct RunSetupView: View {
     @ViewBuilder
     private var terminalArea: some View {
         if let terminal {
-            TerminalSurfaceView(context: terminal.viewState)
+            HostedTerminalView(session: terminal)
                 .onAppear { terminal.startIfNeeded() }
         } else {
             VStack(spacing: 12) {

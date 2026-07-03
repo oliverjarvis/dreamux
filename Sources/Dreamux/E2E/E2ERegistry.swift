@@ -73,11 +73,22 @@ final class E2ERegistry {
     /// window scenarios are documented as "last opened wins".
     private(set) var activeProjectID: UUID?
 
+    /// The active window's project-switch action — writes the
+    /// WindowGroup's binding, exactly what clicking a project in the
+    /// rail does. Re-registered on every window appear; single-window
+    /// e2e runs only ever see the current one.
+    private(set) var projectSwitcher: ((UUID?) -> Void)?
+
     private init() {}
 
     func registerProjectStore(_ store: ProjectStore) {
         guard E2EMode.isActive else { return }
         projectStore = store
+    }
+
+    func registerProjectSwitcher(_ switcher: @escaping (UUID?) -> Void) {
+        guard E2EMode.isActive else { return }
+        projectSwitcher = switcher
     }
 
     /// Called from `ProjectWindowContents.onAppear` — the window-level

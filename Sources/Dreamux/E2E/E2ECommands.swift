@@ -61,6 +61,12 @@ enum E2ECommands {
             return try await createFeature(request: request)
         case "setSidebarMode":
             return try setSidebarMode(request: request)
+        case "switchProject":
+            return try switchProject(request: request)
+        case "terminalText":
+            return try terminalText(request: request)
+        case "sendTerminalText":
+            return try sendTerminalText(request: request)
         case "startFeature":
             return try startFeature(request: request, replacing: false)
         case "startFeatureReplacing":
@@ -339,6 +345,75 @@ enum E2ECommands {
         )
         store.registerFeature(name: name, featureDirectory: dir, linkedRepoIDs: repoIDs)
         return ["ok": true, "featureDirectory": dir.path]
+    }
+
+    // MARK: - Project switching & terminal readback
+
+    /// Flip the project window to another project — the same binding
+    /// write clicking it in the rail performs. The switch settles
+    /// asynchronously; drivers poll `state` until `activeProject`
+    /// matches.
+    private static func switchProject(request: [String: Any]) throws -> [String: Any] {
+        let name = try string("project", in: request)
+        guard let projectStore = E2ERegistry.shared.projectStore else {
+            throw CommandError(message: "project store not registered yet")
+        }
+        guard let project = projectStore.projects.first(where: { $0.name == name }) else {
+            throw CommandError(message: "no project named \"\(name)\"")
+        }
+        guard let switcher = E2ERegistry.shared.projectSwitcher else {
+            throw CommandError(message: "no project window registered yet")
+        }
+        switcher(project.id)
+        return ["ok": true, "projectID": project.id.uuidString]
+    }
+
+    /// Viewport text of every terminal tab in a workspace — the scenario
+    /// probe for "did this shell's contents survive?". The in-process
+    /// `screenshot` can't capture GPU-composited terminals; this reads
+    /// the grid straight from libghostty instead. Defaults to the active
+    /// workspace when `feature` is omitted.
+    private static func terminalText(request: [String: Any]) throws -> [String: Any] {
+        let (_, store, _) = try projectStores()
+        let target: Workspace
+        if let name = request["feature"] as? String, !name.isEmpty {
+            target = try workspace(named: name)
+        } else if let active = store.activeWorkspace {
+            target = active
+        } else {
+            throw CommandError(message: "no active workspace")
+        }
+        let texts = store.session(for: target).terminalTabSessions
+            .compactMap { $0.readViewportText() }
+        return ["ok": true, "feature": target.name, "texts": texts]
+    }
+
+    /// Type into a workspace's first terminal tab as if the user did;
+    /// `submit` appends a carriage return. Fails until the shell has
+    /// been quiescent for a beat — a booting zsh flushes its input
+    /// queue and would silently eat the send — so drivers retry on
+    /// error. Defaults to the active workspace when `feature` is
+    /// omitted.
+    private static func sendTerminalText(request: [String: Any]) throws -> [String: Any] {
+        let text = try string("text", in: request)
+        let (_, store, _) = try projectStores()
+        let target: Workspace
+        if let name = request["feature"] as? String, !name.isEmpty {
+            target = try workspace(named: name)
+        } else if let active = store.activeWorkspace {
+            target = active
+        } else {
+            throw CommandError(message: "no active workspace")
+        }
+        guard let tab = store.session(for: target).terminalTabSessions.first else {
+            throw CommandError(message: "workspace has no terminal tab")
+        }
+        guard tab.isShellQuiescent(for: 0.8) else {
+            throw CommandError(message: "shell not quiescent yet — retry")
+        }
+        let submit = request["submit"] as? Bool ?? false
+        tab.send(submit ? text + "\r" : text)
+        return ["ok": true, "feature": target.name]
     }
 
     // MARK: - Sidebar & run pane

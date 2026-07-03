@@ -247,6 +247,12 @@ final class WorkspaceSession {
         tabSessions.values.allSatisfy { $0.isShellQuiescent(for: interval) }
     }
 
+    /// Terminal tab sessions in this workspace, in no particular order.
+    /// e2e viewport readback only.
+    var terminalTabSessions: [TabSession] {
+        Array(tabSessions.values)
+    }
+
     /// Override for the next tab's cwd. Used by the merge UI to drop a
     /// tab inside a conflicted worktree (which isn't symlinked into
     /// the aggregation directory). Read once and cleared in

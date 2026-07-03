@@ -7,107 +7,31 @@ import SwiftUI
 ///   • content — the selected project's Work Items (`WorkspaceSidebar`),
 ///   • detail  — the terminal / Run / Signals pane for the active feature.
 ///
-/// The run-layer stores (`runConfig`/`signals`/`runners`) and `sidebarMode`
-/// live here because both the content and detail columns need them — they
-/// used to sit in a private `FeaturesDetail` wrapper, but a NavigationSplit-
-/// View has to own all three columns in one place.
+/// Everything it renders comes from the window's long-lived
+/// `ProjectSession` bundle — this view owns only per-visit UI state
+/// (sidebar mode, file-tree visibility, column widths) and is rebuilt
+/// from scratch on every project switch while the bundle's terminals,
+/// runners, and plan queue keep going.
 struct ContentView: View {
-    @Bindable var store: WorkspaceStore
-    @Bindable var repoStore: RepoStore
-    let layout: SidebarLayoutStore
+    @Bindable var session: ProjectSession
     let projects: ProjectStore
-    let currentProjectID: UUID
     let onSwitchProject: (UUID?) -> Void
 
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var runConfig: RunConfigStore
-    @State private var signals: SignalStore
-    @State private var runners: RunnerManager
-    @State private var fileTree: FileTreeStore
-    @State private var docStore: DocStore
-    @State private var planRunner: PlanRunCoordinator
-    @State private var planQueue: PlanQueueController
-    /// Non-e2e channel for the plan queue's "merge and continue" gate
-    /// action: `WorkspaceSidebar` owns the merge sheet's presentation
-    /// state, so this parks the target workspace id the same way
-    /// `E2EBridge.pendingMergeWorkspaceID` does for the automation server.
-    @State private var gateMergeWorkspaceID: UUID?
 
-    init(
-        store: WorkspaceStore,
-        repoStore: RepoStore,
-        layout: SidebarLayoutStore,
-        projects: ProjectStore,
-        currentProjectID: UUID,
-        onSwitchProject: @escaping (UUID?) -> Void
-    ) {
-        self.store = store
-        self.repoStore = repoStore
-        self.layout = layout
-        self.projects = projects
-        self.currentProjectID = currentProjectID
-        self.onSwitchProject = onSwitchProject
-
-        let runConfig = RunConfigStore(project: repoStore.project)
-        let signals = SignalStore()
-        let runners = RunnerManager(project: repoStore.project, signals: signals)
-        runners.reload(from: runConfig.rawTOML)
-        // URL opens land as a browser tab inside the worktree's own
-        // workspace — the running app lives next to the terminals working
-        // on it. No matching workspace (e.g. the runner is on the default
-        // branch) falls back to the external browser.
-        runners.openURLInApp = { [weak store] url, branch, title in
-            guard let store,
-                  let workspace = store.workspaces.first(where: { $0.name == branch })
-            else { return false }
-            store.session(for: workspace).openWebTab(url: url, title: title)
-            return true
-        }
-        if E2EMode.isActive {
-            // Don't open EXTERNAL browsers / run open commands during
-            // automated runs — `openedTargets` still records every fire and
-            // the e2e state dump asserts on it. In-app web tabs are
-            // in-process and stay enabled so scenarios can assert them.
-            runners.openOverride = { _ in }
-        }
-        _runConfig = State(initialValue: runConfig)
-        _signals = State(initialValue: signals)
-        _runners = State(initialValue: runners)
-        _fileTree = State(initialValue: FileTreeStore())
-
-        let docStore = DocStore(project: repoStore.project)
-        _docStore = State(initialValue: docStore)
-        _planRunner = State(initialValue: PlanRunCoordinator(
-            project: repoStore.project,
-            workspaceStore: store,
-            repoStore: repoStore,
-            docStore: docStore))
-
-        let planQueue = PlanQueueController(project: repoStore.project)
-        planQueue.statusForPlan = { [weak docStore, weak store] path in
-            guard let docStore, let store else { return nil }
-            docStore.refresh()
-            guard let doc = docStore.docs.first(where: { docStore.relativePath(of: $0) == path })
-            else { return nil }
-            return docStore.status(for: doc) { name in
-                store.workspaces.contains { $0.name == name }
-            }
-        }
-        planQueue.featureNameForPlan = { [weak docStore] path in
-            docStore?.ledger.recordForPlan(path)?.featureName
-        }
-        planQueue.isFeatureQuiescent = { [weak store] feature in
-            guard let store,
-                  let workspace = store.workspaces.first(where: { $0.name == feature })
-            else { return true }
-            // Quiescent = no tab in the feature's session produced output
-            // in the last 5 s. (Session-level helper added below.)
-            return store.session(for: workspace).allShellsQuiescent(for: 5)
-        }
-        _planQueue = State(initialValue: planQueue)
-    }
+    private var store: WorkspaceStore { session.store }
+    private var repoStore: RepoStore { session.repoStore }
+    private var layout: SidebarLayoutStore { session.layout }
+    private var runConfig: RunConfigStore { session.runConfig }
+    private var signals: SignalStore { session.signals }
+    private var runners: RunnerManager { session.runners }
+    private var fileTree: FileTreeStore { session.fileTree }
+    private var docStore: DocStore { session.docStore }
+    private var planRunner: PlanRunCoordinator { session.planRunner }
+    private var planQueue: PlanQueueController { session.planQueue }
+    private var currentProjectID: UUID { session.project.id }
 
     private var currentProject: Project? { projects.project(id: currentProjectID) }
 
@@ -134,7 +58,7 @@ struct ContentView: View {
                     docStore: docStore,
                     planRunner: planRunner,
                     planQueue: planQueue,
-                    gateMergeWorkspaceID: $gateMergeWorkspaceID,
+                    gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
                     onOpenDoc: openFile
                 )
                 .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
@@ -186,60 +110,21 @@ struct ContentView: View {
         // `ProjectCommands` reaches the active store.
         .focusedSceneValue(\.fileTreeVisible, $showFileTree)
         .onAppear {
-            // e2e only (no-op otherwise): hand the run-layer stores to the
-            // automation server and sync the bridge with this window's
-            // starting mode.
-            E2ERegistry.shared.registerRunStores(
-                projectID: repoStore.project.id,
-                runners: runners,
-                runConfig: runConfig,
-                signals: signals
-            )
-            E2ERegistry.shared.registerDocStores(
-                projectID: repoStore.project.id,
-                docStore: docStore,
-                planRunner: planRunner,
-                planQueue: planQueue
-            )
+            // e2e only (no-op otherwise): sync the bridge with this
+            // window's starting mode. (Store registration and the plan
+            // queue's closure wiring live in `ProjectSession`.)
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
 
-            // `runPlan`/`requestMerge` need `docStore`/`planRunner`/the
-            // bridge, which aren't available to weak-capture from `init`
-            // (self isn't fully formed yet) — `.onAppear` runs once per
-            // window and can capture them directly.
-            let pendingGateMerge = $gateMergeWorkspaceID
-            planQueue.runPlan = { [docStore, planRunner, repoStore] path in
-                docStore.refresh()
-                guard let doc = docStore.docs.first(
-                    where: { docStore.relativePath(of: $0) == path }) else {
-                    throw PlanRunError.notAPlan
-                }
-                try await planRunner.runPlan(
-                    doc,
-                    branchName: PlanDoc.branchName(forFileName: doc.fileURL.lastPathComponent),
-                    repoNames: repoStore.repositories.map(\.name))
-            }
-            planQueue.requestMerge = { [store, repoStore] featureName in
-                guard let workspace = store.workspaces.first(where: { $0.name == featureName })
-                else { return }
-                // The merge sheet is owned by WorkspaceSidebar; reuse the
-                // same pending channel the e2e openMergeSheet command uses.
-                E2ERegistry.shared.bridge(forProject: repoStore.project.id)?
-                    .pendingMergeWorkspaceID = workspace.id
-                // When e2e is inactive the bridge is nil — park on the
-                // queue-local channel the sidebar also observes.
-                pendingGateMerge.wrappedValue = workspace.id
-            }
-
             // `store.workspaces` is empty until the async `reloadFeatures`
-            // (fired from `ProjectWindow.onAppear`) completes — reconciling
-            // the doc ledger or starting the queue poller before then
-            // would see zero known features and prune in-flight plan
-            // records / bypass the merge gate. If discovery already
-            // finished by the time this view appears (store reuse on a
-            // project switch-back), `didLoadFeatures` is already true and
-            // the `.onChange` below won't fire, so catch that case here.
+            // (fired from `ProjectWindowContents.onAppear`) completes —
+            // reconciling the doc ledger or starting the queue poller
+            // before then would see zero known features and prune
+            // in-flight plan records / bypass the merge gate. If discovery
+            // already finished by the time this view appears (bundle reuse
+            // on a project switch-back), `didLoadFeatures` is already true
+            // and the `.onChange` below won't fire, so catch that case
+            // here.
             if store.didLoadFeatures {
                 docStore.refresh()
                 docStore.reconcileLedger(

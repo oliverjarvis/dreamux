@@ -5,18 +5,23 @@ import SwiftUI
 /// project" action writes back through `onSwitchProject` so SwiftUI's
 /// window dedup also moves with the switch (otherwise opening the
 /// originally-bound project in a new window would just bring this one
-/// forward). `WorkspaceStore` and `RepoStore` are scoped to the
-/// project's root directory and are rebuilt fresh when the project
-/// changes (via the `.id` modifier on the inner contents view).
+/// forward).
+///
+/// Per-project state (terminals, dev servers, doc watchers, the plan
+/// queue) lives in `ProjectSession` bundles cached in a window-scoped
+/// registry. Switching projects rebuilds the *views* (the `.id` below)
+/// but reuses the bundle, so shells keep their scrollback and running
+/// work is never interrupted; bundles die with the window.
 struct ProjectWindow: View {
     let project: Project
     let onSwitchProject: (UUID?) -> Void
 
     @Environment(ProjectStore.self) private var projectStore
+    @State private var sessions = ProjectSessionRegistry()
 
     var body: some View {
         ProjectWindowContents(
-            project: project,
+            session: sessions.session(for: project),
             projects: projectStore,
             onSwitchProject: onSwitchProject
         )
@@ -24,67 +29,46 @@ struct ProjectWindow: View {
     }
 }
 
-/// Inner view keyed off the current project's id so SwiftUI re-runs its
-/// `init` (and therefore the `@State` initializers for the stores) when
-/// the user picks a different project in the rail.
+/// Inner view keyed off the current project's id so SwiftUI resets its
+/// view state (sidebar mode, file-tree visibility, …) when the user picks
+/// a different project in the rail. The stores it renders come from the
+/// long-lived `ProjectSession`, not from here.
 private struct ProjectWindowContents: View {
-    let project: Project
+    let session: ProjectSession
     let projects: ProjectStore
     let onSwitchProject: (UUID?) -> Void
 
-    @State private var store: WorkspaceStore
-    @State private var repoStore: RepoStore
-    @State private var layout: SidebarLayoutStore
-
-    init(
-        project: Project,
-        projects: ProjectStore,
-        onSwitchProject: @escaping (UUID?) -> Void
-    ) {
-        self.project = project
-        self.projects = projects
-        self.onSwitchProject = onSwitchProject
-        _store = State(
-            initialValue: WorkspaceStore(defaultWorkingDirectory: project.rootPath.path)
-        )
-        _repoStore = State(initialValue: RepoStore(project: project))
-        _layout = State(initialValue: SidebarLayoutStore(project: project))
-    }
-
     var body: some View {
         ContentView(
-            store: store,
-            repoStore: repoStore,
-            layout: layout,
+            session: session,
             projects: projects,
-            currentProjectID: project.id,
             onSwitchProject: onSwitchProject
         )
         .onAppear {
-            store.layout = layout
             // Remember where the user was so the next launch can land
             // here instead of the Home grid.
-            LastOpenedProject.record(project.id)
-            // e2e only (no-op otherwise): expose this window's live
-            // stores to the automation server, keyed by project id.
-            E2ERegistry.shared.registerWindowStores(
-                projectID: project.id,
-                workspaceStore: store,
-                repoStore: repoStore
-            )
-            repoStore.refresh()
-            Task {
-                // Reconstruct the feature list from the worktrees
-                // we find on disk so a relaunch comes back to the
-                // same set of work items the user closed with.
-                await store.reloadFeatures(in: project, repoStore: repoStore)
-            }
+            LastOpenedProject.record(session.project.id)
+            session.repoStore.refresh()
+            // First appear only: reconstruct the feature list from the
+            // worktrees on disk. Switch-backs skip it — reloading over
+            // live workspaces would disturb their running terminals.
+            session.bootstrapIfNeeded()
+            // e2e only (no-op otherwise): point the automation server at
+            // this window's live stores and switch action.
+            session.registerWithE2E()
+            E2ERegistry.shared.registerProjectSwitcher(onSwitchProject)
         }
         .onDisappear {
-            E2ERegistry.shared.unregister(projectID: project.id)
+            // e2e bookkeeping (handles are weak; the bundle lives on in
+            // the registry). Scoped to THIS project only: whether an
+            // `.id()` swap runs the old view's onDisappear before or
+            // after the new view's onAppear is underspecified, and a
+            // blanket unregister in the late ordering would wipe the
+            // incoming project's fresh registration.
+            E2ERegistry.shared.unregister(projectID: session.project.id)
         }
-        .focusedSceneValue(\.activeStore, store)
-        .focusedSceneValue(\.activeProject, project)
+        .focusedSceneValue(\.activeStore, session.store)
+        .focusedSceneValue(\.activeProject, session.project)
     }
 }
 

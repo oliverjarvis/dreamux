@@ -3,9 +3,12 @@ import Bonsplit
 import GhosttyTerminal
 import WebKit
 
-/// Holds every workspace's tab/split layout in a single ZStack so each
-/// workspace's BonsplitController, NSViews, and PTYs stay alive when the
-/// user clicks away. Only the active workspace is visible and accepts input.
+/// Holds every workspace's tab/split layout in a single ZStack so
+/// switching workspaces is an opacity flip, not a view rebuild. The
+/// terminal NSViews themselves are session-owned (`TabSession
+/// .terminalView`) and would survive teardown anyway; keeping them
+/// mounted avoids reparent churn and keeps split layouts warm. Only the
+/// active workspace is visible and accepts input.
 struct WorkspaceTerminalContainer: View {
     @Bindable var store: WorkspaceStore
 
@@ -78,7 +81,7 @@ private struct TabContentView: View {
 
     var body: some View {
         if let tabSession = session.tabSession(for: tabId) {
-            TerminalSurfaceView(context: tabSession.viewState)
+            HostedTerminalView(session: tabSession)
                 .onAppear { tabSession.startIfNeeded() }
         } else if let fileTab = session.fileTabSession(for: tabId) {
             FileEditorView(session: fileTab)

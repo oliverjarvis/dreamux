@@ -82,6 +82,50 @@ final class TabSession: Identifiable {
         return t.isEmpty ? "shell" : t
     }
 
+    @ObservationIgnored private var _terminalView: TerminalView?
+
+    /// The tab's terminal NSView. Session-owned — not SwiftUI-owned — so
+    /// the ghostty surface behind it (grid, scrollback, running TUI
+    /// state) survives any view-tree teardown: project switches, layout
+    /// restructures, tab drags. `TerminalSurfaceView` would instead
+    /// create a view per mount, and the surface dies with its view's
+    /// coordinator, taking the terminal contents with it. Mirrors how
+    /// `WebTabSession`/`FileEditorTabSession` own their WKWebViews.
+    /// Created on first host so headless code paths (tests) never touch
+    /// the render stack.
+    var terminalView: TerminalView {
+        if let view = _terminalView { return view }
+        let view = TerminalView(frame: .zero)
+        // Same order as the package's TerminalViewRepresentable
+        // .configureView(_:initial:): delegate, controller, then
+        // configuration — the configuration assignment is what attaches
+        // the in-memory backend and builds the surface.
+        view.delegate = viewState
+        view.controller = viewState.controller
+        view.configuration = viewState.configuration
+        _terminalView = view
+        return view
+    }
+
+    /// Re-attach the hosted view to its controller if they ever diverge
+    /// — called from the host's `updateNSView` for parity with the
+    /// package representable, which re-ran this check on every SwiftUI
+    /// update pass. Deliberately does NOT touch `configuration`: ours
+    /// never changes after init, and re-assigning it rebuilds the
+    /// surface, wiping the terminal.
+    func resyncTerminalViewIfNeeded() {
+        guard let view = _terminalView else { return }
+        if view.controller !== viewState.controller {
+            view.controller = viewState.controller
+        }
+    }
+
+    /// Visible-viewport text of this tab's terminal, or `nil` when no
+    /// surface is attached yet. e2e readback only.
+    func readViewportText() -> String? {
+        shell.terminalSession.readViewportText()
+    }
+
     /// Idempotent — safe to call from `onAppear`.
     func startIfNeeded() {
         guard !didStart else { return }
