@@ -303,11 +303,16 @@ final class DocStore {
             prefix.removeSubrange(k...)
         }
         var result = String(prefix).trimmingCharacters(in: .whitespaces)
-        // Drop a partial trailing word (the shared run stopped mid-word).
-        if titles.count > 1, prefix.count < first.count,
-           !first[first.index(first.startIndex, offsetBy: prefix.count)].isWhitespace,
-           let lastSpace = result.lastIndex(of: " ") {
-            result = String(result[..<lastSpace]).trimmingCharacters(in: .whitespaces)
+        // Trim a partial trailing word only when the run breaks mid-word —
+        // a word char on both sides of the divergence. A break at a space
+        // is already a clean boundary, so the whole trailing word stays.
+        if titles.count > 1, prefix.count > 0, prefix.count < first.count {
+            let chars = Array(first)
+            let brokeMidWord = !chars[prefix.count - 1].isWhitespace
+                && !chars[prefix.count].isWhitespace
+            if brokeMidWord, let lastSpace = result.lastIndex(of: " ") {
+                result = String(result[..<lastSpace]).trimmingCharacters(in: .whitespaces)
+            }
         }
         return result.count >= 4 ? result : nil
     }
@@ -341,11 +346,14 @@ final class DocStore {
         (minDate(a), minName(a)) < (minDate(b), minName(b))
     }
 
-    private static func allDocs(_ i: Initiative) -> [PlanDoc] {
-        i.plans + [i.spec].compactMap { $0 } + i.supportingDocs
+    // Members = spec + plans (not supporting docs), so the initiative sort
+    // key shares one date basis with the component ordering above: an
+    // early-dated roadmap can't drag its initiative back up the list.
+    private static func members(_ i: Initiative) -> [PlanDoc] {
+        i.plans + [i.spec].compactMap { $0 }
     }
-    private static func representativeDate(_ i: Initiative) -> String { minDate(allDocs(i)) }
-    private static func representativeName(_ i: Initiative) -> String { minName(allDocs(i)) }
+    private static func representativeDate(_ i: Initiative) -> String { minDate(members(i)) }
+    private static func representativeName(_ i: Initiative) -> String { minName(members(i)) }
     private static func minDate(_ docs: [PlanDoc]) -> String { docs.compactMap { $0.date }.min() ?? "" }
     private static func minName(_ docs: [PlanDoc]) -> String {
         docs.map { $0.fileURL.lastPathComponent }.min() ?? ""

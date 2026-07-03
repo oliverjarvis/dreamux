@@ -207,6 +207,53 @@ final class InitiativeGroupingTests: XCTestCase {
         XCTAssertEqual(store.initiatives.count, 2)
     }
 
+    /// Spec-less multi-plan family: the title is the plans' common prefix.
+    /// A divergence at a word boundary keeps the whole trailing word.
+    func testCommonPrefixTitleKeepsWholeWordAtCleanBoundary() throws {
+        try write("docs/plans/viewers-phase-1.md",
+                  "# Universal File Viewers Core Implementation Plan\n")
+        try write("docs/plans/viewers-phase-2.md",
+                  "# Universal File Viewers Media Implementation Plan\n")
+        let store = makeStore()
+
+        XCTAssertEqual(store.initiatives.count, 1)
+        let it = store.initiatives[0]
+        XCTAssertNil(it.spec)
+        XCTAssertEqual(it.plans.count, 2)
+        XCTAssertEqual(it.title, "Universal File Viewers")
+    }
+
+    /// A genuine mid-word divergence drops the partial last word.
+    func testCommonPrefixTitleDropsPartialWordAtMidWordBoundary() throws {
+        try write("docs/plans/game-phase-1.md", "# Gameboy Corex Implementation Plan\n")
+        try write("docs/plans/game-phase-2.md", "# Gameboy Corey Implementation Plan\n")
+        let store = makeStore()
+
+        XCTAssertEqual(store.initiatives.count, 1)
+        let it = store.initiatives[0]
+        XCTAssertNil(it.spec)
+        XCTAssertEqual(it.title, "Gameboy")
+    }
+
+    /// The initiative sort keys off member (spec/plan) dates only, so a
+    /// supporting doc dated earlier than the plans can't hoist its
+    /// initiative up the list.
+    func testSupportingDocDateDoesNotShiftInitiativeOrder() throws {
+        // Family `aaa`: plan dated 07-05 + a roadmap dated 06-01 linking to it.
+        try write("docs/plans/2026-07-05-aaa.md", "# Aaa Implementation Plan\n")
+        try write("docs/2026-06-01-aaa-roadmap.md", "Ships via docs/plans/2026-07-05-aaa.md\n")
+        // Family `bbb`: plan dated 07-01.
+        try write("docs/plans/2026-07-01-bbb.md", "# Bbb Implementation Plan\n")
+        let store = makeStore()
+
+        let aaa = try XCTUnwrap(store.initiatives.first { $0.id == "aaa" })
+        XCTAssertEqual(aaa.supportingDocs.map { $0.fileURL.lastPathComponent },
+                       ["2026-06-01-aaa-roadmap.md"])
+        // `aaa` (07-05) sorts before `bbb` (07-01) on plan date — the
+        // 06-01 roadmap does not count toward the key.
+        XCTAssertEqual(store.initiatives.map(\.id), ["aaa", "bbb"])
+    }
+
     func testTwoFamiliesSharingADateDoNotMerge() throws {
         try write("docs/plans/2026-07-02-alpha.md", """
         # Alpha Implementation Plan
