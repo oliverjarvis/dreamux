@@ -16,6 +16,12 @@ struct PlansSpecsSection: View {
     @Bindable var queue: PlanQueueController
     let onOpenFeature: (String) -> Void   // feature name → activate workspace
     let onEnqueue: (PlanDoc) -> Void
+    /// The feature a plan runs (or ran) as — ledger record wins, else the
+    /// name derived from the filename. Drives the → workspace affordance and
+    /// the unread dot.
+    let featureName: (PlanDoc) -> String?
+    /// Whether the named feature's workspace has unread terminal output.
+    let hasUnread: (String) -> Bool
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
@@ -480,12 +486,40 @@ struct PlansSpecsSection: View {
     }
 
     private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {
+        let name = featureName(plan)
+        let openableFeature = PlanWorkspacePresence.workspaceToOpen(
+            status: status, featureName: name, featureExists: featureExists)
+        // The unread dot tracks live output regardless of status — an agent
+        // can produce output while parked at a gate — so it keys off the
+        // feature existing, not the in-flight gate the → affordance uses.
+        let showUnread = name.map { featureExists($0) && hasUnread($0) } ?? false
         // The disclosure chevron overlays the row's leading gap rather than
         // nesting inside its open-doc button — the same on-top idiom the
         // feature rows use for their hover controls, so a click on the
         // chevron toggles tasks without opening the doc.
-        ZStack(alignment: .leading) {
-            docRow(plan, canRun: status == .ready || status == .inProgress) {
+        return ZStack(alignment: .leading) {
+            docRow(
+                plan,
+                canRun: status == .ready || status == .inProgress,
+                trailing: {
+                    if let feature = openableFeature {
+                        Button { onOpenFeature(feature) } label: {
+                            Image(systemName: "arrow.right.circle")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22, height: 22)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Open \(feature)'s workspace")
+                    }
+                },
+                menu: {
+                    if let feature = openableFeature {
+                        Button("Open workspace") { onOpenFeature(feature) }
+                    }
+                }
+            ) {
                 HStack(spacing: 8) {
                     Color.clear.frame(width: chevronColumnWidth, height: 18)
                     Image(systemName: status.glyph)
@@ -502,6 +536,9 @@ struct PlansSpecsSection: View {
                             Text(plan.title)
                                 .font(.callout.weight(.medium))
                                 .lineLimit(1).truncationMode(.tail)
+                            if showUnread {
+                                Circle().fill(Color.red).frame(width: 5, height: 5)
+                            }
                         }
                         HStack(spacing: 6) {
                             Text(status.label)
@@ -741,9 +778,14 @@ struct PlansSpecsSection: View {
 
     /// Row chrome shared by all three row types: click opens the doc,
     /// hover reveals Run for runnable plans, context menu everywhere.
-    private func docRow<Body: View>(
+    /// `trailing` adds a caller-supplied hover control (the → workspace
+    /// button) stacked ahead of Run; `menu` adds caller-supplied context
+    /// items ahead of Reveal in Finder.
+    private func docRow<Body: View, Trailing: View, Menu: View>(
         _ doc: PlanDoc,
         canRun: Bool,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() },
+        @ViewBuilder menu: () -> Menu = { EmptyView() },
         @ViewBuilder body: () -> Body
     ) -> some View {
         ZStack(alignment: .trailing) {
@@ -767,22 +809,33 @@ struct PlansSpecsSection: View {
                     Button("Run Plan…") { onRunPlan(doc) }
                     Button("Add to Queue") { onEnqueue(doc) }
                 }
+                menu()
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([doc.fileURL])
                 }
             }
 
-            if canRun, hoveredDocURL == doc.fileURL {
-                Button { onRunPlan(doc) } label: {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(Color.accentColor))
+            // Hover-revealed trailing controls: the caller's affordance
+            // (→ workspace) stacked with Run for a runnable plan. The two
+            // statuses are mutually exclusive today — a plan is either
+            // runnable or in flight — but they stack like `runControls` if
+            // that ever changes.
+            if hoveredDocURL == doc.fileURL {
+                HStack(spacing: 4) {
+                    trailing()
+                    if canRun {
+                        Button { onRunPlan(doc) } label: {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 22, height: 22)
+                                .background(Circle().fill(Color.accentColor))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Run this plan (provisions a worktree and starts claude)")
+                    }
                 }
-                .buttonStyle(.plain)
                 .padding(.trailing, 12)
-                .help("Run this plan (provisions a worktree and starts claude)")
             }
         }
         .onHover { hovering in

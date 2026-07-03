@@ -187,7 +187,16 @@ struct WorkspaceSidebar: View {
                     sidebarMode = .workspace
                     store.activate(workspace.id)
                 },
-                onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) }
+                onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) },
+                featureName: { plan in
+                    docStore.ledger.recordForPlan(docStore.relativePath(of: plan))?.featureName
+                        ?? PlanDoc.branchName(forFileName: plan.fileURL.lastPathComponent)
+                },
+                hasUnread: { name in
+                    guard let workspace = store.workspaces.first(where: { $0.name == name })
+                    else { return false }
+                    return store.hasUnread(for: workspace)
+                }
             )
 
             VStack(alignment: .leading, spacing: 4) {
