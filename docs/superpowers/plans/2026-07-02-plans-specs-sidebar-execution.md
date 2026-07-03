@@ -38,7 +38,7 @@
   - `static func parse(fileURL: URL, contents: String) -> PlanDoc`
   - `static func branchName(forFileName:) -> String` — filename stem minus `YYYY-MM-DD-` prefix and `-design` suffix.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/DreamuxTests/PlanDocTests.swift`:
 
@@ -117,12 +117,12 @@ final class PlanDocTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter PlanDocTests 2>&1 | tail -5`
 Expected: FAIL — `cannot find 'PlanDoc' in scope`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `Sources/Dreamux/Models/PlanDoc.swift`:
 
@@ -245,12 +245,12 @@ struct PlanDoc: Identifiable, Equatable {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --filter PlanDocTests 2>&1 | tail -5`
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/PlanDoc.swift Tests/DreamuxTests/PlanDocTests.swift
@@ -271,7 +271,7 @@ git commit -m "Add PlanDoc shape-based markdown doc parser"
   - `enum PlanStatus: String { case specOnly, ready, inProgress, running, awaitingReview, merged }` with `var glyph: String` (SF Symbol) and `var label: String`.
   - `enum PlanStatusResolver { static func status(checked: Int, total: Int, hasRun: Bool, featureExists: Bool) -> PlanStatus }` — for plan docs. (`.specOnly` is assigned by `DocStore` to unpaired specs, not by the resolver.)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/DreamuxTests/PlanStatusTests.swift`:
 
@@ -319,12 +319,12 @@ final class PlanStatusTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter PlanStatusTests 2>&1 | tail -5`
 Expected: FAIL — `cannot find 'PlanStatusResolver' in scope`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `Sources/Dreamux/Models/PlanStatus.swift`:
 
@@ -386,12 +386,12 @@ enum PlanStatusResolver {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --filter PlanStatusTests 2>&1 | tail -5`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/PlanStatus.swift Tests/DreamuxTests/PlanStatusTests.swift
@@ -412,7 +412,7 @@ git commit -m "Add derived PlanStatus resolver"
   - `struct PlanRunRecord: Codable, Equatable { var planPath: String; var featureName: String; var startedAt: Date }` — `planPath` is relative to the project root (e.g. `docs/plans/2026-07-02-x.md`).
   - `@MainActor @Observable final class PlanRunLedger` with `init(project: Project)`, `private(set) var records: [PlanRunRecord]`, `func record(planPath: String, featureName: String)` (replaces an existing record for the same plan), `func recordForPlan(_ relativePath: String) -> PlanRunRecord?`, `func reconcile(existingFeatureNames: Set<String>, isPlanComplete: (String) -> Bool)` — prunes records whose feature is gone AND whose plan isn't fully checked (feature closed without merging → plan returns to ready; completed-then-closed records are kept so `merged` sticks).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/DreamuxTests/PlanRunLedgerTests.swift`:
 
@@ -466,12 +466,12 @@ final class PlanRunLedgerTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter PlanRunLedgerTests 2>&1 | tail -5`
 Expected: FAIL — `cannot find 'PlanRunLedger' in scope`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `Sources/Dreamux/Models/PlanRunLedger.swift`:
 
@@ -554,12 +554,12 @@ final class PlanRunLedger {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --filter PlanRunLedgerTests 2>&1 | tail -5`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/PlanRunLedger.swift Tests/DreamuxTests/PlanRunLedgerTests.swift
@@ -581,7 +581,7 @@ git commit -m "Add plan-run ledger persisted to .dreamux/plan-runs.json"
   - Views: `var plans: [PlanDoc]`, `var unpairedSpecs: [PlanDoc]`, `var otherDocs: [PlanDoc]`, `func pairedSpec(for plan: PlanDoc) -> PlanDoc?`, `func relativePath(of doc: PlanDoc) -> String`, `func status(for plan: PlanDoc, featureExists: (String) -> Bool) -> PlanStatus`.
   - `static func ensureDocsHome(at projectRoot: URL)` — creates `docs/specs` and `docs/plans`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/DreamuxTests/DocStoreTests.swift`:
 
@@ -690,12 +690,12 @@ final class DocStoreTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter DocStoreTests 2>&1 | tail -5`
 Expected: FAIL — `cannot find 'DocStore' in scope`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `Sources/Dreamux/Models/DocStore.swift`:
 
@@ -872,12 +872,12 @@ final class DocStore {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --filter DocStoreTests 2>&1 | tail -5`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/DocStore.swift Tests/DreamuxTests/DocStoreTests.swift
@@ -896,7 +896,7 @@ git commit -m "Add DocStore: scan, classify, pair, and watch project docs"
 - Consumes: Task 4's `DocStore.ensureDocsHome`.
 - Produces: every provisioned/rebuilt feature aggregation dir contains a `docs` symlink → `../../docs` (named `project-docs` when a linked repo is itself named `docs`); `DREAMUX.md` documents the docs home and instructs agents to write specs/plans there.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `Tests/DreamuxTests/FeatureProvisionerTests.swift` (reuse its existing sandbox/repo fixtures — it already provisions features against `GitFixtures` repos; follow its local helper names):
 
@@ -938,12 +938,12 @@ Append to `Tests/DreamuxTests/FeatureProvisionerTests.swift` (reuse its existing
 
 (If `makeRepo(named:)` doesn't exist under that exact name in the test file, use its actual repo-fixture helper — the file already creates repos for provisioning tests.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter FeatureProvisionerTests 2>&1 | tail -5`
 Expected: FAIL — no `docs` symlink, readme assertions fail.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `Sources/Dreamux/Shell/FeatureProvisioner.swift`:
 
@@ -1007,12 +1007,12 @@ their `- [ ]` checkboxes — tick each step's checkbox in the plan file
 as you complete it.
 ```
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run: `swift test 2>&1 | tail -3`
 Expected: PASS (existing provisioner tests still green — rollback removes the whole feature dir, so the docs link needs no special rollback).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Shell/FeatureProvisioner.swift Tests/DreamuxTests/FeatureProvisionerTests.swift
@@ -1031,7 +1031,7 @@ git commit -m "Symlink project docs home into feature dirs; document it in DREAM
 - Consumes: `TabSession.send(_:)`, `isShellQuiescent(for:)`, `lastShellOutputAt`; `ClaudeCodeIntegration.claudeInvocation`.
 - Produces: `@MainActor enum ClaudePromptDriver` with `static func send(_ prompt: String, into session: TabSession)`, `static func claudeCommand(_ argument: String, quoted: Bool) -> String`, `static func shellQuote(_ text: String) -> String`. RunSetupView behavior is unchanged.
 
-- [ ] **Step 1: Create the driver by MOVING code**
+- [x] **Step 1: Create the driver by MOVING code**
 
 Create `Sources/Dreamux/Shell/ClaudePromptDriver.swift` and move — verbatim, including their doc comments — these three members out of `RunSetupView` (`Sources/Dreamux/Views/RunSetupView.swift:373-439` and `:546-552`):
 
@@ -1056,7 +1056,7 @@ enum ClaudePromptDriver {
 }
 ```
 
-- [ ] **Step 2: Point RunSetupView at the driver**
+- [x] **Step 2: Point RunSetupView at the driver**
 
 In `Sources/Dreamux/Views/RunSetupView.swift`, replace the moved members with a thin forwarder so call sites stay small:
 
@@ -1068,12 +1068,12 @@ In `Sources/Dreamux/Views/RunSetupView.swift`, replace the moved members with a 
 
 `runDetect`/`runIsolate`/`runDiagnose` keep calling `sendClaude(...)` unchanged. Delete the now-unused local `claudeCommand`/`shellQuote` (the prompts themselves don't use them; verify with a search in the file before deleting).
 
-- [ ] **Step 3: Build and run the suite**
+- [x] **Step 3: Build and run the suite**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass — this is a pure move; `FakeClaudeDetectTests` and runner tests stay green.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/Dreamux/Shell/ClaudePromptDriver.swift Sources/Dreamux/Views/RunSetupView.swift
@@ -1092,7 +1092,7 @@ git commit -m "Extract shared ClaudePromptDriver from RunSetupView"
 - Consumes: existing `nextTabCwdOverride` / `handleDidCreateTab` machinery.
 - Produces: `@discardableResult func openAgentTab(at path: String, title: String, icon: String) -> TabSession?` — creates a terminal tab cwd'd at `path` and returns its `TabSession` so callers can `ClaudePromptDriver.send` into it. Also `private(set) var lastCreatedTabID: TabID?`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `Tests/DreamuxTests/WorkspaceSessionFileTabTests.swift`:
 
@@ -1108,12 +1108,12 @@ Append to `Tests/DreamuxTests/WorkspaceSessionFileTabTests.swift`:
 
 (`TabSession` creation does not spawn a PTY — the shell starts on `startIfNeeded()` from the view's `onAppear` — so this is safe in unit tests. If `TabSession` has no public `cwd` property, add `let cwd: String?` stored from its initializer as part of this task and assert on it.)
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `swift test --filter WorkspaceSessionFileTabTests 2>&1 | tail -5`
 Expected: FAIL — no member `openAgentTab`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `Sources/Dreamux/Models/WorkspaceSession.swift`:
 
@@ -1151,12 +1151,12 @@ Add below `openTab(at:title:icon:)`:
 
 If `TabSession` doesn't expose its cwd, in `Sources/Dreamux/Models/TabSession.swift` store it: add `let cwd: String?` assigned from the initializer's `cwd` parameter.
 
-- [ ] **Step 4: Run the full suite**
+- [x] **Step 4: Run the full suite**
 
 Run: `swift test 2>&1 | tail -3`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/WorkspaceSession.swift Sources/Dreamux/Models/TabSession.swift Tests/DreamuxTests/WorkspaceSessionFileTabTests.swift
@@ -1179,7 +1179,7 @@ git commit -m "Add WorkspaceSession.openAgentTab returning the created TabSessio
   - `enum PlanPrompts` — `static func runPlan(planRelativePath: String, docsLinkName: String) -> String`, `static func resumePlan(planRelativePath: String, docsLinkName: String) -> String`, `static func brainstormKickoff(idea: String) -> String`, `static func writePlanKickoff(specRelativePath: String) -> String`.
   - `@MainActor final class PlanRunCoordinator` — `init(project: Project, workspaceStore: WorkspaceStore, repoStore: RepoStore, docStore: DocStore)`, `func runPlan(_ doc: PlanDoc, branchName: String, repoNames: [String]) async throws -> Workspace` (provision or resume + ledger + agent tab + prompt), and an injectable `var sendPrompt: (String, TabSession) -> Void` defaulting to `ClaudePromptDriver.send` (tests capture prompts without a PTY).
 
-- [ ] **Step 1: Write the failing prompt tests**
+- [x] **Step 1: Write the failing prompt tests**
 
 Create `Tests/DreamuxTests/PlanPromptsTests.swift`:
 
@@ -1221,7 +1221,7 @@ final class PlanPromptsTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure, then implement `PlanPrompts`**
+- [x] **Step 2: Run to verify failure, then implement `PlanPrompts`**
 
 Run: `swift test --filter PlanPromptsTests 2>&1 | tail -5` — expect `cannot find 'PlanPrompts'`.
 
@@ -1306,7 +1306,7 @@ enum PlanPrompts {
 
 Run: `swift test --filter PlanPromptsTests 2>&1 | tail -5` — expect PASS. (Note: `runPlan` interpolates `planRelativePath` as given — callers pass the ledger-style project-relative path, which is also valid inside the feature dir because the `docs` symlink mirrors the layout. The `docsLinkName` parameter exists for the `project-docs` collision case; when it's `project-docs`, callers pass a path already rewritten with that prefix — see the coordinator below.)
 
-- [ ] **Step 3: Write the failing coordinator test**
+- [x] **Step 3: Write the failing coordinator test**
 
 Create `Tests/DreamuxTests/PlanRunCoordinatorTests.swift`:
 
@@ -1365,7 +1365,7 @@ final class PlanRunCoordinatorTests: XCTestCase {
 
 (Adapt the two fixture calls — `RepoStore(project:)`/`reload()` and `GitFixtures.makeBareRepoWithWorktree` — to the actual helper names in `Tests/DreamuxTests/Support/GitFixtures.swift` and the provisioner tests; the assertions are the contract.)
 
-- [ ] **Step 4: Implement the coordinator**
+- [x] **Step 4: Implement the coordinator**
 
 Create `Sources/Dreamux/Shell/PlanRunCoordinator.swift`:
 
@@ -1458,12 +1458,12 @@ final class PlanRunCoordinator {
 }
 ```
 
-- [ ] **Step 5: Run the suite**
+- [x] **Step 5: Run the suite**
 
 Run: `swift test --filter "PlanPromptsTests|PlanRunCoordinatorTests" 2>&1 | tail -5`
 Expected: PASS. Then `swift test 2>&1 | tail -3` — full suite green.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Sources/Dreamux/Shell/PlanPrompts.swift Sources/Dreamux/Shell/PlanRunCoordinator.swift Tests/DreamuxTests/PlanPromptsTests.swift Tests/DreamuxTests/PlanRunCoordinatorTests.swift
@@ -1485,7 +1485,7 @@ git commit -m "Add PlanPrompts and PlanRunCoordinator (provision + drive claude)
 - Consumes: everything above.
 - Produces: the Plans & Specs section above Features; `SidebarLayoutStore.plansExpanded: Bool` (persisted); ContentView owns `DocStore` + `PlanRunCoordinator` and passes `openDoc` (file-tab path) into the sidebar.
 
-- [ ] **Step 1: Persisted collapse state (failing test first)**
+- [x] **Step 1: Persisted collapse state (failing test first)**
 
 Append to `Tests/DreamuxTests/SidebarLayoutStoreTests.swift`:
 
@@ -1510,7 +1510,7 @@ In `Sources/Dreamux/Models/SidebarLayoutStore.swift`:
 
 Run the filter again — expect PASS.
 
-- [ ] **Step 2: The section view**
+- [x] **Step 2: The section view**
 
 Create `Sources/Dreamux/Views/PlansSpecsSection.swift`:
 
@@ -1790,7 +1790,7 @@ struct PlansSpecsSection: View {
 }
 ```
 
-- [ ] **Step 3: Run Plan sheet + New Plan sheet**
+- [x] **Step 3: Run Plan sheet + New Plan sheet**
 
 Append to `Sources/Dreamux/Views/PlansSpecsSection.swift`:
 
@@ -1915,7 +1915,7 @@ struct NewPlanSheet: View {
 }
 ```
 
-- [ ] **Step 4: Wire into ContentView and WorkspaceSidebar**
+- [x] **Step 4: Wire into ContentView and WorkspaceSidebar**
 
 In `Sources/Dreamux/Views/ContentView.swift`:
 
@@ -2063,14 +2063,14 @@ and in `handleDidCloseTab(_ tabId:)` add `if planningTabID == tabId { planningTa
 - Make `PlanDoc` `Identifiable` conformance work with `.sheet(item:)` — it already is (Task 1).
 - `PlanDoc` needs `Hashable`? `.sheet(item:)` needs `Identifiable` only. Fine.
 
-- [ ] **Step 5: Build, test, and walk the flow**
+- [x] **Step 5: Build, test, and walk the flow**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass.
 
 Launch the app against a scratch project. Verify: the section renders above Features (collapsible, persisted across relaunch); drop a plan file into `<project>/docs/plans/` from Terminal — it appears within ~1s (watcher); clicking it opens the rendered markdown tab; Run Plan shows the sheet with derived branch name; running provisions the feature, opens a `plan: <name>` terminal tab, and types the claude invocation (with the real CLI or `DREAMUX_CLAUDE_BIN` fake); ticking a checkbox in the file on disk updates the row's progress live; “＋” opens the New Plan sheet and kickoff lands in a `planning` tab.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/PlansSpecsSection.swift Sources/Dreamux/Views/WorkspaceSidebar.swift Sources/Dreamux/Views/ContentView.swift Sources/Dreamux/Models/SidebarLayoutStore.swift Tests/DreamuxTests/SidebarLayoutStoreTests.swift
@@ -2091,7 +2091,7 @@ git commit -m "Add Plans & Specs sidebar section with run/new-plan flows"
 - Consumes: `DocStore`, `PlanRunCoordinator`.
 - Produces: e2e commands `listDocs` and `runPlan {path, branch?, repos?}`; state dump gains `"plans"`; `E2EProjectHandles` gains `weak var docStore: DocStore?` and `weak var planRunner: PlanRunCoordinator?`.
 
-- [ ] **Step 1: Registry**
+- [x] **Step 1: Registry**
 
 In `Sources/Dreamux/E2E/E2ERegistry.swift`:
 - In `E2EProjectHandles`, after `weak var signals: SignalStore?`:
@@ -2127,7 +2127,7 @@ In `Sources/Dreamux/Views/ContentView.swift` `.onAppear`, after `registerRunStor
             )
 ```
 
-- [ ] **Step 2: Commands**
+- [x] **Step 2: Commands**
 
 In `Sources/Dreamux/E2E/E2ECommands.swift`, add the two cases next to `case "openFile":` (follow the file's existing handler style — each case calls a private method with the request dict):
 
@@ -2225,7 +2225,7 @@ Also add plan facts to the `state` dump next to `payload["runners"]`:
         }
 ```
 
-- [ ] **Step 3: PROTOCOL.md**
+- [x] **Step 3: PROTOCOL.md**
 
 In `scripts/e2e/PROTOCOL.md`, add to the command list (matching the doc's existing per-command format):
 
@@ -2251,12 +2251,12 @@ fake). Replies `{"ok": true, "feature": "<branch>"}`.
 
 And document the `state` payload's new `plans` array alongside the `workspaces`/`runners` field docs.
 
-- [ ] **Step 4: Build + full suite**
+- [x] **Step 4: Build + full suite**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/E2E/E2ERegistry.swift Sources/Dreamux/E2E/E2ECommands.swift Sources/Dreamux/Views/ContentView.swift scripts/e2e/PROTOCOL.md
