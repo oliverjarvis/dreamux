@@ -1,7 +1,7 @@
 # Initiative-Grouped Plans Sidebar — Design
 
 **Date:** 2026-07-03
-**Status:** Draft — awaiting approval
+**Status:** Approved 2026-07-03 ("Let's try with this for now")
 **Supersedes:** the sidebar-presentation portions of
 `2026-07-02-plans-specs-orchestration-design.md` (its execution model —
 run coordinator, ledger, queue, gates — is untouched and remains the
