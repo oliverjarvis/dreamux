@@ -151,6 +151,22 @@ struct ContentView: View {
         // The project identity lives in `heroBand` at the top of the detail
         // area (right of the rail), so the macOS titlebar title is blanked.
         .navigationTitle("")
+        // The file-explorer toggle lives in the native titlebar. It has no
+        // `.keyboardShortcut` on purpose: a shortcut on a toolbar item isn't
+        // dispatched while the Ghostty terminal NSView is first responder
+        // (it just rings the bell) — ⌥⌘E lives in `FileExplorerCommands`
+        // instead (see the comment on `focusedSceneValue` below).
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showFileTree.toggle()
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .foregroundStyle(showFileTree ? Color.accentColor : Color.secondary)
+                }
+                .help("Toggle file explorer (⌥⌘E)")
+            }
+        }
         .inspector(isPresented: $showFileTree) {
             FileTreePanel(
                 store: store,
@@ -271,10 +287,9 @@ struct ContentView: View {
     }
 
     /// The bold "hero" header pinned full-width to the top of the window:
-    /// an accent-tinted gradient carrying a gradient project glyph, the
-    /// project name in a heavy rounded face, and the file-explorer toggle
-    /// on the right. Replaces the flat titlebar title + Finder-path
-    /// subtitle.
+    /// an accent-tinted gradient carrying a gradient project glyph and the
+    /// project name in a heavy rounded face. Replaces the flat titlebar
+    /// title + Finder-path subtitle.
     private var heroBand: some View {
         let name = currentProject?.name ?? ""
         return HStack(spacing: 12) {
@@ -302,21 +317,6 @@ struct ContentView: View {
                 .minimumScaleFactor(0.6)
 
             Spacer(minLength: 8)
-
-            Button {
-                showFileTree.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(showFileTree ? Color.accentColor : .secondary)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(showFileTree ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.06))
-                    )
-            }
-            .buttonStyle(.plain)
-            .help("Toggle file explorer (⌥⌘E)")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
