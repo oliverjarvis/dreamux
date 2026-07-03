@@ -20,6 +20,10 @@ struct PlansSpecsSection: View {
     @State private var doneExpanded = false
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
+    @State private var hoveredChipURL: URL?
+    /// Plan rows expanded to their task list, keyed by plan file path.
+    /// Deliberately not persisted — a per-session affordance.
+    @State private var expandedPlans: Set<String> = []
     /// Queue row currently being dragged for reorder — see `queueSection`.
     @State private var draggingQueueItem: QueueItem?
 
@@ -94,31 +98,71 @@ struct PlansSpecsSection: View {
 
     @ViewBuilder
     private var rows: some View {
-        let statuses = Dictionary(uniqueKeysWithValues: docStore.plans.map {
-            ($0.fileURL, docStore.status(for: $0, featureExists: featureExists))
-        })
-        let active = docStore.plans.filter { statuses[$0.fileURL] != .merged }
-            .sorted { rank(statuses[$0.fileURL]!) < rank(statuses[$1.fileURL]!) }
+        let statuses = planStatuses()
+        // Active initiatives (any non-merged plan), ordered by their
+        // most-urgent plan so a running plan hoists its whole initiative.
+        let active = docStore.initiatives
+            .filter { hasActivePlan($0, statuses) }
+            .sorted { initiativeRank($0, statuses) < initiativeRank($1, statuses) }
+        let needsPlan = docStore.initiatives.filter(\.needsPlan)
+        // Every merged plan folds into the shared Done disclosure — a
+        // merged single-plan initiative and a merged phase land together.
         let done = docStore.plans.filter { statuses[$0.fileURL] == .merged }
 
         VStack(spacing: 2) {
             queueSection
-            ForEach(active) { plan in
-                planRow(plan, status: statuses[plan.fileURL]!)
+            ForEach(active) { initiative in
+                initiativeRows(initiative, statuses: statuses)
             }
-            ForEach(docStore.unpairedSpecs) { spec in
-                specOnlyRow(spec)
+            ForEach(needsPlan) { initiative in
+                if let spec = initiative.spec { specOnlyRow(spec) }
             }
             if !done.isEmpty {
                 disclosure("Done (\(done.count))", isExpanded: $doneExpanded) {
-                    ForEach(done) { plan in planRow(plan, status: .merged) }
+                    ForEach(done) { plan in
+                        planBlock(plan, status: .merged, ordinal: nil, chips: [])
+                    }
                 }
             }
-            if !docStore.otherDocs.isEmpty {
-                disclosure("Docs (\(docStore.otherDocs.count))", isExpanded: $docsExpanded) {
-                    ForEach(docStore.otherDocs) { doc in plainDocRow(doc) }
+            if !docStore.looseDocs.isEmpty {
+                disclosure("Docs (\(docStore.looseDocs.count))", isExpanded: $docsExpanded) {
+                    ForEach(docStore.looseDocs) { doc in plainDocRow(doc) }
                 }
             }
+        }
+    }
+
+    private func planStatuses() -> [URL: PlanStatus] {
+        Dictionary(uniqueKeysWithValues: docStore.plans.map {
+            ($0.fileURL, docStore.status(for: $0, featureExists: featureExists))
+        })
+    }
+
+    private func hasActivePlan(_ initiative: Initiative, _ statuses: [URL: PlanStatus]) -> Bool {
+        initiative.plans.contains { statuses[$0.fileURL] != .merged }
+    }
+
+    /// An initiative sorts by its most-urgent plan — the same rank the flat
+    /// plan list used, lifted to the initiative level.
+    private func initiativeRank(_ initiative: Initiative, _ statuses: [URL: PlanStatus]) -> Int {
+        initiative.plans.map { rank(statuses[$0.fileURL] ?? .ready) }.min() ?? rank(.ready)
+    }
+
+    /// Non-merged plans of an initiative, rendered as consecutive rows. The
+    /// spec/supporting-doc chip line attaches under the first plan row; a
+    /// multi-plan family also prefixes each row with its 1-based ordinal
+    /// (grouping-row treatment is a later task).
+    @ViewBuilder
+    private func initiativeRows(_ initiative: Initiative, statuses: [URL: PlanStatus]) -> some View {
+        let plans = initiative.plans.filter { statuses[$0.fileURL] != .merged }
+        let multi = initiative.plans.count > 1
+        let chips = docChips(for: initiative)
+        ForEach(Array(plans.enumerated()), id: \.element.id) { index, plan in
+            planBlock(
+                plan,
+                status: statuses[plan.fileURL] ?? .ready,
+                ordinal: multi ? ordinal(of: plan, in: initiative) : nil,
+                chips: index == 0 ? chips : [])
         }
     }
 
@@ -271,35 +315,193 @@ struct PlansSpecsSection: View {
         )
     }
 
-    private func planRow(_ plan: PlanDoc, status: PlanStatus) -> some View {
-        docRow(plan, canRun: status == .ready || status == .inProgress) {
-            HStack(spacing: 8) {
-                Image(systemName: status.glyph)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(status == .running ? Color.green : Color.secondary)
-                    .frame(width: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(plan.title)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1).truncationMode(.tail)
-                    HStack(spacing: 6) {
-                        Text(status.label)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if plan.totalSteps > 0 {
-                            ProgressView(value: Double(plan.checkedSteps),
-                                         total: Double(plan.totalSteps))
-                                .controlSize(.mini)
-                                .frame(width: 60)
-                            Text("\(plan.checkedSteps)/\(plan.totalSteps)")
-                                .font(.caption2.monospacedDigit())
-                                .foregroundStyle(.tertiary)
+    /// A plan row plus the pieces that hang beneath it: the doc-chip line
+    /// (first plan of an initiative) and, when expanded, its task rows.
+    @ViewBuilder
+    private func planBlock(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, chips: [Chip]) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            planRow(plan, status: status, ordinal: ordinal)
+            if !chips.isEmpty { chipLine(chips) }
+            if expandedPlans.contains(plan.fileURL.path) { planTasks(plan) }
+        }
+    }
+
+    private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?) -> some View {
+        // The disclosure chevron overlays the row's leading gap rather than
+        // nesting inside its open-doc button — the same on-top idiom the
+        // feature rows use for their hover controls, so a click on the
+        // chevron toggles tasks without opening the doc.
+        ZStack(alignment: .leading) {
+            docRow(plan, canRun: status == .ready || status == .inProgress) {
+                HStack(spacing: 8) {
+                    Color.clear.frame(width: chevronColumnWidth, height: 18)
+                    Image(systemName: status.glyph)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(status == .running ? Color.green : Color.secondary)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 4) {
+                            if let ordinal {
+                                Text("\(ordinal) ·")
+                                    .font(.callout.weight(.medium).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(plan.title)
+                                .font(.callout.weight(.medium))
+                                .lineLimit(1).truncationMode(.tail)
+                        }
+                        HStack(spacing: 6) {
+                            Text(status.label)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            if plan.totalSteps > 0 {
+                                ProgressView(value: Double(plan.checkedSteps),
+                                             total: Double(plan.totalSteps))
+                                    .controlSize(.mini)
+                                    .frame(width: 60)
+                                Text("\(plan.checkedSteps)/\(plan.totalSteps)")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                     }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+            }
+            if !renderableTasks(plan).isEmpty {
+                planDisclosure(plan).padding(.leading, 10)
             }
         }
+    }
+
+    /// Width of the leading column reserved for the disclosure chevron. The
+    /// overlaid chevron sits inside it (row content padding + this width),
+    /// so a plan with no tasks still aligns with one that has them.
+    private let chevronColumnWidth: CGFloat = 10
+
+    private func planDisclosure(_ plan: PlanDoc) -> some View {
+        let expanded = expandedPlans.contains(plan.fileURL.path)
+        return Button {
+            withAnimation(.snappy(duration: 0.18)) { togglePlan(plan) }
+        } label: {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .frame(width: chevronColumnWidth, height: 18)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Show tasks")
+    }
+
+    /// Task rows for an expanded plan: ✓ (all steps checked), ▶ + `← current`
+    /// (first task with an unchecked step), else ○ — with per-task counts.
+    @ViewBuilder
+    private func planTasks(_ plan: PlanDoc) -> some View {
+        let tasks = renderableTasks(plan)
+        let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
+        ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
+            taskRow(task, isCurrent: index == currentIndex)
+        }
+    }
+
+    private func taskRow(_ task: PlanTask, isCurrent: Bool) -> some View {
+        let checked = task.steps.filter(\.checked).count
+        let total = task.steps.count
+        let allChecked = checked == total
+        let glyph = allChecked ? "checkmark" : (isCurrent ? "arrowtriangle.right.fill" : "circle")
+        let tint = isCurrent
+            ? AnyShapeStyle(Color.accentColor)
+            : AnyShapeStyle(allChecked ? .secondary : .tertiary)
+        return HStack(spacing: 8) {
+            Image(systemName: glyph)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 14)
+            Text(task.title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.tail)
+            if isCurrent {
+                Text("← current")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+            Text("\(checked)/\(total)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.leading, 28)
+        .padding(.trailing, 12)
+        .padding(.vertical, 2)
+    }
+
+    /// Tasks worth a row: a heading with at least one checkbox step. A
+    /// `### Notes`-style section parses as a zero-step task and is skipped.
+    private func renderableTasks(_ plan: PlanDoc) -> [PlanTask] {
+        plan.tasks.filter { !$0.steps.isEmpty }
+    }
+
+    // MARK: - Doc chips
+
+    /// A compact, tappable label for an initiative-level doc.
+    private struct Chip: Identifiable {
+        let label: String
+        let url: URL
+        var id: URL { url }
+    }
+
+    private func docChips(for initiative: Initiative) -> [Chip] {
+        var chips: [Chip] = []
+        if let spec = initiative.spec {
+            chips.append(Chip(label: DocChipLabel.label(title: spec.title, isSpec: true),
+                              url: spec.fileURL))
+        }
+        for doc in initiative.supportingDocs {
+            chips.append(Chip(label: DocChipLabel.label(title: doc.title, isSpec: false),
+                              url: doc.fileURL))
+        }
+        return chips
+    }
+
+    private func chipLine(_ chips: [Chip]) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "paperclip")
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
+            ForEach(Array(chips.enumerated()), id: \.element.id) { index, chip in
+                if index > 0 {
+                    Text("·").font(.caption2).foregroundStyle(.tertiary)
+                }
+                Button { onOpenDoc(chip.url) } label: {
+                    Text(chip.label)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .underline(hoveredChipURL == chip.url)
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    if hovering { hoveredChipURL = chip.url }
+                    else if hoveredChipURL == chip.url { hoveredChipURL = nil }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 28)
+        .padding(.trailing, 12)
+        .padding(.bottom, 2)
+    }
+
+    private func togglePlan(_ plan: PlanDoc) {
+        let key = plan.fileURL.path
+        if expandedPlans.contains(key) { expandedPlans.remove(key) }
+        else { expandedPlans.insert(key) }
+    }
+
+    private func ordinal(of plan: PlanDoc, in initiative: Initiative) -> Int? {
+        initiative.plans.firstIndex { $0.id == plan.id }.map { $0 + 1 }
     }
 
     private func specOnlyRow(_ spec: PlanDoc) -> some View {
@@ -417,6 +619,21 @@ struct PlansSpecsSection: View {
             .buttonStyle(.plain)
             if isExpanded.wrappedValue { content() }
         }
+    }
+}
+
+// MARK: - Doc chip labeling
+
+/// Pure labeling for an initiative's doc chips, kept out of the view so it
+/// is unit-testable. The spec always reads `spec`; a supporting doc that
+/// mentions a roadmap reads `roadmap`; otherwise the first word of its
+/// title, lowercased.
+enum DocChipLabel {
+    static func label(title: String, isSpec: Bool) -> String {
+        if isSpec { return "spec" }
+        if title.range(of: "roadmap", options: .caseInsensitive) != nil { return "roadmap" }
+        let firstWord = title.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        return firstWord.lowercased()
     }
 }
 
