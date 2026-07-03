@@ -163,6 +163,12 @@ Field notes:
 - `plans` mirrors `DocStore.plans` (docs classified as plans only,
   i.e. not specs/plain docs): `status` is the same derived value
   `listDocs` reports (ledger + checkboxes + feature existence).
+- `queue` mirrors `PlanQueueController`: `{"state":
+  "idle|running|atGate|attention", "entries": ["docs/plans/…"],
+  "current": "docs/plans/…"?}`. `current` is omitted while the queue
+  is idle; JSON `null` when no plan queue is registered. Unlike
+  `queueState`, reading `state` does **not** tick the queue — poll
+  `queueState` to force a transition.
 - Empty-but-registered states return empty arrays, never `null`.
 
 ### `screenshot`
@@ -461,6 +467,59 @@ fake). Replies `{"ok": true, "feature": "<branch>"}`.
 ```
 → {"cmd":"runPlan","path":"docs/plans/2026-07-02-x.md"}
 ← {"ok":true,"feature":"x"}
+```
+
+### `enqueuePlan`
+
+Append a plan path to the queue (`PlanQueueController.enqueue`) — a
+no-op if it's already queued. Does not start the queue.
+
+```
+→ {"cmd":"enqueuePlan","path":"docs/plans/2026-07-02-x.md"}
+← {"ok":true}
+```
+
+### `startQueue`
+
+Start the queue (`PlanQueueController.start`): if idle with at least
+one entry, launches the first plan via `runPlan` and moves to
+`"running"`. A no-op when already running or empty.
+
+```
+→ {"cmd":"startQueue"}
+← {"ok":true}
+```
+
+### `stopQueue`
+
+Stop the queue (`PlanQueueController.stopQueue`): resets to `"idle"`,
+clears the current plan, and cancels the poller. Does not touch
+anything the current plan already started (worktrees, terminals).
+
+```
+→ {"cmd":"stopQueue"}
+← {"ok":true}
+```
+
+### `queueState`
+
+Snapshot of the plan queue, after running one synchronous
+`PlanQueueController.tick()` — the same transition logic the 3s
+background poller drives, but forced immediately so scenarios don't
+race a timer. This is how a driver deterministically walks the state
+machine: tick a plan's checkboxes to done, call `queueState`, and
+assert `"atGate"` shows up on that call rather than an arbitrary one a
+few seconds later.
+
+`{"ok": true, "state": "idle|running|atGate|attention", "entries":
+["docs/plans/…"], "current"?, "lastError"?}` — `current` is present
+whenever a plan is active (`running`/`atGate`/`attention`);
+`lastError` only after a launch or disappearance failure.
+
+```
+→ {"cmd":"queueState"}
+← {"ok":true,"state":"atGate","entries":[],
+   "current":"docs/plans/2026-07-02-x.md"}
 ```
 
 ### `quit`

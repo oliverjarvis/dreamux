@@ -91,6 +91,14 @@ enum E2ECommands {
             return handleListDocs()
         case "runPlan":
             return await handleRunPlan(request)
+        case "enqueuePlan":
+            return handleQueueMutation(request) { $0.enqueue($1) }
+        case "startQueue":
+            return handleQueueMutation(request) { queue, _ in queue.start() }
+        case "stopQueue":
+            return handleQueueMutation(request) { queue, _ in queue.stopQueue() }
+        case "queueState":
+            return handleQueueState()
         case "quit":
             return ["ok": true]
         default:
@@ -203,6 +211,17 @@ enum E2ECommands {
             }
         } else {
             payload["plans"] = [Any]()
+        }
+
+        if let queue = handles.planQueue {
+            var queueEntry: [String: Any] = [
+                "state": queue.state.rawValue,
+                "entries": queue.entries,
+            ]
+            if let current = queue.currentPlanPath { queueEntry["current"] = current }
+            payload["queue"] = queueEntry
+        } else {
+            payload["queue"] = NSNull()
         }
 
         payload["runTomlExists"] = handles.runConfig?.exists ?? false
@@ -446,6 +465,42 @@ enum E2ECommands {
         } catch {
             return ["ok": false, "error": error.localizedDescription]
         }
+    }
+
+    /// Shared plumbing for `enqueuePlan`/`startQueue`/`stopQueue`: resolve
+    /// the registered queue, run the mutation (with `request["path"]`, or
+    /// `""` when the command doesn't take one), and reply. Failures never
+    /// throw — like `handleListDocs`/`handleRunPlan`, a missing queue is
+    /// reported inline rather than via `CommandError`.
+    private static func handleQueueMutation(
+        _ request: [String: Any],
+        _ mutate: (PlanQueueController, String) -> Void
+    ) -> [String: Any] {
+        guard let handles = try? activeHandles(), let queue = handles.planQueue else {
+            return ["ok": false, "error": "no plan queue registered"]
+        }
+        mutate(queue, (request["path"] as? String) ?? "")
+        return ["ok": true]
+    }
+
+    /// Snapshot of the plan queue's state machine. Runs a synchronous
+    /// `tick()` first — the queue otherwise only advances off its 3s
+    /// poller or a `runPlan` completion, and scenarios need deterministic
+    /// transitions (write plan checkboxes → `queueState` → assert
+    /// `atGate`) rather than a race against that timer.
+    private static func handleQueueState() -> [String: Any] {
+        guard let handles = try? activeHandles(), let queue = handles.planQueue else {
+            return ["ok": false, "error": "no plan queue registered"]
+        }
+        queue.tick()   // deterministic: scenarios don't wait for the poller
+        var payload: [String: Any] = [
+            "ok": true,
+            "state": queue.state.rawValue,
+            "entries": queue.entries,
+        ]
+        if let current = queue.currentPlanPath { payload["current"] = current }
+        if let error = queue.lastError { payload["lastError"] = error }
+        return payload
     }
 
     /// Play semantics — worktree-centric, never a question. Flexible
