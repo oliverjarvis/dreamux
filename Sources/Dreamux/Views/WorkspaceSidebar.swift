@@ -198,10 +198,7 @@ struct WorkspaceSidebar: View {
                     store.activate(workspace.id)
                 },
                 onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) },
-                featureName: { plan in
-                    docStore.ledger.recordForPlan(docStore.relativePath(of: plan))?.featureName
-                        ?? PlanDoc.branchName(forFileName: plan.fileURL.lastPathComponent)
-                },
+                featureName: { featureName(for: $0) },
                 hasUnread: { name in
                     guard let workspace = store.workspaces.first(where: { $0.name == name })
                     else { return false }
@@ -233,6 +230,27 @@ struct WorkspaceSidebar: View {
                                 .onDrop(of: [.text], delegate: ReorderDropDelegate(
                                     item: workspace,
                                     items: workspacesBinding,
+                                    dragging: $draggingWorkspace,
+                                    onReorder: { store.persistFeatureOrder() }
+                                ))
+                        }
+                    }
+                }
+            }
+
+            if !adHocWorkspaces.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    sectionLabel("Ad hoc")
+                    VStack(spacing: 2) {
+                        ForEach(adHocWorkspaces) { workspace in
+                            featureRow(workspace) { featureRowBody(workspace) }
+                                .onDrag {
+                                    draggingWorkspace = workspace
+                                    return NSItemProvider(object: workspace.id.uuidString as NSString)
+                                }
+                                .onDrop(of: [.text], delegate: ReorderDropDelegate(
+                                    item: workspace,
+                                    items: adHocWorkspacesBinding,
                                     dragging: $draggingWorkspace,
                                     onReorder: { store.persistFeatureOrder() }
                                 ))
@@ -436,6 +454,46 @@ struct WorkspaceSidebar: View {
 
     private var workspacesBinding: Binding<[Workspace]> {
         Binding(get: { store.workspaces }, set: { store.workspaces = $0 })
+    }
+
+    // MARK: - Plan-backed / ad-hoc partition
+
+    /// The ledger record for a plan, keyed by its project-relative path.
+    private func planRecord(_ plan: PlanDoc) -> PlanRunRecord? {
+        docStore.ledger.recordForPlan(docStore.relativePath(of: plan))
+    }
+
+    /// The feature a plan runs as (ledger name, else filename-derived
+    /// branch). Shared by the Plans section's row labels and the ad-hoc
+    /// partition so both resolve names identically.
+    private func featureName(for plan: PlanDoc) -> String {
+        AdHocWorkspaces.featureName(for: plan, record: planRecord)
+    }
+
+    /// Workspaces with no plan behind them — reachable only from their own
+    /// row. Everything a plan runs as lives under its plan row instead.
+    private var adHocWorkspaces: [Workspace] {
+        let planBacked = AdHocWorkspaces.planBackedFeatureNames(
+            in: docStore.initiatives, record: planRecord)
+        return store.workspaces.filter { !planBacked.contains($0.name) }
+    }
+
+    /// Live drag-reorder scoped to the ad-hoc subset: reads the ad-hoc
+    /// workspaces in sidebar order, and on write splices the reordered
+    /// subset back into `store.workspaces`, leaving plan-backed rows where
+    /// they sit.
+    private var adHocWorkspacesBinding: Binding<[Workspace]> {
+        Binding(
+            get: { adHocWorkspaces },
+            set: { reordered in
+                let planBacked = AdHocWorkspaces.planBackedFeatureNames(
+                    in: docStore.initiatives, record: planRecord)
+                var next = reordered.makeIterator()
+                store.workspaces = store.workspaces.map { workspace in
+                    planBacked.contains(workspace.name) ? workspace : (next.next() ?? workspace)
+                }
+            }
+        )
     }
 
     private func sectionLabel(_ text: String) -> some View {
