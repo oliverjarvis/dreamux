@@ -72,7 +72,6 @@ struct ContentView: View {
         _fileTree = State(initialValue: FileTreeStore())
 
         let docStore = DocStore(project: repoStore.project)
-        docStore.refresh()
         _docStore = State(initialValue: docStore)
         _planRunner = State(initialValue: PlanRunCoordinator(
             project: repoStore.project,
@@ -152,6 +151,9 @@ struct ContentView: View {
             )
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
+            docStore.refresh()
+            docStore.reconcileLedger(
+                existingFeatureNames: Set(store.workspaces.map(\.name)))
         }
         .onChange(of: e2eBridge?.pendingSidebarMode) { _, _ in
             consumePendingSidebarModeIfAny()

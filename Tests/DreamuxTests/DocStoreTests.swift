@@ -99,4 +99,45 @@ final class DocStoreTests: XCTestCase {
         store.refresh()
         XCTAssertTrue(store.docs.isEmpty)
     }
+
+    /// Directory kqueue sources only fire on entry changes (create/rename/
+    /// delete) — an in-place content write (how claude's Edit tool updates
+    /// a checklist) fires nothing there. `refresh()` must still pick up the
+    /// new content on a subsequent scan regardless of how the file changed,
+    /// so this drives that rescan path directly rather than depending on
+    /// the (timing-dependent) kqueue firing itself.
+    func testRefreshPicksUpInPlaceEdits() throws {
+        try write("docs/plans/z.md", """
+        # Z Implementation Plan
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        - [ ] **Step 2: u**
+        """)
+        let store = DocStore(project: project)
+        store.refresh()
+        XCTAssertEqual(store.plans.count, 1)
+        XCTAssertEqual(store.plans[0].checkedSteps, 0)
+        XCTAssertEqual(store.plans[0].totalSteps, 2)
+
+        // Overwrite the file's bytes in place via FileHandle — no
+        // atomic-rename dance, so this never touches the directory entry
+        // itself (the case a directory-only watcher would miss).
+        let updated = """
+        # Z Implementation Plan
+        ### Task 1: a
+        - [x] **Step 1: t**
+        - [ ] **Step 2: u**
+        """
+        let url = project.rootPath.appendingPathComponent("docs/plans/z.md")
+        let data = try XCTUnwrap(updated.data(using: .utf8))
+        let handle = try FileHandle(forWritingTo: url)
+        handle.seek(toFileOffset: 0)
+        handle.write(data)
+        handle.closeFile()
+
+        store.refresh()
+        XCTAssertEqual(store.plans.count, 1)
+        XCTAssertEqual(store.plans[0].checkedSteps, 1)
+        XCTAssertEqual(store.plans[0].totalSteps, 2)
+    }
 }

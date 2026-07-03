@@ -615,6 +615,7 @@ struct WorkspaceSidebar: View {
         sidebarMode = .workspace
         let session = store.session(for: workspace)
         DocStore.ensureDocsHome(at: repoStore.project.rootPath)
+        docStore.refresh()
         if let tab = session.reuseOrOpenPlanningTab(
             at: repoStore.project.rootPath.path) {
             tab.startIfNeeded()
@@ -683,6 +684,8 @@ struct WorkspaceSidebar: View {
             stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
         }
         store.remove(workspace)
+        docStore.reconcileLedger(
+            existingFeatureNames: Set(store.workspaces.map(\.name)))
         guard !linkedRepos.isEmpty else { return }
         Task {
             await FeatureProvisioner.teardown(

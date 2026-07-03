@@ -4,9 +4,11 @@ import Observation
 /// Discovers and watches the project-level docs home (`<project>/docs/`),
 /// classifying every markdown file by shape via `PlanDoc`. Holds the run
 /// ledger so views can derive each plan's status in one place. Watching
-/// is kqueue-based (one DispatchSource per directory, rebuilt on every
-/// scan) — the docs tree is shallow, and live checkbox ticks from a
-/// running claude session land as `.write` events on `docs/plans/`.
+/// is kqueue-based (one DispatchSource per watched path, rebuilt on every
+/// scan) — the docs tree is shallow. Watchers cover both each directory
+/// (entry changes: create/rename/delete) and each doc file (in-place
+/// content writes, how claude's Edit tool updates a checklist), since a
+/// directory kqueue source alone fires on neither.
 @MainActor
 @Observable
 final class DocStore {
@@ -22,6 +24,11 @@ final class DocStore {
         projectRoot = project.rootPath
         docsRoot = project.rootPath.appendingPathComponent("docs", isDirectory: true)
         ledger = PlanRunLedger(project: project)
+    }
+
+    deinit {
+        watchers.forEach { $0.cancel() }
+        debounce?.cancel()
     }
 
     static func ensureDocsHome(at projectRoot: URL) {
@@ -71,7 +78,7 @@ final class DocStore {
         }
         .sorted { ($0.date ?? "") > ($1.date ?? "") }
 
-        rebuildWatchers(for: directories)
+        rebuildWatchers(for: directories + docs.map(\.fileURL))
     }
 
     // MARK: - Views over the scan
@@ -137,14 +144,14 @@ final class DocStore {
         debounce?.cancel()
     }
 
-    private func rebuildWatchers(for directories: [URL]) {
+    private func rebuildWatchers(for paths: [URL]) {
         watchers.forEach { $0.cancel() }
-        watchers = directories.compactMap { dir in
-            let fd = open(dir.path, O_EVTONLY)
+        watchers = paths.compactMap { path in
+            let fd = open(path.path, O_EVTONLY)
             guard fd >= 0 else { return nil }
             let source = DispatchSource.makeFileSystemObjectSource(
                 fileDescriptor: fd,
-                eventMask: [.write, .rename, .delete],
+                eventMask: [.write, .extend, .rename, .delete],
                 queue: .main)
             source.setEventHandler { [weak self] in self?.scheduleRefresh() }
             source.setCancelHandler { close(fd) }
