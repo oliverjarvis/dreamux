@@ -30,4 +30,28 @@ enum InitiativeProgress {
         }
         return (current, "plan \(current + 1)/\(statuses.count)", fraction)
     }
+
+    /// The 1-based ordinal of the plan that blocks the member at `index`,
+    /// or nil when every predecessor is merged (so it is runnable in
+    /// sequence). Blocking is sequential and presentational: the reported
+    /// plan is the *nearest* earlier member that isn't merged — the thing
+    /// directly ahead of this one in the queue. The first plan is never
+    /// blocked.
+    static func blockingOrdinal(statuses: [PlanStatus], index: Int) -> Int? {
+        guard index > 0 else { return nil }
+        for predecessor in stride(from: index - 1, through: 0, by: -1)
+        where statuses[predecessor] != .merged {
+            return predecessor + 1
+        }
+        return nil
+    }
+
+    /// Whether a multi-plan family starts expanded before the user touches
+    /// it: it has a child in flight (running or awaiting review) or the
+    /// queue is parked at a gate/attention on one of its plans. A family
+    /// with nothing in flight starts collapsed.
+    static func defaultsExpanded(statuses: [PlanStatus], queueParkedOnMember: Bool) -> Bool {
+        if queueParkedOnMember { return true }
+        return statuses.contains { $0 == .running || $0 == .awaitingReview }
+    }
 }

@@ -24,6 +24,12 @@ struct PlansSpecsSection: View {
     /// Plan rows expanded to their task list, keyed by plan file path.
     /// Deliberately not persisted — a per-session affordance.
     @State private var expandedPlans: Set<String> = []
+    /// User overrides of a multi-plan family's expansion, keyed by
+    /// initiative id. Absence means "follow the default" — expanded while a
+    /// child is in flight (see `isInitiativeExpanded`); once the user
+    /// toggles, their choice sticks. Not persisted.
+    @State private var initiativeExpansion: [String: Bool] = [:]
+    @State private var hoveredInitiativeID: String?
     /// Queue row currently being dragged for reorder — see `queueSection`.
     @State private var draggingQueueItem: QueueItem?
 
@@ -105,22 +111,43 @@ struct PlansSpecsSection: View {
             .filter { hasActivePlan($0, statuses) }
             .sorted { initiativeRank($0, statuses) < initiativeRank($1, statuses) }
         let needsPlan = docStore.initiatives.filter(\.needsPlan)
-        // Every merged plan folds into the shared Done disclosure — a
-        // merged single-plan initiative and a merged phase land together.
-        let done = docStore.plans.filter { statuses[$0.fileURL] == .merged }
+        // Merged plans fold into the shared Done disclosure — except the
+        // merged phases of an active multi-plan family, which render as
+        // children under their grouping row instead of being double-listed.
+        let claimed = familyMemberURLs(active)
+        let done = docStore.plans.filter {
+            statuses[$0.fileURL] == .merged && !claimed.contains($0.fileURL)
+        }
 
         VStack(spacing: 2) {
-            queueSection
+            queueSection(showGateFallback: !isGateAnchoredToRenderedRow(active, statuses))
             ForEach(active) { initiative in
-                initiativeRows(initiative, statuses: statuses)
+                if initiative.plans.count > 1 {
+                    multiPlanBlock(initiative, statuses: statuses)
+                } else if let plan = initiative.plans.first {
+                    planBlock(plan,
+                              status: statuses[plan.fileURL] ?? .ready,
+                              ordinal: nil,
+                              chips: docChips(for: initiative),
+                              blockedBy: nil)
+                }
             }
             ForEach(needsPlan) { initiative in
-                if let spec = initiative.spec { specOnlyRow(spec) }
+                if let spec = initiative.spec {
+                    VStack(alignment: .leading, spacing: 2) {
+                        specOnlyRow(spec)
+                        // Carry the initiative's absorbed docs (a roadmap or
+                        // notes that paired with the spec) onto the row —
+                        // otherwise they'd be silently hidden.
+                        let chips = supportingChips(for: initiative)
+                        if !chips.isEmpty { chipLine(chips) }
+                    }
+                }
             }
             if !done.isEmpty {
                 disclosure("Done (\(done.count))", isExpanded: $doneExpanded) {
                     ForEach(done) { plan in
-                        planBlock(plan, status: .merged, ordinal: nil, chips: [])
+                        planBlock(plan, status: .merged, ordinal: nil, chips: [], blockedBy: nil)
                     }
                 }
             }
@@ -130,6 +157,12 @@ struct PlansSpecsSection: View {
                 }
             }
         }
+    }
+
+    /// File URLs of every plan owned by an active multi-plan family — the
+    /// rows the grouping level renders itself, kept out of the flat Done list.
+    private func familyMemberURLs(_ active: [Initiative]) -> Set<URL> {
+        Set(active.filter { $0.plans.count > 1 }.flatMap { $0.plans.map(\.fileURL) })
     }
 
     private func planStatuses() -> [URL: PlanStatus] {
@@ -148,22 +181,131 @@ struct PlansSpecsSection: View {
         initiative.plans.map { rank(statuses[$0.fileURL] ?? .ready) }.min() ?? rank(.ready)
     }
 
-    /// Non-merged plans of an initiative, rendered as consecutive rows. The
-    /// spec/supporting-doc chip line attaches under the first plan row; a
-    /// multi-plan family also prefixes each row with its 1-based ordinal
-    /// (grouping-row treatment is a later task).
+    // MARK: - Multi-plan family
+
+    /// A multi-plan initiative: a grouping row (aggregate glyph, title,
+    /// `plan k/n · pct`) with the doc-chip line beneath, and — when
+    /// expanded — every phase as an indented child row carrying its
+    /// ordinal, status, and a `blocked by k` annotation.
     @ViewBuilder
-    private func initiativeRows(_ initiative: Initiative, statuses: [URL: PlanStatus]) -> some View {
-        let plans = initiative.plans.filter { statuses[$0.fileURL] != .merged }
-        let multi = initiative.plans.count > 1
+    private func multiPlanBlock(_ initiative: Initiative, statuses: [URL: PlanStatus]) -> some View {
+        let memberStatuses = initiative.plans.map { statuses[$0.fileURL] ?? .ready }
+        let progress = InitiativeProgress.resolve(
+            statuses: memberStatuses,
+            checked: initiative.plans.reduce(0) { $0 + $1.checkedSteps },
+            total: initiative.plans.reduce(0) { $0 + $1.totalSteps })
+        let expanded = isInitiativeExpanded(initiative, memberStatuses)
         let chips = docChips(for: initiative)
-        ForEach(Array(plans.enumerated()), id: \.element.id) { index, plan in
-            planBlock(
-                plan,
-                status: statuses[plan.fileURL] ?? .ready,
-                ordinal: multi ? ordinal(of: plan, in: initiative) : nil,
-                chips: index == 0 ? chips : [])
+        VStack(alignment: .leading, spacing: 2) {
+            initiativeGroupingRow(initiative, memberStatuses: memberStatuses,
+                                  progress: progress, expanded: expanded)
+            if !chips.isEmpty { chipLine(chips) }
+            if expanded {
+                ForEach(Array(initiative.plans.enumerated()), id: \.element.id) { index, plan in
+                    // A merged phase is never "blocked" — the annotation is
+                    // for the phases still waiting their turn.
+                    let blockedBy = memberStatuses[index] == .merged
+                        ? nil
+                        : InitiativeProgress.blockingOrdinal(statuses: memberStatuses, index: index)
+                    planBlock(plan,
+                              status: memberStatuses[index],
+                              ordinal: index + 1,
+                              chips: [],
+                              blockedBy: blockedBy)
+                        .padding(.leading, 14)
+                }
+            }
         }
+    }
+
+    private func initiativeGroupingRow(
+        _ initiative: Initiative,
+        memberStatuses: [PlanStatus],
+        progress: (currentIndex: Int?, label: String, fraction: Double?),
+        expanded: Bool
+    ) -> some View {
+        let anyRunning = memberStatuses.contains(.running)
+        let glyph = progress.currentIndex == nil ? "checkmark.seal.fill" : "circle.lefthalf.filled"
+        return Button {
+            withAnimation(.snappy(duration: 0.18)) {
+                setInitiative(initiative.id, expanded: !expanded)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .frame(width: chevronColumnWidth, height: 18)
+                Image(systemName: glyph)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(anyRunning ? Color.green : Color.secondary)
+                    .frame(width: 18)
+                Text(initiative.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+                Text(progressSummary(progress))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if hoveredInitiativeID == initiative.id {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
+            }
+        }
+        .contextMenu {
+            Button("Run remaining plans") { runRemaining(initiative, statuses: memberStatuses) }
+        }
+        .onHover { hovering in
+            if hovering { hoveredInitiativeID = initiative.id }
+            else if hoveredInitiativeID == initiative.id { hoveredInitiativeID = nil }
+        }
+    }
+
+    /// `plan 2/3 · 41%` — the resolver's label plus a rounded percentage
+    /// when the family carries checkboxes.
+    private func progressSummary(_ progress: (currentIndex: Int?, label: String, fraction: Double?)) -> String {
+        guard let fraction = progress.fraction else { return progress.label }
+        return "\(progress.label) · \(Int((fraction * 100).rounded()))%"
+    }
+
+    /// Enqueue every non-merged phase in order — the grouping row's
+    /// *Run remaining plans*. Blocking is presentational, so this walks the
+    /// whole remaining sequence and lets the queue gate between them.
+    private func runRemaining(_ initiative: Initiative, statuses: [PlanStatus]) {
+        for (index, plan) in initiative.plans.enumerated() where statuses[index] != .merged {
+            onEnqueue(plan)
+        }
+    }
+
+    /// A family follows its default expansion (running/awaiting child, or
+    /// the queue parked on one of its plans) until the user toggles it.
+    private func isInitiativeExpanded(_ initiative: Initiative, _ memberStatuses: [PlanStatus]) -> Bool {
+        if let override = initiativeExpansion[initiative.id] { return override }
+        return InitiativeProgress.defaultsExpanded(
+            statuses: memberStatuses,
+            queueParkedOnMember: queueParked(on: initiative))
+    }
+
+    private func setInitiative(_ id: String, expanded: Bool) {
+        initiativeExpansion[id] = expanded
+    }
+
+    /// Whether the queue sits at a gate/attention on one of the initiative's
+    /// plans (matched by relative path).
+    private func queueParked(on initiative: Initiative) -> Bool {
+        guard queue.state == .atGate || queue.state == .attention,
+              let current = queue.currentPlanPath else { return false }
+        return initiative.plans.contains { docStore.relativePath(of: $0) == current }
     }
 
     /// Sidebar ordering: running → awaiting review → ready/in-progress
@@ -180,7 +322,7 @@ struct PlansSpecsSection: View {
     // MARK: - Queue
 
     @ViewBuilder
-    private var queueSection: some View {
+    private func queueSection(showGateFallback: Bool) -> some View {
         if !queue.entries.isEmpty || queue.state != .idle {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -219,7 +361,11 @@ struct PlansSpecsSection: View {
                         ))
                 }
 
-                gateCardIfAny
+                // The gate/attention card normally anchors to the plan row
+                // it concerns (see `planBlock`); this is the fallback copy
+                // for when that row isn't on screen (family collapsed, or
+                // the plan isn't in the doc scan).
+                if showGateFallback { gateCard() }
             }
             .padding(.vertical, 6)
             .background(
@@ -253,8 +399,11 @@ struct PlansSpecsSection: View {
         .contentShape(Rectangle())
     }
 
+    /// The gate/attention action card for the queue's current plan. Rendered
+    /// either inline under the plan row it concerns (`planBlock`) or, when
+    /// that row isn't visible, as a fallback inside the queue box.
     @ViewBuilder
-    private var gateCardIfAny: some View {
+    private func gateCard() -> some View {
         if let path = queue.currentPlanPath,
            queue.state == .atGate || queue.state == .attention {
             let feature = queue.featureNameForPlan(path)
@@ -316,17 +465,21 @@ struct PlansSpecsSection: View {
     }
 
     /// A plan row plus the pieces that hang beneath it: the doc-chip line
-    /// (first plan of an initiative) and, when expanded, its task rows.
+    /// (first plan of an initiative), the queue gate card when this is the
+    /// current plan, and, when expanded, its task rows.
     @ViewBuilder
-    private func planBlock(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, chips: [Chip]) -> some View {
+    private func planBlock(
+        _ plan: PlanDoc, status: PlanStatus, ordinal: Int?, chips: [Chip], blockedBy: Int?
+    ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            planRow(plan, status: status, ordinal: ordinal)
+            planRow(plan, status: status, ordinal: ordinal, blockedBy: blockedBy)
             if !chips.isEmpty { chipLine(chips) }
+            if shouldAnchorGate(under: plan) { gateCard() }
             if expandedPlans.contains(plan.fileURL.path) { planTasks(plan) }
         }
     }
 
-    private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?) -> some View {
+    private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {
         // The disclosure chevron overlays the row's leading gap rather than
         // nesting inside its open-doc button — the same on-top idiom the
         // feature rows use for their hover controls, so a click on the
@@ -361,6 +514,11 @@ struct PlansSpecsSection: View {
                                     .frame(width: 60)
                                 Text("\(plan.checkedSteps)/\(plan.totalSteps)")
                                     .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
+                            if let blockedBy {
+                                Text("· blocked by \(blockedBy)")
+                                    .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
                         }
@@ -459,11 +617,16 @@ struct PlansSpecsSection: View {
             chips.append(Chip(label: DocChipLabel.label(title: spec.title, isSpec: true),
                               url: spec.fileURL))
         }
-        for doc in initiative.supportingDocs {
-            chips.append(Chip(label: DocChipLabel.label(title: doc.title, isSpec: false),
-                              url: doc.fileURL))
-        }
+        chips.append(contentsOf: supportingChips(for: initiative))
         return chips
+    }
+
+    /// The initiative's supporting docs (roadmap, notes) as chips — the
+    /// subset shown on a needs-plan row, whose spec is already the row.
+    private func supportingChips(for initiative: Initiative) -> [Chip] {
+        initiative.supportingDocs.map {
+            Chip(label: DocChipLabel.label(title: $0.title, isSpec: false), url: $0.fileURL)
+        }
     }
 
     private func chipLine(_ chips: [Chip]) -> some View {
@@ -500,8 +663,29 @@ struct PlansSpecsSection: View {
         else { expandedPlans.insert(key) }
     }
 
-    private func ordinal(of plan: PlanDoc, in initiative: Initiative) -> Int? {
-        initiative.plans.firstIndex { $0.id == plan.id }.map { $0 + 1 }
+    // MARK: - Gate anchoring
+
+    /// Whether the queue's gate/attention card belongs under this plan row —
+    /// true when the queue is parked and this row is its current plan.
+    private func shouldAnchorGate(under plan: PlanDoc) -> Bool {
+        (queue.state == .atGate || queue.state == .attention)
+            && queue.currentPlanPath == docStore.relativePath(of: plan)
+    }
+
+    /// Whether the queue's current plan is on screen as a row, so its gate
+    /// card anchors there and the queue box drops its fallback copy. The row
+    /// shows when its single-plan initiative is active, or its multi-plan
+    /// family is active *and* expanded; anything else falls back.
+    private func isGateAnchoredToRenderedRow(_ active: [Initiative], _ statuses: [URL: PlanStatus]) -> Bool {
+        guard queue.state == .atGate || queue.state == .attention,
+              let current = queue.currentPlanPath,
+              let owner = active.first(where: { initiative in
+                  initiative.plans.contains { docStore.relativePath(of: $0) == current }
+              })
+        else { return false }
+        guard owner.plans.count > 1 else { return true }
+        let memberStatuses = owner.plans.map { statuses[$0.fileURL] ?? .ready }
+        return isInitiativeExpanded(owner, memberStatuses)
     }
 
     private func specOnlyRow(_ spec: PlanDoc) -> some View {

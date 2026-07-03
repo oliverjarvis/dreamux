@@ -67,4 +67,68 @@ final class InitiativeProgressTests: XCTestCase {
         XCTAssertEqual(label, "done")
         XCTAssertNil(fraction)
     }
+
+    // MARK: - blockingOrdinal
+
+    func testFirstPlanIsNeverBlocked() {
+        XCTAssertNil(InitiativeProgress.blockingOrdinal(
+            statuses: [.ready, .ready, .ready], index: 0))
+    }
+
+    func testCurrentPlanIsNotBlockedWhenPredecessorsMerged() {
+        // Plan 2 (index 1) is the in-flight plan: its only predecessor is
+        // merged, so nothing blocks it.
+        XCTAssertNil(InitiativeProgress.blockingOrdinal(
+            statuses: [.merged, .running, .ready], index: 1))
+    }
+
+    func testBlockedByNearestUnmergedPredecessor() {
+        // Plan 3 waits on plan 2 (running) — the nearest predecessor that
+        // isn't merged. Reported 1-based, so `blocked by 2`.
+        XCTAssertEqual(InitiativeProgress.blockingOrdinal(
+            statuses: [.merged, .running, .ready], index: 2), 2)
+    }
+
+    func testBlockedByFirstPlanWhenNothingMerged() {
+        XCTAssertEqual(InitiativeProgress.blockingOrdinal(
+            statuses: [.ready, .ready], index: 1), 1)
+    }
+
+    func testNearestUnmergedWinsOverEarlierUnmerged() {
+        // Both plan 1 and plan 2 are unmerged; plan 3 reports the nearest
+        // (plan 2), the thing right ahead of it in the queue.
+        XCTAssertEqual(InitiativeProgress.blockingOrdinal(
+            statuses: [.ready, .inProgress, .ready], index: 2), 2)
+    }
+
+    func testNotBlockedWhenEveryPredecessorMerged() {
+        XCTAssertNil(InitiativeProgress.blockingOrdinal(
+            statuses: [.merged, .merged, .running], index: 2))
+    }
+
+    // MARK: - defaultsExpanded
+
+    func testCollapsedByDefaultWhenNothingInFlight() {
+        XCTAssertFalse(InitiativeProgress.defaultsExpanded(
+            statuses: [.ready, .ready], queueParkedOnMember: false))
+        XCTAssertFalse(InitiativeProgress.defaultsExpanded(
+            statuses: [.merged, .merged], queueParkedOnMember: false))
+    }
+
+    func testExpandedByDefaultWhenAChildIsRunning() {
+        XCTAssertTrue(InitiativeProgress.defaultsExpanded(
+            statuses: [.merged, .running], queueParkedOnMember: false))
+    }
+
+    func testExpandedByDefaultWhenAChildAwaitsReview() {
+        XCTAssertTrue(InitiativeProgress.defaultsExpanded(
+            statuses: [.awaitingReview, .ready], queueParkedOnMember: false))
+    }
+
+    func testExpandedByDefaultWhenQueueParkedOnMember() {
+        // The queue sitting at a gate/attention on one of the plans forces
+        // the family open even when no child status reads running yet.
+        XCTAssertTrue(InitiativeProgress.defaultsExpanded(
+            statuses: [.ready, .ready], queueParkedOnMember: true))
+    }
 }
