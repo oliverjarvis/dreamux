@@ -4,8 +4,9 @@ import UniformTypeIdentifiers
 /// The Work Items column of a project window (the `content` column of the
 /// window's NavigationSplitView). Top: an Arc-style `PinnedTileGrid` of
 /// pinned tiles (Signals + Web Browser), drag-reorderable. Below: the
-/// Features list as flat, drag-reorderable rows led by a soft tinted badge,
-/// then the Repositories card.
+/// Plans & Specs section (plan-backed work reachable from its plan rows),
+/// then an `Ad hoc` list of plan-less work items as flat, drag-reorderable
+/// rows led by a soft tinted badge, then the Repositories card.
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
@@ -213,47 +214,35 @@ struct WorkspaceSidebar: View {
                 gateCloseWorkspaceID: $gateCloseWorkspaceID
             )
 
-            VStack(alignment: .leading, spacing: 4) {
-                sectionLabel("Features")
-                switchNoticeIfAny
-                addFeatureButton
-                if hasNoFeaturesOrRepos {
-                    emptyFeaturesText
-                } else {
-                    VStack(spacing: 2) {
-                        ForEach(store.workspaces) { workspace in
-                            featureRow(workspace) { featureRowBody(workspace) }
-                                .onDrag {
-                                    draggingWorkspace = workspace
-                                    return NSItemProvider(object: workspace.id.uuidString as NSString)
-                                }
-                                .onDrop(of: [.text], delegate: ReorderDropDelegate(
-                                    item: workspace,
-                                    items: workspacesBinding,
-                                    dragging: $draggingWorkspace,
-                                    onReorder: { store.persistFeatureOrder() }
-                                ))
-                        }
-                    }
-                }
-            }
+            switchNoticeIfAny
 
-            if !adHocWorkspaces.isEmpty {
+            // Ad hoc work items — workspaces with no plan behind them
+            // (plan-backed workspaces render only on their Plans & Specs
+            // rows). The header carries the sole Add Feature affordance now
+            // that the Features list is gone, so the section shows whenever a
+            // feature can be created — i.e. whenever repositories exist to
+            // branch from. With no repositories the whole group is hidden
+            // (Add Feature would be disabled anyway, and the Repositories
+            // card guides the user to add one first). Only the row list is
+            // conditional on there actually being ad-hoc workspaces.
+            if !repoStore.repositories.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    sectionLabel("Ad hoc")
-                    VStack(spacing: 2) {
-                        ForEach(adHocWorkspaces) { workspace in
-                            featureRow(workspace) { featureRowBody(workspace) }
-                                .onDrag {
-                                    draggingWorkspace = workspace
-                                    return NSItemProvider(object: workspace.id.uuidString as NSString)
-                                }
-                                .onDrop(of: [.text], delegate: ReorderDropDelegate(
-                                    item: workspace,
-                                    items: adHocWorkspacesBinding,
-                                    dragging: $draggingWorkspace,
-                                    onReorder: { store.persistFeatureOrder() }
-                                ))
+                    adHocHeader
+                    if !adHocWorkspaces.isEmpty {
+                        VStack(spacing: 2) {
+                            ForEach(adHocWorkspaces) { workspace in
+                                featureRow(workspace) { featureRowBody(workspace) }
+                                    .onDrag {
+                                        draggingWorkspace = workspace
+                                        return NSItemProvider(object: workspace.id.uuidString as NSString)
+                                    }
+                                    .onDrop(of: [.text], delegate: ReorderDropDelegate(
+                                        item: workspace,
+                                        items: adHocWorkspacesBinding,
+                                        dragging: $draggingWorkspace,
+                                        onReorder: { store.persistFeatureOrder() }
+                                    ))
+                            }
                         }
                     }
                 }
@@ -446,16 +435,6 @@ struct WorkspaceSidebar: View {
         return repos.prefix(2).joined(separator: " · ") + " · +\(repos.count - 2)"
     }
 
-    // MARK: - Shared chrome
-
-    private var hasNoFeaturesOrRepos: Bool {
-        store.workspaces.isEmpty && repoStore.repositories.isEmpty
-    }
-
-    private var workspacesBinding: Binding<[Workspace]> {
-        Binding(get: { store.workspaces }, set: { store.workspaces = $0 })
-    }
-
     // MARK: - Plan-backed / ad-hoc partition
 
     /// The ledger record for a plan, keyed by its project-relative path.
@@ -496,16 +475,6 @@ struct WorkspaceSidebar: View {
         )
     }
 
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .kerning(0.6)
-            .textCase(.uppercase)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 2)
-    }
-
     @ViewBuilder
     private var switchNoticeIfAny: some View {
         if let notice = switchNotice {
@@ -514,38 +483,31 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    private var emptyFeaturesText: some View {
-        Text("Add a repository, then create your first feature.")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 4)
-            .padding(.top, 2)
-    }
-
-    private var addFeatureButton: some View {
-        Button { showAddFeature = true } label: {
-            HStack(spacing: 8) {
+    /// The Ad hoc section header: the section label plus the `+` that opens
+    /// the Add Feature sheet — the only ad-hoc creation entry point now that
+    /// the Features list is gone. The enclosing section only renders when
+    /// repositories exist, so the `+` is always enabled here (bar an
+    /// in-flight provision). Mirrors `repositoriesHeader`'s trailing `+`.
+    private var adHocHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text("Ad hoc")
+                .font(.system(size: 11, weight: .semibold))
+                .kerning(0.6)
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            Button { showAddFeature = true } label: {
                 Image(systemName: isWorking ? "hourglass" : "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 26, height: 26)
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 18, height: 18)
                     .foregroundStyle(.secondary)
-                Text(isWorking ? "Adding…" : "Add Feature")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
+                    .contentShape(Rectangle())
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(isWorking)
+            .help(isWorking ? "Adding…" : "New Feature")
         }
-        .buttonStyle(.plain)
-        .disabled(repoStore.repositories.isEmpty || isWorking)
-        .help(repoStore.repositories.isEmpty
-              ? "Add a repository before creating features."
-              : "New Feature")
+        .padding(.bottom, 2)
     }
 
     // MARK: - Repositories

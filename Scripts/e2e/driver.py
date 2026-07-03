@@ -456,6 +456,9 @@ def scenario_repos_and_feature(d):
     require(ws is not None, "workspace feat-alpha missing from state")
     require(set(ws["linkedRepoIDs"]) == {"portenv-server", "fixedport-server"},
             f"feat-alpha linkedRepoIDs wrong: {ws['linkedRepoIDs']}")
+    # feat-alpha has no plan behind it, so it renders under the sidebar's
+    # "Ad hoc" group (the Features list is gone); the row body and controls
+    # are unchanged, so this screenshot still documents a work-item row.
     d.screenshot("sidebar-feature")
 
 

@@ -240,6 +240,11 @@ worktree per repo on a branch named after the feature, plus the
 `features/<name>/` symlink aggregation dir, then
 `WorkspaceStore.registerFeature`). Fails (with the provisioner's
 error message) if the feature already exists, a repo is unknown, etc.
+The sidebar has no Features list anymore: a plan-less workspace created
+this way appears under the sidebar's **Ad hoc** group (whose header now
+hosts the Add Feature `+`), while plan-backed workspaces are reachable
+from their Plans & Specs rows. Either way the `state` `workspaces` dump
+is store-level and unchanged.
 
 ```
 → {"cmd":"createFeature","name":"feature-x","repos":["webapp"]}

@@ -46,7 +46,7 @@ struct WorkspaceTerminalContainer: View {
             Text("No work items open")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("Add a feature from the sidebar, or run a plan from Plans & Specs.")
+            Text("Run a plan from Plans & Specs, or add an ad-hoc work item from the sidebar.")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
