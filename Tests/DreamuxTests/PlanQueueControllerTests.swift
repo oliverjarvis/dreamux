@@ -25,6 +25,15 @@ final class PlanQueueControllerTests: XCTestCase {
     }
     override func tearDown() { sandbox?.destroy(); sandbox = nil }
 
+    /// launch() runs its runPlan effect in an unstructured Task; yield
+    /// until the observable consequence lands (bounded, deterministic).
+    private func settle(until condition: () -> Bool) async {
+        for _ in 0..<200 {
+            if condition() { return }
+            await Task.yield()
+        }
+    }
+
     func testEnqueuePersistsAndDedupes() {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/a.md")
@@ -38,7 +47,7 @@ final class PlanQueueControllerTests: XCTestCase {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/b.md")
         controller.start()
-        await Task.yield()
+        await settle(until: { !ran.isEmpty })
         XCTAssertEqual(controller.state, .running)
         XCTAssertEqual(controller.currentPlanPath, "docs/plans/a.md")
         XCTAssertEqual(ran, ["docs/plans/a.md"])
@@ -56,14 +65,14 @@ final class PlanQueueControllerTests: XCTestCase {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/b.md")
         controller.start()
-        await Task.yield()
+        await settle(until: { !ran.isEmpty })
         statuses["docs/plans/a.md"] = .awaitingReview
         controller.tick()
         controller.mergeAndContinue()
         XCTAssertEqual(mergeRequests, ["a.md"], "merge requested for the plan's feature")
         statuses["docs/plans/a.md"] = .merged
         controller.tick()
-        await Task.yield()
+        await settle(until: { ran.count == 2 })
         XCTAssertEqual(controller.state, .running)
         XCTAssertEqual(controller.currentPlanPath, "docs/plans/b.md")
         XCTAssertEqual(ran, ["docs/plans/a.md", "docs/plans/b.md"])
@@ -110,7 +119,7 @@ final class PlanQueueControllerTests: XCTestCase {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/b.md")
         controller.start()
-        await Task.yield()
+        await settle(until: { !ran.isEmpty })
         statuses["docs/plans/a.md"] = .running
         quiescent = true
         controller.tick()
@@ -119,7 +128,7 @@ final class PlanQueueControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .attention)
 
         controller.resumeCurrent()
-        await Task.yield()
+        await settle(until: { ran.count == 2 })
         XCTAssertEqual(controller.state, .running)
         XCTAssertEqual(ran, ["docs/plans/a.md", "docs/plans/a.md"], "resume re-runs current")
 
@@ -151,11 +160,11 @@ final class PlanQueueControllerTests: XCTestCase {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/b.md")
         controller.start()
-        await Task.yield()               // a.md's launch is in flight, parked on the continuation
+        await settle(until: { releaseA != nil })  // a.md's launch is in flight, parked on the continuation
         controller.skipCurrent()         // advances the queue to b.md while a.md is still running
         XCTAssertEqual(controller.currentPlanPath, "docs/plans/b.md")
         releaseA?.resume()
-        await Task.yield()               // let a.md's now-stale throw complete
+        await settle(until: { ran.count == 2 })   // let a.md's now-stale throw complete, and b.md's launch land
         XCTAssertEqual(controller.state, .running)
         XCTAssertEqual(controller.currentPlanPath, "docs/plans/b.md")
         XCTAssertNil(controller.lastError)
@@ -164,7 +173,7 @@ final class PlanQueueControllerTests: XCTestCase {
     func testRelaunchMidRunFlipsToAttention() async {
         controller.enqueue("docs/plans/a.md")
         controller.start()
-        await Task.yield()
+        await settle(until: { !ran.isEmpty })
         statuses["docs/plans/a.md"] = .inProgress
         controller.tick()
         XCTAssertEqual(controller.state, .attention)

@@ -514,11 +514,15 @@ few seconds later.
 `{"ok": true, "state": "idle|running|atGate|attention", "entries":
 ["docs/plans/…"], "current"?, "lastError"?}` — `current` is present
 whenever a plan is active (`running`/`atGate`/`attention`);
-`lastError` only after a launch or disappearance failure.
+`lastError` only after a launch or disappearance failure. `entries`
+keeps the current plan until it merges or is skipped — it isn't
+removed just because the plan reached the gate — so `entries` and
+`current` overlap for the active plan; only after a merge/skip
+advances the queue past it does it drop out of `entries`.
 
 ```
 → {"cmd":"queueState"}
-← {"ok":true,"state":"atGate","entries":[],
+← {"ok":true,"state":"atGate","entries":["docs/plans/2026-07-02-x.md"],
    "current":"docs/plans/2026-07-02-x.md"}
 ```
 
