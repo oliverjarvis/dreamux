@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Collapsible "Plans & Specs" sidebar section (rendered above the
 /// Features list). Plans carry derived status + checkbox progress;
@@ -12,10 +13,15 @@ struct PlansSpecsSection: View {
     let onRunPlan: (PlanDoc) -> Void
     let onNewPlan: () -> Void
     let onWritePlan: (PlanDoc) -> Void
+    @Bindable var queue: PlanQueueController
+    let onOpenFeature: (String) -> Void   // feature name → activate workspace
+    let onEnqueue: (PlanDoc) -> Void
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
+    /// Queue row currently being dragged for reorder — see `queueSection`.
+    @State private var draggingQueueItem: QueueItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -96,6 +102,7 @@ struct PlansSpecsSection: View {
         let done = docStore.plans.filter { statuses[$0.fileURL] == .merged }
 
         VStack(spacing: 2) {
+            queueSection
             ForEach(active) { plan in
                 planRow(plan, status: statuses[plan.fileURL]!)
             }
@@ -124,6 +131,144 @@ struct PlansSpecsSection: View {
         case .ready, .inProgress: return 2
         case .specOnly, .merged: return 3
         }
+    }
+
+    // MARK: - Queue
+
+    @ViewBuilder
+    private var queueSection: some View {
+        if !queue.entries.isEmpty || queue.state != .idle {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Queue")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    if queue.state == .idle {
+                        Button("Start") { queue.start() }
+                            .controlSize(.mini).buttonStyle(.bordered)
+                            .disabled(queue.entries.isEmpty)
+                    } else {
+                        Button("Stop") { queue.stopQueue() }
+                            .controlSize(.mini).buttonStyle(.bordered)
+                    }
+                }
+                .padding(.horizontal, 10)
+
+                // `ForEach.onMove` needs `List` semantics to engage drag
+                // reorder on macOS, and this queue lives in a plain
+                // `VStack` (matching the rest of the section's chrome) —
+                // so rows use the same `ReorderDropDelegate` pattern as
+                // the feature rows (`WorkspaceSidebar.featureRow`)
+                // instead, wrapping each path in `QueueItem` since the
+                // delegate is generic over `Identifiable`.
+                ForEach(queue.entries, id: \.self) { path in
+                    queueRow(path)
+                        .onDrag {
+                            draggingQueueItem = QueueItem(path: path)
+                            return NSItemProvider(object: path as NSString)
+                        }
+                        .onDrop(of: [.text], delegate: ReorderDropDelegate(
+                            item: QueueItem(path: path),
+                            items: queueItemsBinding,
+                            dragging: $draggingQueueItem
+                        ))
+                }
+
+                gateCardIfAny
+            }
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.primary.opacity(0.04)))
+        }
+    }
+
+    private func queueRow(_ path: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: path == queue.currentPlanPath
+                  ? "arrowtriangle.right.fill" : "line.3.horizontal")
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
+            Text((path as NSString).lastPathComponent)
+                .font(.caption)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
+            Button {
+                queue.remove(path)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .disabled(path == queue.currentPlanPath && queue.state != .idle)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var gateCardIfAny: some View {
+        if let path = queue.currentPlanPath,
+           queue.state == .atGate || queue.state == .attention {
+            let feature = queue.featureNameForPlan(path)
+            VStack(alignment: .leading, spacing: 6) {
+                Label(
+                    queue.state == .atGate
+                        ? "Plan complete — review before merging"
+                        : (queue.lastError ?? "Session stalled with steps unchecked"),
+                    systemImage: queue.state == .atGate
+                        ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(queue.state == .atGate ? Color.green : .orange)
+                HStack(spacing: 6) {
+                    if let feature {
+                        Button("Open feature") { onOpenFeature(feature) }
+                    }
+                    if queue.state == .atGate {
+                        Button("Merge & Continue") { queue.mergeAndContinue() }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Resume") { queue.resumeCurrent() }
+                            .buttonStyle(.borderedProminent)
+                        Button("Skip") { queue.skipCurrent() }
+                    }
+                }
+                .controlSize(.mini)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Path-wrapping `Identifiable` used only to drive `ReorderDropDelegate`
+    /// with `queue.entries` (a plain `[String]`).
+    private struct QueueItem: Identifiable {
+        let path: String
+        var id: String { path }
+    }
+
+    /// Bridges the delegate's whole-array `Binding` to the controller's
+    /// `move(fromOffsets:toOffset:)` — `queue.entries` is intentionally
+    /// not directly settable from outside the controller, so each live
+    /// reorder step fired by `ReorderDropDelegate.dropEntered` (as the
+    /// drag crosses a sibling row) is translated into the equivalent
+    /// single-item move and applied immediately, the same "commit as you
+    /// go" persistence `queue.move` already has.
+    private var queueItemsBinding: Binding<[QueueItem]> {
+        Binding(
+            get: { queue.entries.map(QueueItem.init) },
+            set: { newItems in
+                guard let dragging = draggingQueueItem,
+                      let from = queue.entries.firstIndex(of: dragging.path),
+                      let to = newItems.firstIndex(where: { $0.id == dragging.path })
+                else { return }
+                queue.move(fromOffsets: IndexSet(integer: from),
+                           toOffset: to > from ? to + 1 : to)
+            }
+        )
     }
 
     private func planRow(_ plan: PlanDoc, status: PlanStatus) -> some View {
@@ -221,7 +366,10 @@ struct PlansSpecsSection: View {
                 }
             }
             .contextMenu {
-                if canRun { Button("Run Plan…") { onRunPlan(doc) } }
+                if canRun {
+                    Button("Run Plan…") { onRunPlan(doc) }
+                    Button("Add to Queue") { onEnqueue(doc) }
+                }
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([doc.fileURL])
                 }

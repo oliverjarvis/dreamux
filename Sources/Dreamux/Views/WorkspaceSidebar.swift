@@ -179,7 +179,15 @@ struct WorkspaceSidebar: View {
                     openPlanningSession(
                         prompt: PlanPrompts.writePlanKickoff(
                             specRelativePath: docStore.relativePath(of: spec)))
-                }
+                },
+                queue: planQueue,
+                onOpenFeature: { name in
+                    guard let workspace = store.workspaces.first(where: { $0.name == name })
+                    else { return }
+                    sidebarMode = .workspace
+                    store.activate(workspace.id)
+                },
+                onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) }
             )
 
             VStack(alignment: .leading, spacing: 4) {
