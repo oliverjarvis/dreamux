@@ -178,4 +178,19 @@ final class PlanQueueControllerTests: XCTestCase {
         controller.tick()
         XCTAssertEqual(controller.state, .attention)
     }
+
+    func testRecordLossFlipsToAttention() async {
+        controller.enqueue("docs/plans/a.md")
+        controller.start()
+        await settle(until: { !ran.isEmpty })
+        statuses["docs/plans/a.md"] = .ready
+        controller.tick()
+        XCTAssertEqual(controller.state, .attention)
+        XCTAssertNotNil(controller.lastError)
+    }
+
+    func testEnqueueRejectsEmptyPath() {
+        controller.enqueue("")
+        XCTAssertTrue(controller.entries.isEmpty)
+    }
 }

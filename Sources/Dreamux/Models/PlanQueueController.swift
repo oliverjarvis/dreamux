@@ -51,6 +51,7 @@ final class PlanQueueController {
     // MARK: - Mutations
 
     func enqueue(_ path: String) {
+        guard !path.isEmpty else { return }
         guard !entries.contains(path) else { return }
         entries.append(path)
         save()
@@ -145,6 +146,13 @@ final class PlanQueueController {
             // The run's feature workspace is gone (app relaunch mid-run,
             // or the feature was closed under us) with steps unchecked —
             // surface it instead of silently waiting forever.
+            state = .attention
+            quiescentSince = nil
+            save()
+        case (.running, .ready):
+            // The run record vanished (feature closed under us, ledger
+            // pruned) — surface it rather than waiting forever.
+            lastError = "Run record lost (feature closed?)"
             state = .attention
             quiescentSince = nil
             save()

@@ -183,9 +183,6 @@ struct ContentView: View {
             )
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
-            docStore.refresh()
-            docStore.reconcileLedger(
-                existingFeatureNames: Set(store.workspaces.map(\.name)))
 
             // `runPlan`/`requestMerge` need `docStore`/`planRunner`/the
             // bridge, which aren't available to weak-capture from `init`
@@ -214,6 +211,27 @@ struct ContentView: View {
                 // queue-local channel the sidebar also observes.
                 pendingGateMerge.wrappedValue = workspace.id
             }
+
+            // `store.workspaces` is empty until the async `reloadFeatures`
+            // (fired from `ProjectWindow.onAppear`) completes — reconciling
+            // the doc ledger or starting the queue poller before then
+            // would see zero known features and prune in-flight plan
+            // records / bypass the merge gate. If discovery already
+            // finished by the time this view appears (store reuse on a
+            // project switch-back), `didLoadFeatures` is already true and
+            // the `.onChange` below won't fire, so catch that case here.
+            if store.didLoadFeatures {
+                docStore.refresh()
+                docStore.reconcileLedger(
+                    existingFeatureNames: Set(store.workspaces.map(\.name)))
+                planQueue.startPolling()
+            }
+        }
+        .onChange(of: store.didLoadFeatures) { _, loaded in
+            guard loaded else { return }
+            docStore.refresh()
+            docStore.reconcileLedger(
+                existingFeatureNames: Set(store.workspaces.map(\.name)))
             planQueue.startPolling()
         }
         .onChange(of: e2eBridge?.pendingSidebarMode) { _, _ in

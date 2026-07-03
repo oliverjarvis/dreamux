@@ -38,6 +38,13 @@ final class WorkspaceStore {
 
     var canReopenClosed: Bool { !closedStack.isEmpty }
 
+    /// Flips true once `reloadFeatures(in:repoStore:)` has completed at
+    /// least once. `workspaces` is empty (and every feature name is
+    /// therefore "unknown") until then, so callers that need the real
+    /// feature set — ledger reconciliation, the plan queue's poller —
+    /// must wait for this rather than racing the async discovery.
+    private(set) var didLoadFeatures = false
+
     init(defaultWorkingDirectory: String? = nil) {
         self.defaultWorkingDirectory = defaultWorkingDirectory
         // Work items are now created under repos; new projects start
@@ -165,6 +172,8 @@ final class WorkspaceStore {
         } else if activeID == nil {
             activeID = workspaces.first?.id
         }
+
+        didLoadFeatures = true
     }
 
     /// Persist the current feature order after a drag-reorder. Only
