@@ -121,35 +121,36 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
             // The project rail stays the native, full-height split-view
-            // sidebar. The bold header and the Work-Items/content split sit
-            // to its right, so the header begins right of the rail.
-            VStack(spacing: 0) {
-                heroBand
-                HSplitView {
-                    WorkspaceSidebar(
-                        store: store,
-                        repoStore: repoStore,
-                        runners: runners,
-                        layout: layout,
-                        sidebarMode: $sidebarMode,
-                        docStore: docStore,
-                        planRunner: planRunner,
-                        planQueue: planQueue,
-                        gateMergeWorkspaceID: $gateMergeWorkspaceID,
-                        onOpenDoc: openFile
-                    )
-                    .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
+            // sidebar. The Work-Items column reaches the top of the content
+            // area; the compact project header sits right of it, above the
+            // terminal tabs.
+            HSplitView {
+                WorkspaceSidebar(
+                    store: store,
+                    repoStore: repoStore,
+                    runners: runners,
+                    layout: layout,
+                    sidebarMode: $sidebarMode,
+                    docStore: docStore,
+                    planRunner: planRunner,
+                    planQueue: planQueue,
+                    gateMergeWorkspaceID: $gateMergeWorkspaceID,
+                    onOpenDoc: openFile
+                )
+                .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 
+                VStack(spacing: 0) {
+                    projectHeaderRow
                     mainPane
-                        // maxHeight keeps the HSplitView vertically greedy
-                        // in every mode — without a height-flexible child
-                        // the split collapses under the hero band.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                // maxHeight keeps the HSplitView vertically greedy in every
+                // mode — without a height-flexible child the split collapses
+                // under the header row.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        // The project identity lives in `heroBand` at the top of the detail
-        // area (right of the rail), so the macOS titlebar title is blanked.
+        // The project identity lives in `projectHeaderRow` above the
+        // terminal tabs, so the macOS titlebar title is blanked.
         .navigationTitle("")
         // The file-explorer toggle lives in the native titlebar. It has no
         // `.keyboardShortcut` on purpose: a shortcut on a toolbar item isn't
@@ -286,15 +287,14 @@ struct ContentView: View {
         }
     }
 
-    /// The bold "hero" header pinned full-width to the top of the window:
-    /// an accent-tinted gradient carrying a gradient project glyph and the
-    /// project name in a heavy rounded face. Replaces the flat titlebar
-    /// title + Finder-path subtitle.
-    private var heroBand: some View {
+    /// Compact project identity — a small accent-gradient glyph and the
+    /// project name — pinned above the terminal tabs, right of the
+    /// Work-Items column. Replaces the old full-width hero band.
+    private var projectHeaderRow: some View {
         let name = currentProject?.name ?? ""
-        return HStack(spacing: 12) {
+        return HStack(spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [Color.accentColor, Color.accentColor.opacity(0.55)],
@@ -303,37 +303,22 @@ struct ContentView: View {
                         )
                     )
                 Text(String(name.prefix(1)).uppercased())
-                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
             }
-            .frame(width: 30, height: 30)
-            .shadow(color: Color.accentColor.opacity(0.4), radius: 5, y: 2)
+            .frame(width: 20, height: 20)
 
             Text(name)
-                .font(.system(size: 22, weight: .heavy, design: .rounded))
-                .kerning(0.4)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 11)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            ZStack {
-                LinearGradient(
-                    colors: [Color.accentColor.opacity(0.38), Color.accentColor.opacity(0.14)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-                VStack {
-                    Spacer()
-                    Divider()
-                }
-            }
-        )
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     /// Open a file (clicked in the tree) as a Monaco tab in the active
