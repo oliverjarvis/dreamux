@@ -240,6 +240,13 @@ final class WorkspaceSession {
         tabSessions.values.contains { $0.hasUnread }
     }
 
+    /// True when every terminal tab's shell has been silent for at
+    /// least `interval` — the queue's cheap "agent finished or stalled"
+    /// probe.
+    func allShellsQuiescent(for interval: TimeInterval) -> Bool {
+        tabSessions.values.allSatisfy { $0.isShellQuiescent(for: interval) }
+    }
+
     /// Override for the next tab's cwd. Used by the merge UI to drop a
     /// tab inside a conflicted worktree (which isn't symlinked into
     /// the aggregation directory). Read once and cleared in

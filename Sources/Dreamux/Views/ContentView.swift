@@ -28,6 +28,12 @@ struct ContentView: View {
     @State private var fileTree: FileTreeStore
     @State private var docStore: DocStore
     @State private var planRunner: PlanRunCoordinator
+    @State private var planQueue: PlanQueueController
+    /// Non-e2e channel for the plan queue's "merge and continue" gate
+    /// action: `WorkspaceSidebar` owns the merge sheet's presentation
+    /// state, so this parks the target workspace id the same way
+    /// `E2EBridge.pendingMergeWorkspaceID` does for the automation server.
+    @State private var gateMergeWorkspaceID: UUID?
 
     init(
         store: WorkspaceStore,
@@ -78,6 +84,29 @@ struct ContentView: View {
             workspaceStore: store,
             repoStore: repoStore,
             docStore: docStore))
+
+        let planQueue = PlanQueueController(project: repoStore.project)
+        planQueue.statusForPlan = { [weak docStore, weak store] path in
+            guard let docStore, let store else { return nil }
+            docStore.refresh()
+            guard let doc = docStore.docs.first(where: { docStore.relativePath(of: $0) == path })
+            else { return nil }
+            return docStore.status(for: doc) { name in
+                store.workspaces.contains { $0.name == name }
+            }
+        }
+        planQueue.featureNameForPlan = { [weak docStore] path in
+            docStore?.ledger.recordForPlan(path)?.featureName
+        }
+        planQueue.isFeatureQuiescent = { [weak store] feature in
+            guard let store,
+                  let workspace = store.workspaces.first(where: { $0.name == feature })
+            else { return true }
+            // Quiescent = no tab in the feature's session produced output
+            // in the last 5 s. (Session-level helper added below.)
+            return store.session(for: workspace).allShellsQuiescent(for: 5)
+        }
+        _planQueue = State(initialValue: planQueue)
     }
 
     private var currentProject: Project? { projects.project(id: currentProjectID) }
@@ -105,6 +134,8 @@ struct ContentView: View {
                         sidebarMode: $sidebarMode,
                         docStore: docStore,
                         planRunner: planRunner,
+                        planQueue: planQueue,
+                        gateMergeWorkspaceID: $gateMergeWorkspaceID,
                         onOpenDoc: openFile
                     )
                     .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
@@ -147,13 +178,43 @@ struct ContentView: View {
             E2ERegistry.shared.registerDocStores(
                 projectID: repoStore.project.id,
                 docStore: docStore,
-                planRunner: planRunner
+                planRunner: planRunner,
+                planQueue: planQueue
             )
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
             docStore.refresh()
             docStore.reconcileLedger(
                 existingFeatureNames: Set(store.workspaces.map(\.name)))
+
+            // `runPlan`/`requestMerge` need `docStore`/`planRunner`/the
+            // bridge, which aren't available to weak-capture from `init`
+            // (self isn't fully formed yet) — `.onAppear` runs once per
+            // window and can capture them directly.
+            let pendingGateMerge = $gateMergeWorkspaceID
+            planQueue.runPlan = { [docStore, planRunner, repoStore] path in
+                docStore.refresh()
+                guard let doc = docStore.docs.first(
+                    where: { docStore.relativePath(of: $0) == path }) else {
+                    throw PlanRunError.notAPlan
+                }
+                try await planRunner.runPlan(
+                    doc,
+                    branchName: PlanDoc.branchName(forFileName: doc.fileURL.lastPathComponent),
+                    repoNames: repoStore.repositories.map(\.name))
+            }
+            planQueue.requestMerge = { [store, repoStore] featureName in
+                guard let workspace = store.workspaces.first(where: { $0.name == featureName })
+                else { return }
+                // The merge sheet is owned by WorkspaceSidebar; reuse the
+                // same pending channel the e2e openMergeSheet command uses.
+                E2ERegistry.shared.bridge(forProject: repoStore.project.id)?
+                    .pendingMergeWorkspaceID = workspace.id
+                // When e2e is inactive the bridge is nil — park on the
+                // queue-local channel the sidebar also observes.
+                pendingGateMerge.wrappedValue = workspace.id
+            }
+            planQueue.startPolling()
         }
         .onChange(of: e2eBridge?.pendingSidebarMode) { _, _ in
             consumePendingSidebarModeIfAny()

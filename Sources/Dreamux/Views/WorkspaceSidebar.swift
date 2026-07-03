@@ -14,6 +14,12 @@ struct WorkspaceSidebar: View {
     @Binding var sidebarMode: SidebarMode
     @Bindable var docStore: DocStore
     let planRunner: PlanRunCoordinator
+    let planQueue: PlanQueueController
+    /// Non-e2e "merge and continue" gate channel — the plan queue's
+    /// `requestMerge` closure parks the target workspace id here when
+    /// the e2e bridge is inactive; consumed below exactly like
+    /// `consumePendingMergeIfAny()`.
+    @Binding var gateMergeWorkspaceID: UUID?
     let onOpenDoc: (URL) -> Void
 
     @State private var showAddFeature = false
@@ -141,6 +147,12 @@ struct WorkspaceSidebar: View {
         .onAppear { consumePendingMergeIfAny() }
         .onChange(of: e2eBridge?.pendingMergeWorkspaceID) { _, _ in
             consumePendingMergeIfAny()
+        }
+        .onChange(of: gateMergeWorkspaceID) { _, id in
+            guard let id, let workspace = store.workspaces.first(where: { $0.id == id })
+            else { return }
+            gateMergeWorkspaceID = nil
+            pendingMerge = workspace
         }
     }
 
