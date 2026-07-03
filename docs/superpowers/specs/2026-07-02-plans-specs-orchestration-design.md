@@ -1,7 +1,9 @@
 # Plans & Specs Orchestration
 
 **Date:** 2026-07-02
-**Status:** Approved
+**Status:** Approved — sidebar-presentation portions superseded by
+`2026-07-03-initiative-sidebar-design.md` (execution model — runner,
+ledger, queue, gates — still authoritative here)
 **Supersedes:** `2026-06-12-specs-plans-browser-design.md`
 
 ## Problem
