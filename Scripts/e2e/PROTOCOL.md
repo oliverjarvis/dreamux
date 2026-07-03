@@ -135,6 +135,17 @@ Snapshot of everything a scenario typically asserts on.
     "plans": [
       {"path":"docs/plans/2026-07-02-x.md","status":"ready",
        "checkedSteps":0,"totalSteps":4}
+    ],
+    "initiatives": [
+      {"title":"Game Boy Emulator","id":"gameboy",
+       "specPath":"docs/specs/2026-07-02-gameboy-design.md",
+       "docPaths":["docs/2026-07-02-gameboy-roadmap.md"],
+       "plans":[
+         {"path":"docs/plans/2026-07-02-gameboy-phase-1.md","status":"merged",
+          "ordinal":1,"tasks":[{"title":"Task 1: CPU","checked":6,"total":6}]},
+         {"path":"docs/plans/2026-07-02-gameboy-phase-2.md","status":"running",
+          "ordinal":2,"tasks":[{"title":"Task 1: PPU","checked":1,"total":5}]}
+       ]}
     ]
   }
 ```
@@ -167,6 +178,15 @@ Field notes:
 - `plans` mirrors `DocStore.plans` (docs classified as plans only,
   i.e. not specs/plain docs): `status` is the same derived value
   `listDocs` reports (ledger + checkboxes + feature existence).
+- `initiatives` mirrors `DocStore.initiatives` — the same work grouped
+  into families (spec + ordered plans + supporting docs) the sidebar
+  renders. One entry per initiative in sidebar order: `title`, `id`
+  (family key), `specPath` (**omitted** when the initiative has no
+  spec), `docPaths` (supporting docs — roadmaps, extra specs), and
+  `plans`, each with its 1-based `ordinal` (execution order), derived
+  `status` (as in `plans`), and a per-`tasks` checkbox rollup
+  (`title`, `checked`, `total`). All paths are project-relative. The
+  flat `plans` array above stays for compatibility.
 - `queue` mirrors `PlanQueueController`: `{"state":
   "idle|running|atGate|attention", "entries": ["docs/plans/…"],
   "current": "docs/plans/…"?}`. `current` is omitted while the queue
