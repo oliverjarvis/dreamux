@@ -131,6 +131,24 @@ struct PlanDoc: Identifiable, Equatable {
         return stem
     }
 
+    /// The slug that binds a spec, its phase plans, and their roadmap into
+    /// one initiative family: the branch stem (date prefix and a trailing
+    /// `-design`/`-roadmap`/`-plan` removed) with any `phase-N`/`part-N`
+    /// segment dropped. `2026-07-02-gameboy-phase-1.md` → `gameboy`;
+    /// `x-design.md` → `x`. A trailing `-N` that is not a phase marker
+    /// stays put, so `x-design-2.md` → `x-design-2`, never family `x`.
+    static func familyKey(forFileName name: String) -> String {
+        var stem = stripDatePrefix(from: (name as NSString).deletingPathExtension)
+        for suffix in ["-design", "-roadmap", "-plan"] where stem.hasSuffix(suffix) {
+            stem = String(stem.dropLast(suffix.count))
+            break
+        }
+        stem = stem.replacingOccurrences(
+            of: #"(?i)-?\b(?:phase|part)-\d+"#, with: "", options: .regularExpression)
+        stem = stem.replacingOccurrences(of: #"-{2,}"#, with: "-", options: .regularExpression)
+        return stem.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
     // MARK: - Helpers
 
     /// Checkbox state of a trimmed line: `true`/`false` for a checked or
