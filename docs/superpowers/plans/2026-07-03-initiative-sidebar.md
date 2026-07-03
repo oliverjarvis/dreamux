@@ -2,7 +2,7 @@
 
 **Spec:** docs/superpowers/specs/2026-07-03-initiative-sidebar-design.md — read it first; it is authoritative for grouping rules, hierarchy, and UI semantics.
 
-**Goal:** Rebuild the Plans & Specs section around plans as the main item: task expansion on plan rows, doc chips, initiative grouping for multi-plan families only, queue affordances anchored to rows. Features section stays put in this plan (its retirement is `2026-07-03-features-retirement.md`).
+**Goal:** Rebuild the Plans & Specs section around plans as the main item: task expansion on plan rows, doc chips, initiative grouping for multi-plan families only, queue affordances anchored to rows. Features section stays put in this plan (its retirement is `2026-07-04-features-retirement.md`).
 
 ## Global Constraints
 

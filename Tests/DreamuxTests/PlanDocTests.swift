@@ -45,6 +45,27 @@ final class PlanDocTests: XCTestCase {
         XCTAssertEqual(d.specReference, "docs/specs/2026-07-02-widgets-design.md")
     }
 
+    /// `**Spec:**` lines often carry a trailing qualifier; resolving the
+    /// whole string as a path silently breaks backlink pairing, so only
+    /// the `.md` token survives.
+    func testSpecReferenceDropsTrailingQualifiers() {
+        let paren = doc("2026-07-02-x.md", """
+        # X Plan
+        **Spec:** docs/specs/x-design.md (§6 Queue)
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertEqual(paren.specReference, "docs/specs/x-design.md")
+
+        let section = doc("2026-07-02-y.md", """
+        # Y Plan
+        **Spec:** docs/specs/y-design.md (section "Features retirement")
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertEqual(section.specReference, "docs/specs/y-design.md")
+    }
+
     func testPlanByTaskAndCheckboxShape() {
         let d = doc("notes.md", """
         # Some work

@@ -72,7 +72,7 @@ struct PlanDoc: Identifiable, Equatable {
                 goal = value
             }
             if specReference == nil, let value = headerValue(line, field: "Spec") {
-                specReference = stripDecoration(value)
+                specReference = specPathToken(value)
             }
 
             if line.hasPrefix("### ") {
@@ -178,6 +178,20 @@ struct PlanDoc: Identifiable, Equatable {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix(prefix) else { return nil }
         return String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// A `**Spec:**` value is a path plus optional prose or qualifiers
+    /// (`docs/x-design.md — read it first`, `docs/x-design.md (§6 Queue)`,
+    /// `docs/x-design.md (section "…")`). Resolving the whole string as a
+    /// path silently breaks backlink pairing, so take the first token
+    /// ending in `.md`; fall back to the decoration-stripped value for
+    /// references that aren't markdown paths.
+    private static func specPathToken(_ value: String) -> String {
+        let stripped = stripDecoration(value)
+        if let range = stripped.range(of: #"\S+\.md\b"#, options: .regularExpression) {
+            return String(stripped[range])
+        }
+        return stripped
     }
 
     /// Strip surrounding backticks and any ` — trailing prose`.

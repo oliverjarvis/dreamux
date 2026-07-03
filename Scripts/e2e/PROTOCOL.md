@@ -180,13 +180,19 @@ Field notes:
   `listDocs` reports (ledger + checkboxes + feature existence).
 - `initiatives` mirrors `DocStore.initiatives` — the same work grouped
   into families (spec + ordered plans + supporting docs) the sidebar
-  renders. One entry per initiative in sidebar order: `title`, `id`
-  (family key), `specPath` (**omitted** when the initiative has no
-  spec), `docPaths` (supporting docs — roadmaps, extra specs), and
-  `plans`, each with its 1-based `ordinal` (execution order), derived
-  `status` (as in `plans`), and a per-`tasks` checkbox rollup
-  (`title`, `checked`, `total`). All paths are project-relative. The
-  flat `plans` array above stays for compatibility.
+  renders. Entries come in **store order** (newest member date first),
+  NOT the sidebar's render order (active-first by status rank, merged
+  work folded into Done) — match entries by `id`, never by index. Each
+  entry: `title`, `id` (family key), `specPath` (**omitted** when the
+  initiative has no spec), `docPaths` (supporting docs — roadmaps,
+  extra specs), and `plans`, each with its 1-based `ordinal`
+  (execution order), derived `status` (as in `plans`), and a
+  per-`tasks` checkbox rollup (`title`, `checked`, `total`). `tasks`
+  reports every parsed heading — a heading with no checkboxes dumps as
+  `total: 0` even though the sidebar hides such rows, and its `title`
+  may be empty for steps that precede the first heading. All paths are
+  project-relative. The flat `plans` array above stays for
+  compatibility.
 - `queue` mirrors `PlanQueueController`: `{"state":
   "idle|running|atGate|attention", "entries": ["docs/plans/…"],
   "current": "docs/plans/…"?}`. `current` is omitted while the queue
