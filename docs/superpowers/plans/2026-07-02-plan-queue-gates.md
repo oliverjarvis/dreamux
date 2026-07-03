@@ -40,7 +40,7 @@
     - `func tick()` — derive transitions; `func startPolling()` / `func stopPolling()`.
   - Stall rule: while `running`, if the current plan's status is `.running`, its feature's shell has been quiescent on every tick for ≥ 120 s (tracked via `quiescentSince`), and boxes are unchecked since the last change, the queue flips to `.attention`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `Tests/DreamuxTests/PlanQueueControllerTests.swift`:
 
@@ -179,12 +179,12 @@ final class PlanQueueControllerTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `swift test --filter PlanQueueControllerTests 2>&1 | tail -5`
 Expected: FAIL — `cannot find 'PlanQueueController' in scope`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `Sources/Dreamux/Models/PlanQueueController.swift`:
 
@@ -408,12 +408,12 @@ final class PlanQueueController {
 
 Note for the test on `start()`/`launch`: `runPlan` fires inside a `Task`, so tests that assert `ran` immediately after `start()` need a spin of the main queue. If the assertions in Step 1 flake, make the test methods `async` and insert `await Task.yield()` after `start()`/`resumeCurrent()`/the advancing `tick()` calls — that is the intended fix, not changing `launch` to be synchronous.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --filter PlanQueueControllerTests 2>&1 | tail -5`
 Expected: PASS (8 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Models/PlanQueueController.swift Tests/DreamuxTests/PlanQueueControllerTests.swift
@@ -432,7 +432,7 @@ git commit -m "Add PlanQueueController state machine with persistence"
 - Consumes: Task 1; B1's `DocStore`/`PlanRunCoordinator`; `E2EBridge`.
 - Produces: a fully wired `PlanQueueController` owned by ContentView; `E2EBridge.pendingMergeWorkspaceID` reused as the gate's merge channel; `E2EProjectHandles.planQueue`.
 
-- [ ] **Step 1: Wire in ContentView**
+- [x] **Step 1: Wire in ContentView**
 
 In `Sources/Dreamux/Views/ContentView.swift`:
 
@@ -507,7 +507,7 @@ In `Sources/Dreamux/Views/ContentView.swift`:
 
 In `Sources/Dreamux/E2E/E2ERegistry.swift`, add `weak var planQueue: PlanQueueController?` to `E2EProjectHandles` and a `planQueue` parameter to `registerDocStores(...)` (update the ContentView call site to pass it).
 
-- [ ] **Step 2: Session quiescence helper**
+- [x] **Step 2: Session quiescence helper**
 
 In `Sources/Dreamux/Models/WorkspaceSession.swift`, add near `anyTabHasUnread`:
 
@@ -520,12 +520,12 @@ In `Sources/Dreamux/Models/WorkspaceSession.swift`, add near `anyTabHasUnread`:
     }
 ```
 
-- [ ] **Step 3: Build + suite**
+- [x] **Step 3: Build + suite**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass (nothing user-visible yet).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/ContentView.swift Sources/Dreamux/E2E/E2ERegistry.swift Sources/Dreamux/Models/WorkspaceSession.swift
@@ -544,7 +544,7 @@ git commit -m "Wire PlanQueueController into the project window"
 - Consumes: Tasks 1–2.
 - Produces: a Queue subsection at the top of Plans & Specs (ordered entries, reorder via `.onMove`-style drag using the existing `ReorderDropDelegate` pattern or Move Up/Down context actions — pick the drag pattern used by feature rows), Start/Stop button, gate card (`atGate`) with Open Feature / Merge & Continue / Stop, attention card with Resume / Skip / Stop, and an "Add to Queue" context action on ready plan rows.
 
-- [ ] **Step 1: Queue subsection**
+- [x] **Step 1: Queue subsection**
 
 In `Sources/Dreamux/Views/PlansSpecsSection.swift`, add properties to `PlansSpecsSection`:
 
@@ -657,7 +657,7 @@ Also add to the runnable plans' context menu in `docRow` (only when `canRun`):
 
 with a new `let onEnqueue: (PlanDoc) -> Void` property.
 
-- [ ] **Step 2: Sidebar + ContentView plumbing**
+- [x] **Step 2: Sidebar + ContentView plumbing**
 
 In `Sources/Dreamux/Views/WorkspaceSidebar.swift`, pass through to `PlansSpecsSection`:
 
@@ -676,14 +676,14 @@ In `Sources/Dreamux/Views/WorkspaceSidebar.swift`, pass through to `PlansSpecsSe
 
 Update the `WorkspaceSidebar(...)` call in `ContentView.swift` with the new arguments.
 
-- [ ] **Step 3: Build, test, and walk the queue**
+- [x] **Step 3: Build, test, and walk the queue**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass.
 
 Manual walk (scratch project, `DREAMUX_CLAUDE_BIN` fake): enqueue two toy plans → Start → first provisions and runs; tick all its boxes on disk → gate card appears → Merge & Continue opens the merge sheet; completing the merge (fake-friendly: merge + cleanup) flips the plan to merged and the queue auto-starts the second plan; Stop works at any point; a stalled session (fake claude exits without ticking) shows the attention card with Resume/Skip.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/PlansSpecsSection.swift Sources/Dreamux/Views/WorkspaceSidebar.swift Sources/Dreamux/Views/ContentView.swift
@@ -702,7 +702,7 @@ git commit -m "Add queue subsection with merge-gate and attention cards"
 - Consumes: `E2EProjectHandles.planQueue` (Task 2).
 - Produces: commands `enqueuePlan {path}`, `startQueue`, `stopQueue`, `queueState`; the `state` dump gains `"queue"`.
 
-- [ ] **Step 1: Implement the commands**
+- [x] **Step 1: Implement the commands**
 
 In `Sources/Dreamux/E2E/E2ECommands.swift`, add cases beside `runPlan`:
 
@@ -749,16 +749,16 @@ And the handlers:
 
 Add `"queue": ["state": …, "entries": …, "current": …]` to the main `state` dump with the same fields (nil-safe, mirroring the handler above).
 
-- [ ] **Step 2: PROTOCOL.md**
+- [x] **Step 2: PROTOCOL.md**
 
 Document the four commands and the `state.queue` field, in the file's per-command format, including the note that `queueState` runs a synchronous `tick()` so scenarios can drive transitions deterministically (write plan checkboxes → `queueState` → assert `atGate`).
 
-- [ ] **Step 3: Build + suite**
+- [x] **Step 3: Build + suite**
 
 Run: `swift build 2>&1 | tail -3 && swift test 2>&1 | tail -3`
 Expected: both pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/Dreamux/E2E/E2ECommands.swift scripts/e2e/PROTOCOL.md
