@@ -72,7 +72,7 @@ final class DocStore {
                 return PlanDoc(
                     fileURL: doc.fileURL, kind: .spec, title: doc.title, date: doc.date,
                     goal: doc.goal, specReference: doc.specReference,
-                    checkedSteps: doc.checkedSteps, totalSteps: doc.totalSteps)
+                    checkedSteps: doc.checkedSteps, totalSteps: doc.totalSteps, tasks: doc.tasks)
             }
             return doc
         }

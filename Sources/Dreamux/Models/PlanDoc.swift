@@ -1,5 +1,21 @@
 import Foundation
 
+/// A `### Task N:` heading and the checkbox steps beneath it. The title
+/// is the full heading text (e.g. `Task 1: File-kind classifier`); the
+/// synthetic bucket for checkboxes that precede any heading carries an
+/// empty title.
+struct PlanTask: Equatable {
+    let title: String
+    let steps: [PlanStep]
+}
+
+/// One `- [ ]` / `- [x]` checkbox line, with the readable title left
+/// after stripping the `**Step k: …**` decoration.
+struct PlanStep: Equatable {
+    let title: String
+    let checked: Bool
+}
+
 /// One markdown document under the project docs home, classified by
 /// SHAPE (never by path): superpowers-style plans and specs are
 /// recognized wherever they sit, and anything else stays a plain doc.
@@ -20,6 +36,10 @@ struct PlanDoc: Identifiable, Equatable {
     let specReference: String?
     let checkedSteps: Int
     let totalSteps: Int
+    /// Tasks in document order (`### Task N:` headings), each carrying
+    /// its checkbox steps. `checkedSteps`/`totalSteps` above stay the
+    /// authoritative totals — they are exactly the sums over these steps.
+    let tasks: [PlanTask]
 
     static func parse(fileURL: URL, contents: String) -> PlanDoc {
         let lines = contents.components(separatedBy: .newlines)
@@ -29,6 +49,20 @@ struct PlanDoc: Identifiable, Equatable {
         var specReference: String?
         var hasTaskHeading = false
         var checked = 0, total = 0
+
+        // Tasks accumulate in the same pass. Each checkbox that bumps the
+        // counters above also appends a step here, so the totals and the
+        // per-task sums can never drift.
+        var tasks: [(title: String, steps: [PlanStep])] = []
+        func appendStep(_ step: PlanStep) {
+            if tasks.isEmpty {
+                // Checkboxes before any heading go in a synthetic untitled
+                // bucket, created only when such steps actually exist.
+                tasks.append((title: "", steps: [step]))
+            } else {
+                tasks[tasks.count - 1].steps.append(step)
+            }
+        }
 
         for line in lines {
             if firstH1 == nil, line.hasPrefix("# ") {
@@ -40,13 +74,26 @@ struct PlanDoc: Identifiable, Equatable {
             if specReference == nil, let value = headerValue(line, field: "Spec") {
                 specReference = stripDecoration(value)
             }
-            if line.range(of: #"^###\s+Task\s+\d+:"#, options: .regularExpression) != nil {
-                hasTaskHeading = true
+
+            if line.hasPrefix("### ") {
+                let heading = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+                if heading.range(of: #"^Task\s+\d+\s*[:—]"#, options: .regularExpression) != nil {
+                    hasTaskHeading = true
+                    tasks.append((title: heading, steps: []))
+                } else if hasTaskHeading {
+                    // A bare `### …` heading opens a task only once we're
+                    // past the first Task heading (later phases sometimes
+                    // drop the `Task N:` prefix).
+                    tasks.append((title: heading, steps: []))
+                }
+                continue
             }
+
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("- [ ]") { total += 1 }
-            else if trimmed.hasPrefix("- [x]") || trimmed.hasPrefix("- [X]") {
-                total += 1; checked += 1
+            if let isChecked = checkboxState(trimmed) {
+                total += 1
+                if isChecked { checked += 1 }
+                appendStep(PlanStep(title: stepTitle(from: trimmed), checked: isChecked))
             }
         }
 
@@ -69,7 +116,8 @@ struct PlanDoc: Identifiable, Equatable {
             goal: goal,
             specReference: specReference,
             checkedSteps: checked,
-            totalSteps: total
+            totalSteps: total,
+            tasks: tasks.map { PlanTask(title: $0.title, steps: $0.steps) }
         )
     }
 
@@ -84,6 +132,27 @@ struct PlanDoc: Identifiable, Equatable {
     }
 
     // MARK: - Helpers
+
+    /// Checkbox state of a trimmed line: `true`/`false` for a checked or
+    /// unchecked `- [ ]` item, `nil` when it isn't a checkbox. Shared by
+    /// the totals counters and the step parse so they stay in lockstep.
+    private static func checkboxState(_ trimmed: String) -> Bool? {
+        if trimmed.hasPrefix("- [ ]") { return false }
+        if trimmed.hasPrefix("- [x]") || trimmed.hasPrefix("- [X]") { return true }
+        return nil
+    }
+
+    /// Readable step title: drop the `- [ ]` marker, a leading
+    /// `**Step k:` numbering label, and any remaining `**` bold markers.
+    /// `**Step 1: Model.** In …` → `Model. In …`; `plain item` → `plain item`.
+    private static func stepTitle(from trimmed: String) -> String {
+        var body = String(trimmed.dropFirst("- [ ]".count)).trimmingCharacters(in: .whitespaces)
+        if let label = body.range(of: #"^\*\*Step\s+\d+\s*[:—]\s*"#, options: .regularExpression) {
+            body.removeSubrange(label)
+        }
+        body = body.replacingOccurrences(of: "**", with: "")
+        return body.trimmingCharacters(in: .whitespaces)
+    }
 
     /// `**Field:** value` → `value` (nil when the line isn't that field).
     private static func headerValue(_ line: String, field: String) -> String? {
