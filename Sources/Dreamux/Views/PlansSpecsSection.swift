@@ -474,7 +474,7 @@ struct PlansSpecsSection: View {
         VStack(alignment: .leading, spacing: 2) {
             planRow(plan, status: status, ordinal: ordinal, blockedBy: blockedBy)
             if !chips.isEmpty { chipLine(chips) }
-            if shouldAnchorGate(under: plan) { gateCard() }
+            if shouldAnchorGate(under: plan, status: status) { gateCard() }
             if expandedPlans.contains(plan.fileURL.path) { planTasks(plan) }
         }
     }
@@ -666,14 +666,23 @@ struct PlansSpecsSection: View {
     // MARK: - Gate anchoring
 
     /// Whether the queue's gate/attention card belongs under this plan row —
-    /// true when the queue is parked and this row is its current plan.
-    private func shouldAnchorGate(under plan: PlanDoc) -> Bool {
-        (queue.state == .atGate || queue.state == .attention)
+    /// true when the queue is parked and this row is its current plan. A
+    /// `.merged` current plan never anchors: an out-of-band merge can leave
+    /// the queue parked on a plan that has since merged (e.g. `.attention`
+    /// isn't cleared by a tick), and a merged row — in `Done` or as a merged
+    /// phase under an active family — would otherwise double up with the
+    /// queue-box fallback. The fallback covers that window instead.
+    private func shouldAnchorGate(under plan: PlanDoc, status: PlanStatus) -> Bool {
+        status != .merged
+            && (queue.state == .atGate || queue.state == .attention)
             && queue.currentPlanPath == docStore.relativePath(of: plan)
     }
 
-    /// Whether the queue's current plan is on screen as a row, so its gate
-    /// card anchors there and the queue box drops its fallback copy. The row
+    /// Whether the queue's current plan is on screen as a row that will
+    /// anchor the gate card, so the queue box drops its fallback copy. Kept
+    /// the exact complement of `shouldAnchorGate`: a `.merged` current plan
+    /// never anchors (even when its row is rendered — a merged phase under an
+    /// active family, or a row in `Done`), so the fallback must show. The row
     /// shows when its single-plan initiative is active, or its multi-plan
     /// family is active *and* expanded; anything else falls back.
     private func isGateAnchoredToRenderedRow(_ active: [Initiative], _ statuses: [URL: PlanStatus]) -> Bool {
@@ -681,7 +690,9 @@ struct PlansSpecsSection: View {
               let current = queue.currentPlanPath,
               let owner = active.first(where: { initiative in
                   initiative.plans.contains { docStore.relativePath(of: $0) == current }
-              })
+              }),
+              let plan = owner.plans.first(where: { docStore.relativePath(of: $0) == current }),
+              statuses[plan.fileURL] != .merged
         else { return false }
         guard owner.plans.count > 1 else { return true }
         let memberStatuses = owner.plans.map { statuses[$0.fileURL] ?? .ready }
