@@ -20,6 +20,10 @@ struct WorkspaceSidebar: View {
     /// the e2e bridge is inactive; consumed below exactly like
     /// `consumePendingMergeIfAny()`.
     @Binding var gateMergeWorkspaceID: UUID?
+    /// Plan-row *Close* channel — `PlansSpecsSection` parks the target
+    /// workspace id here (it doesn't own the confirm alert); consumed below
+    /// exactly like `gateMergeWorkspaceID`, driving the `pendingClose` alert.
+    @Binding var gateCloseWorkspaceID: UUID?
     let onOpenDoc: (URL) -> Void
 
     @State private var showAddFeature = false
@@ -154,6 +158,12 @@ struct WorkspaceSidebar: View {
             gateMergeWorkspaceID = nil
             pendingMerge = workspace
         }
+        .onChange(of: gateCloseWorkspaceID) { _, id in
+            guard let id, let workspace = store.workspaces.first(where: { $0.id == id })
+            else { return }
+            gateCloseWorkspaceID = nil
+            pendingClose = workspace
+        }
     }
 
     // MARK: - Content
@@ -201,7 +211,9 @@ struct WorkspaceSidebar: View {
                 workspaceForFeature: { name in
                     store.workspaces.first(where: { $0.name == name })
                 },
-                makeRunControls: { runControls(for: $0) }
+                makeRunControls: { runControls(for: $0) },
+                gateMergeWorkspaceID: $gateMergeWorkspaceID,
+                gateCloseWorkspaceID: $gateCloseWorkspaceID
             )
 
             VStack(alignment: .leading, spacing: 4) {

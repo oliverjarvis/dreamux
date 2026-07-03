@@ -59,6 +59,7 @@ struct ContentView: View {
                     planRunner: planRunner,
                     planQueue: planQueue,
                     gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
+                    gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
                     onOpenDoc: openFile
                 )
                 .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)

@@ -32,6 +32,12 @@ struct PlansSpecsSection: View {
     /// Builds the shared run-control cluster for a workspace, wired to the
     /// sidebar's runner actions (see `WorkspaceSidebar.runControls(for:)`).
     let makeRunControls: (Workspace) -> WorkspaceRunControls
+    /// Merge/Close pending channels — the plan-row context menu parks the
+    /// target workspace id here; `WorkspaceSidebar` owns the merge sheet and
+    /// close confirm-alert and consumes these exactly like the gate-merge
+    /// channel. (The section never imports `ProjectSession`.)
+    @Binding var gateMergeWorkspaceID: UUID?
+    @Binding var gateCloseWorkspaceID: UUID?
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
@@ -537,6 +543,18 @@ struct PlansSpecsSection: View {
                 menu: {
                     if let feature = openableFeature {
                         Button("Open workspace") { onOpenFeature(feature) }
+                    }
+                    // Merge/Close parity with the feature rows, for any plan
+                    // whose feature workspace is live — routed through the
+                    // sidebar's sheet/alert channels (see featureMenu).
+                    if let workspace {
+                        if !workspace.linkedRepoIDs.isEmpty {
+                            Button("Merge…") { gateMergeWorkspaceID = workspace.id }
+                        }
+                        Divider()
+                        Button("Close \"\(workspace.name)\"", role: .destructive) {
+                            gateCloseWorkspaceID = workspace.id
+                        }
                     }
                 }
             ) {

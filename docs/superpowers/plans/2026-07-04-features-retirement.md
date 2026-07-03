@@ -18,9 +18,9 @@
 
 ### Task 2: Merge/Close parity on plan rows
 
-- [ ] **Step 1:** Plan-row context menu gains *Merge…* (workspaces with linked repos) and *Close "<feature>"…* (destructive), routed through two new pending channels on `ProjectSession` (`pendingGateMergeWorkspaceID` already exists and is reused for merge; add `pendingCloseWorkspaceID`) consumed by `WorkspaceSidebar`'s existing sheet/alert owners.
-- [ ] **Step 2:** Unit-test the channel handoff at the `ProjectSession` level (set channel → sidebar consumption is UI, but the channel semantics — set/clear once — get a test like `testRequestMergeParksWorkspaceOnGateChannel`).
-- [ ] **Step 3: Build + tests green.**
+- [x] **Step 1:** Plan-row context menu gains *Merge…* (workspaces with linked repos) and *Close "<feature>"…* (destructive), routed through two new pending channels on `ProjectSession` (`pendingGateMergeWorkspaceID` already exists and is reused for merge; add `pendingCloseWorkspaceID`) consumed by `WorkspaceSidebar`'s existing sheet/alert owners.
+- [x] **Step 2:** Unit-test the channel handoff at the `ProjectSession` level (set channel → sidebar consumption is UI, but the channel semantics — set/clear once — get a test like `testRequestMergeParksWorkspaceOnGateChannel`).
+- [x] **Step 3: Build + tests green.**
 
 ### Task 3: Ad hoc group
 

@@ -87,6 +87,25 @@ final class ProjectSessionTests: XCTestCase {
         XCTAssertNil(session.pendingGateMergeWorkspaceID)
     }
 
+    func testCloseChannelParksAndClearsWorkspace() throws {
+        let project = try sandbox.makeProject(named: "alpha")
+        let session = ProjectSession(project: project)
+        let workspace = session.store.registerFeature(
+            name: "feature-x",
+            featureDirectory: project.rootPath.appendingPathComponent("features/feature-x"),
+            linkedRepoIDs: []
+        )
+
+        // The plan-row Close action parks the target here; WorkspaceSidebar's
+        // confirm-alert owner adopts and clears it — the same set/consume
+        // handoff `pendingGateMergeWorkspaceID` uses for merge.
+        XCTAssertNil(session.pendingCloseWorkspaceID)
+        session.pendingCloseWorkspaceID = workspace.id
+        XCTAssertEqual(session.pendingCloseWorkspaceID, workspace.id)
+        session.pendingCloseWorkspaceID = nil
+        XCTAssertNil(session.pendingCloseWorkspaceID)
+    }
+
     func testBootstrapIsOneShot() throws {
         let project = try sandbox.makeProject(named: "alpha")
         let session = ProjectSession(project: project)

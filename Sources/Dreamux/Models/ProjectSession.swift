@@ -35,6 +35,12 @@ final class ProjectSession {
     /// while the project is in a background window position isn't lost.
     var pendingGateMergeWorkspaceID: UUID?
 
+    /// Non-e2e channel for the plan-row *Close* action: `PlansSpecsSection`
+    /// doesn't own the close confirm-alert (it lives on `WorkspaceSidebar`),
+    /// so it parks the target workspace id here and the sidebar adopts it —
+    /// the close-side twin of `pendingGateMergeWorkspaceID`.
+    var pendingCloseWorkspaceID: UUID?
+
     @ObservationIgnored private var didBootstrap = false
 
     init(project: Project) {
