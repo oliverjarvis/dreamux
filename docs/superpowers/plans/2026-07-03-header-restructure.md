@@ -30,7 +30,7 @@
 - Consumes: `@State private var showFileTree: Bool` (already declared at `ContentView.swift:23`)
 - Produces: a `ToolbarItem(placement: .primaryAction)` in the titlebar; the hero band no longer contains a button (Task 2 deletes the band entirely)
 
-- [ ] **Step 1: Add the toolbar item**
+- [x] **Step 1: Add the toolbar item**
 
 In `ContentView.body`, directly after `.navigationTitle("")` (line 153), insert:
 
@@ -53,16 +53,16 @@ In `ContentView.body`, directly after `.navigationTitle("")` (line 153), insert:
         }
 ```
 
-- [ ] **Step 2: Remove the button from the hero band**
+- [x] **Step 2: Remove the button from the hero band**
 
 In `heroBand` (lines 304–319), delete the `Spacer(minLength: 8)` and the entire `Button { showFileTree.toggle() } ... .help("Toggle file explorer (⌥⌘E)")` block. Also update the `heroBand` doc comment (lines 273–277): drop the words "and the file-explorer toggle on the right".
 
-- [ ] **Step 3: Build and run tests**
+- [x] **Step 3: Build and run tests**
 
 Run: `swift build 2>&1 | tail -5` — Expected: `Build complete!`
 Run: `swift test 2>&1 | tail -5` — Expected: all tests pass (no test touches the toolbar).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/ContentView.swift
@@ -80,7 +80,7 @@ git commit -m "Move file-explorer toggle into the native titlebar"
 - Consumes: `currentProject: Project?` (`ContentView.swift:112`), `mainPane` (`:254-271`)
 - Produces: `private var projectHeaderRow: some View` — compact avatar + name row
 
-- [ ] **Step 1: Reshuffle the detail column**
+- [x] **Step 1: Reshuffle the detail column**
 
 Replace the detail closure body (lines 122–150, the comment + `VStack` wrapping `heroBand` and the `HSplitView`) with:
 
@@ -117,7 +117,7 @@ Replace the detail closure body (lines 122–150, the comment + `VStack` wrappin
         }
 ```
 
-- [ ] **Step 2: Replace `heroBand` with `projectHeaderRow`**
+- [x] **Step 2: Replace `heroBand` with `projectHeaderRow`**
 
 Delete the `heroBand` property and its doc comment entirely (lines 273–337 region) and add in its place:
 
@@ -157,7 +157,7 @@ Delete the `heroBand` property and its doc comment entirely (lines 273–337 reg
     }
 ```
 
-- [ ] **Step 3: Update the stale `.navigationTitle` comment**
+- [x] **Step 3: Update the stale `.navigationTitle` comment**
 
 Replace the comment at lines 151–153 ("The project identity lives in `heroBand` …") with:
 
@@ -166,12 +166,12 @@ Replace the comment at lines 151–153 ("The project identity lives in `heroBand
         // terminal tabs, so the macOS titlebar title is blanked.
 ```
 
-- [ ] **Step 4: Build and run tests**
+- [x] **Step 4: Build and run tests**
 
 Run: `swift build 2>&1 | tail -5` — Expected: `Build complete!`
 Run: `swift test 2>&1 | tail -5` — Expected: all tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Sources/Dreamux/Views/ContentView.swift
@@ -188,20 +188,20 @@ git commit -m "Replace hero band with compact project header above the tabs"
 **Interfaces:**
 - Consumes: the built `Dreamux.app` bundle; the e2e `screenshot` command (in-process, no permissions).
 
-- [ ] **Step 1: Build the app bundle**
+- [x] **Step 1: Build the app bundle**
 
 Run: `./Scripts/make-app.sh` — Expected: exits 0, `Dreamux.app` refreshed at repo root.
 
-- [ ] **Step 2: Sandboxed boot + screenshot**
+- [x] **Step 2: Sandboxed boot + screenshot**
 
 Launch the binary with the e2e env (sandboxed projects root + state dir under the scratchpad, socket at a short `/tmp` path, seeded project so a window opens), send `{"cmd":"screenshot","path":"<scratchpad>/header.png"}` over the socket, then terminate the process. Follow `Scripts/e2e/PROTOCOL.md` — retry-connect for a couple of seconds after spawn.
 
 Expected in the screenshot: titlebar shows the `sidebar.right` toggle at the trailing end; no blue hero band; compact avatar + name row above the ghostty tabs, starting right of the Work-Items sidebar; sidebar tiles reach the top. Read the screenshot and verify each point; fix and re-shoot if anything is off.
 
-- [ ] **Step 3: Verify the toggle works**
+- [x] **Step 3: Verify the toggle works**
 
 Over the same socket session (before terminating): send `{"cmd":"setFileTree","visible":true}` (see `Scripts/e2e/PROTOCOL.md`), screenshot again, confirm the inspector opened and the toolbar icon is accent-tinted.
 
-- [ ] **Step 4: Boot the app for the user**
+- [x] **Step 4: Boot the app for the user**
 
 Run: `open <repo>/Dreamux.app` (no e2e env — real projects). Expected: window opens with the new chrome.
