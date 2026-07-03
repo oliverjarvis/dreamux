@@ -11,6 +11,9 @@ struct WorkspaceTerminalContainer: View {
 
     var body: some View {
         ZStack {
+            if store.workspaces.isEmpty {
+                noWorkspacesState
+            }
             ForEach(store.workspaces) { workspace in
                 WorkspaceBonsplitPane(session: store.session(for: workspace))
                     .opacity(workspace.id == store.activeID ? 1 : 0)
@@ -23,6 +26,29 @@ struct WorkspaceTerminalContainer: View {
                     .zIndex(workspace.id == store.activeID ? 1 : 0)
             }
         }
+        // Always claim the full pane. With zero workspaces the ZStack is
+        // otherwise empty and reports ~zero ideal height, and no other
+        // HSplitView child forces height — the whole split collapses and
+        // the hero band floats centered in an empty window.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Shown when the project has no work items at all (fresh project,
+    /// or the last feature was just closed).
+    private var noWorkspacesState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "square.stack.3d.up.slash")
+                .font(.system(size: 36))
+                .foregroundStyle(.tertiary)
+            Text("No work items open")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("Add a feature from the sidebar, or run a plan from Plans & Specs.")
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

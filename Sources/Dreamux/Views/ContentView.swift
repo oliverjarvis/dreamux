@@ -141,7 +141,10 @@ struct ContentView: View {
                     .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 
                     mainPane
-                        .frame(maxWidth: .infinity)
+                        // maxHeight keeps the HSplitView vertically greedy
+                        // in every mode — without a height-flexible child
+                        // the split collapses under the hero band.
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
