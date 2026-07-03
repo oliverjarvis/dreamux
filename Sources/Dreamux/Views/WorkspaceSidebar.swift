@@ -196,7 +196,12 @@ struct WorkspaceSidebar: View {
                     guard let workspace = store.workspaces.first(where: { $0.name == name })
                     else { return false }
                     return store.hasUnread(for: workspace)
-                }
+                },
+                runners: runners,
+                workspaceForFeature: { name in
+                    store.workspaces.first(where: { $0.name == name })
+                },
+                makeRunControls: { runControls(for: $0) }
             )
 
             VStack(alignment: .leading, spacing: 4) {
@@ -336,14 +341,13 @@ struct WorkspaceSidebar: View {
     ) -> some View {
         let isRunning = !runners.runningRunners(onBranch: workspace.name).isEmpty
         let isHovered = hoveredWorkspaceID == workspace.id
-        let openable = runners.openableRunners(for: workspace).map(\.name)
         return ZStack(alignment: .trailing) {
             Button { selectWorkspace(workspace) } label: { body() }
                 .buttonStyle(.plain)
                 .help(workspace.workingDirectory ?? workspace.name)
                 .contextMenu { featureMenu(for: workspace) }
 
-            runControls(for: workspace, isRunning: isRunning, openableNames: openable)
+            runControls(for: workspace)
                 .opacity(isHovered || isRunning ? 1 : 0)
                 .padding(.trailing, 12)
         }
@@ -368,45 +372,18 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    private func runControls(for workspace: Workspace, isRunning: Bool, openableNames: [String]) -> some View {
-        HStack(spacing: 4) {
-            if isRunning, !openableNames.isEmpty {
-                Menu {
-                    ForEach(openableNames, id: \.self) { name in
-                        Button("Open \(name)") { openServices(for: workspace, runnerName: name) }
-                    }
-                } label: {
-                    Image(systemName: "safari")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(Color.primary.opacity(0.10)))
-                } primaryAction: {
-                    openServices(for: workspace, runnerName: nil)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Open \(workspace.name)'s services (hold to pick one)")
-            }
-
-            Menu {
-                Button("Run Settings…") { configure(workspace) }
-            } label: {
-                Image(systemName: isRunning ? "stop.fill" : "play.fill")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(Circle().fill(Color.green))
-            } primaryAction: {
-                isRunning ? stopAllRunning(on: workspace) : startRunnersForWorkspace(workspace)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(isRunning ? "Stop running services on \(workspace.name) (hold for Run Settings)"
-                            : "Start \(workspace.name) (hold for Run Settings)")
-        }
+    /// The trailing run-control cluster for a workspace, wired to this view's
+    /// actions. Shared with `PlansSpecsSection` (passed as `makeRunControls`)
+    /// so plan rows drive runners exactly like feature rows do.
+    private func runControls(for workspace: Workspace) -> WorkspaceRunControls {
+        WorkspaceRunControls(
+            workspace: workspace,
+            runners: runners,
+            openServices: { openServices(for: workspace, runnerName: $0) },
+            start: { startRunnersForWorkspace(workspace) },
+            stop: { stopAllRunning(on: workspace) },
+            configure: { configure(workspace) }
+        )
     }
 
     @ViewBuilder

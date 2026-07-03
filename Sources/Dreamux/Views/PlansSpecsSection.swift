@@ -22,6 +22,16 @@ struct PlansSpecsSection: View {
     let featureName: (PlanDoc) -> String?
     /// Whether the named feature's workspace has unread terminal output.
     let hasUnread: (String) -> Bool
+    /// The runner state, so a plan row whose feature is live can reveal its
+    /// run controls whenever a runner is up (not only on hover) and reflect
+    /// their running/stopped state.
+    let runners: RunnerManager
+    /// The live workspace backing a feature name, or nil when it isn't in the
+    /// sidebar — resolves the row's target for `makeRunControls`.
+    let workspaceForFeature: (String) -> Workspace?
+    /// Builds the shared run-control cluster for a workspace, wired to the
+    /// sidebar's runner actions (see `WorkspaceSidebar.runControls(for:)`).
+    let makeRunControls: (Workspace) -> WorkspaceRunControls
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
@@ -493,6 +503,11 @@ struct PlansSpecsSection: View {
         // can produce output while parked at a gate — so it keys off the
         // feature existing, not the in-flight gate the → affordance uses.
         let showUnread = name.map { featureExists($0) && hasUnread($0) } ?? false
+        // The live workspace behind this plan (nil until its worktree exists),
+        // and whether a runner is up on it — run controls ride alongside the →
+        // affordance and, like feature rows, stay visible while running.
+        let workspace = name.flatMap(workspaceForFeature)
+        let runnerRunning = workspace.map { !runners.runningRunners(onBranch: $0.name).isEmpty } ?? false
         // The disclosure chevron overlays the row's leading gap rather than
         // nesting inside its open-doc button — the same on-top idiom the
         // feature rows use for their hover controls, so a click on the
@@ -501,6 +516,7 @@ struct PlansSpecsSection: View {
             docRow(
                 plan,
                 canRun: status == .ready || status == .inProgress,
+                keepTrailingVisible: runnerRunning,
                 trailing: {
                     if let feature = openableFeature {
                         Button { onOpenFeature(feature) } label: {
@@ -512,6 +528,9 @@ struct PlansSpecsSection: View {
                         }
                         .buttonStyle(.plain)
                         .help("Open \(feature)'s workspace")
+                    }
+                    if let workspace {
+                        makeRunControls(workspace)
                     }
                 },
                 menu: {
@@ -779,11 +798,14 @@ struct PlansSpecsSection: View {
     /// Row chrome shared by all three row types: click opens the doc,
     /// hover reveals Run for runnable plans, context menu everywhere.
     /// `trailing` adds a caller-supplied hover control (the → workspace
-    /// button) stacked ahead of Run; `menu` adds caller-supplied context
-    /// items ahead of Reveal in Finder.
+    /// button, run controls) stacked ahead of Run; `menu` adds caller-supplied
+    /// context items ahead of Reveal in Finder. `keepTrailingVisible` pins the
+    /// trailing area open when not hovered — the plan row uses it so a live
+    /// runner's controls stay on screen, matching the feature rows.
     private func docRow<Body: View, Trailing: View, Menu: View>(
         _ doc: PlanDoc,
         canRun: Bool,
+        keepTrailingVisible: Bool = false,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() },
         @ViewBuilder menu: () -> Menu = { EmptyView() },
         @ViewBuilder body: () -> Body
@@ -816,11 +838,10 @@ struct PlansSpecsSection: View {
             }
 
             // Hover-revealed trailing controls: the caller's affordance
-            // (→ workspace) stacked with Run for a runnable plan. The two
-            // statuses are mutually exclusive today — a plan is either
-            // runnable or in flight — but they stack like `runControls` if
-            // that ever changes.
-            if hoveredDocURL == doc.fileURL {
+            // (→ workspace, run controls) stacked with Run for a runnable
+            // plan. A live runner keeps them on screen without hover via
+            // `keepTrailingVisible`, the same rule the feature rows use.
+            if hoveredDocURL == doc.fileURL || keepTrailingVisible {
                 HStack(spacing: 4) {
                     trailing()
                     if canRun {
