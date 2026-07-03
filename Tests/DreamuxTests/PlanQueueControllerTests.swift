@@ -134,4 +134,39 @@ final class PlanQueueControllerTests: XCTestCase {
         XCTAssertEqual(controller.entries.first, "docs/plans/b.md",
                        "stop keeps remaining entries for a later start")
     }
+
+    private struct FakeRunError: Error {}
+
+    func testStaleLaunchFailureDoesNotClobberAdvancedQueue() async {
+        var releaseA: CheckedContinuation<Void, Never>?
+        controller.runPlan = { [weak self] path in
+            self?.ran.append(path)
+            if path == "docs/plans/a.md" {
+                // Suspend (rather than busy-spin) until the test releases us,
+                // so a.md's completion lands strictly after skipCurrent().
+                await withCheckedContinuation { releaseA = $0 }
+                throw FakeRunError()
+            }
+        }
+        controller.enqueue("docs/plans/a.md")
+        controller.enqueue("docs/plans/b.md")
+        controller.start()
+        await Task.yield()               // a.md's launch is in flight, parked on the continuation
+        controller.skipCurrent()         // advances the queue to b.md while a.md is still running
+        XCTAssertEqual(controller.currentPlanPath, "docs/plans/b.md")
+        releaseA?.resume()
+        await Task.yield()               // let a.md's now-stale throw complete
+        XCTAssertEqual(controller.state, .running)
+        XCTAssertEqual(controller.currentPlanPath, "docs/plans/b.md")
+        XCTAssertNil(controller.lastError)
+    }
+
+    func testRelaunchMidRunFlipsToAttention() async {
+        controller.enqueue("docs/plans/a.md")
+        controller.start()
+        await Task.yield()
+        statuses["docs/plans/a.md"] = .inProgress
+        controller.tick()
+        XCTAssertEqual(controller.state, .attention)
+    }
 }

@@ -141,6 +141,13 @@ final class PlanQueueController {
         case (.running, .merged), (.atGate, .merged):
             entries.removeAll { $0 == path }
             advance(after: path)
+        case (.running, .inProgress):
+            // The run's feature workspace is gone (app relaunch mid-run,
+            // or the feature was closed under us) with steps unchecked —
+            // surface it instead of silently waiting forever.
+            state = .attention
+            quiescentSince = nil
+            save()
         case (.running, .running):
             trackStall(for: path)
         case (.running, _), (.atGate, _), (.attention, _), (.idle, _):
@@ -181,8 +188,12 @@ final class PlanQueueController {
             guard let self else { return }
             do {
                 try await self.runPlan(path)
+                // A skip/stop/advance while runPlan was in flight makes
+                // this completion stale — don't touch the queue's state.
+                guard self.currentPlanPath == path else { return }
                 self.startPolling()
             } catch {
+                guard self.currentPlanPath == path else { return }
                 self.lastError = error.localizedDescription
                 self.state = .attention
                 self.save()
