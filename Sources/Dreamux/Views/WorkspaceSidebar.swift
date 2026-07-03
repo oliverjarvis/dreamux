@@ -218,14 +218,20 @@ struct WorkspaceSidebar: View {
 
             // Ad hoc work items — workspaces with no plan behind them
             // (plan-backed workspaces render only on their Plans & Specs
-            // rows). The header carries the sole Add Feature affordance now
-            // that the Features list is gone, so the section shows whenever a
-            // feature can be created — i.e. whenever repositories exist to
-            // branch from. With no repositories the whole group is hidden
-            // (Add Feature would be disabled anyway, and the Repositories
-            // card guides the user to add one first). Only the row list is
-            // conditional on there actually being ad-hoc workspaces.
-            if !repoStore.repositories.isEmpty {
+            // rows). Two independent concerns drive this section:
+            //   1. Showing the rows — ad-hoc workspaces are repo-independent:
+            //      `store.addWorkspace()` makes repo-less scratch workspaces
+            //      (⌘⇧T "New Workspace", the Web Browser tile, planning
+            //      sessions), and this list is their only home, so it must
+            //      render whenever any ad-hoc workspace exists.
+            //   2. Reaching the `+` — the header hosts the sole Add Feature
+            //      affordance, which needs a repository to branch from; when
+            //      repos exist we also render the section so that `+` (and
+            //      the empty-state copy that points at it) is reachable.
+            // So render on either condition; the `+` itself is disabled (not
+            // hidden) when there are no repositories. The row list is further
+            // gated on there actually being ad-hoc workspaces.
+            if !adHocWorkspaces.isEmpty || !repoStore.repositories.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     adHocHeader
                     if !adHocWorkspaces.isEmpty {
@@ -485,9 +491,10 @@ struct WorkspaceSidebar: View {
 
     /// The Ad hoc section header: the section label plus the `+` that opens
     /// the Add Feature sheet — the only ad-hoc creation entry point now that
-    /// the Features list is gone. The enclosing section only renders when
-    /// repositories exist, so the `+` is always enabled here (bar an
-    /// in-flight provision). Mirrors `repositoriesHeader`'s trailing `+`.
+    /// the Features list is gone. Creating a feature needs a repository to
+    /// branch from, so the `+` is disabled (not hidden) with no repositories,
+    /// keeping the affordance visible for the empty-state copy to point at.
+    /// Mirrors `repositoriesHeader`'s trailing `+`.
     private var adHocHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text("Ad hoc")
@@ -504,8 +511,10 @@ struct WorkspaceSidebar: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(isWorking)
-            .help(isWorking ? "Adding…" : "New Feature")
+            .disabled(repoStore.repositories.isEmpty || isWorking)
+            .help(repoStore.repositories.isEmpty
+                  ? "Add a repository before creating features."
+                  : (isWorking ? "Adding…" : "New Feature"))
         }
         .padding(.bottom, 2)
     }
