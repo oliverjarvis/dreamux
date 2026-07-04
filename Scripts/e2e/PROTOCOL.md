@@ -177,7 +177,14 @@ Field notes:
   enabled and observable.
 - `plans` mirrors `DocStore.plans` (docs classified as plans only,
   i.e. not specs/plain docs): `status` is the same derived value
-  `listDocs` reports (ledger + checkboxes + feature existence).
+  `listDocs` reports (ledger + checkboxes + feature existence). Each
+  entry also carries its ordering disposition: `runsAfter` (the blocker
+  plan's project-relative path, from a `**Runs:** after <plan>` header)
+  and `declaresParallel: true` (from a `**Runs:** parallel` header).
+  Both follow `specPath`'s omitted-not-null convention — `runsAfter` is
+  **omitted** when the plan names no blocker, `declaresParallel`
+  **omitted** when the plan doesn't explicitly opt into parallel — and
+  are mutually exclusive on a well-formed header.
 - `initiatives` mirrors `DocStore.initiatives` — the same work grouped
   into families (spec + ordered plans + supporting docs) the sidebar
   renders. Entries come in **store order** (newest member date first),
@@ -186,15 +193,23 @@ Field notes:
   entry: `title`, `id` (family key), `specPath` (**omitted** when the
   initiative has no spec), `docPaths` (supporting docs — roadmaps,
   extra specs), and `plans`, each with its 1-based `ordinal`
-  (execution order), derived `status` (as in `plans`), and a
-  per-`tasks` checkbox rollup (`title`, `checked`, `total`). `tasks`
-  reports every parsed heading — a heading with no checkboxes dumps as
-  `total: 0` even though the sidebar hides such rows, and its `title`
-  may be empty for steps that precede the first heading. Each task also
-  carries `phase`, the `## ` section it falls under in single-file
-  phased plans (omitted when the plan has no sections). All paths are
-  project-relative. The flat `plans` array above stays for
-  compatibility.
+  (execution order), derived `status` (as in `plans`), the same
+  `runsAfter` / `declaresParallel` disposition fields the flat `plans`
+  entries carry (each omitted when not declared), and a per-`tasks`
+  checkbox rollup (`title`, `checked`, `total`). `tasks` reports every
+  parsed heading — a heading with no checkboxes dumps as `total: 0` even
+  though the sidebar hides such rows, and its `title` may be empty for
+  steps that precede the first heading. Each task also carries `phase`,
+  the `## ` section it falls under in single-file phased plans (omitted
+  when the plan has no sections). All paths are project-relative. The
+  flat `plans` array above stays for compatibility.
+- **Enactment.** Dropping a plan whose header reads `**Runs:** after
+  <blocker>` into the docs home self-enqueues it behind its blocker on
+  the next watcher tick — the plan appears in `queue.entries` after its
+  blocker with no explicit `enqueuePlan`, observable via `queueState`.
+  Enactment is edge-triggered: it fires once when the waiter first
+  appears, so a waiter a driver manually removes from the queue stays
+  removed rather than being re-enqueued on the next tick.
 - `queue` mirrors `PlanQueueController`: `{"state":
   "idle|running|atGate|attention", "entries": ["docs/plans/…"],
   "current": "docs/plans/…"?}`. `current` is omitted while the queue

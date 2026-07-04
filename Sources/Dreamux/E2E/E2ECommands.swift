@@ -207,16 +207,14 @@ enum E2ECommands {
             let featureExists: (String) -> Bool = { name in
                 workspaceStore.workspaces.contains { $0.name == name }
             }
-            // The flat `plans` dump stays as-is for compatibility; the
-            // `initiatives` grouping is the richer, structured view.
-            payload["plans"] = docStore.plans.map { plan -> [String: Any] in
-                [
-                    "path": docStore.relativePath(of: plan),
-                    "status": docStore.status(for: plan, featureExists: featureExists).rawValue,
-                    "checkedSteps": plan.checkedSteps,
-                    "totalSteps": plan.totalSteps,
-                ]
-            }
+            // The flat `plans` dump stays for compatibility; the
+            // `initiatives` grouping is the richer, structured view. Both
+            // go through E2EStateDump so their shape is unit-tested.
+            payload["plans"] = E2EStateDump.flatPlansPayload(
+                docStore.plans,
+                relativePath: { docStore.relativePath(of: $0) },
+                status: { docStore.status(for: $0, featureExists: featureExists) }
+            )
             payload["initiatives"] = E2EStateDump.initiativesPayload(
                 docStore.initiatives,
                 relativePath: { docStore.relativePath(of: $0) },

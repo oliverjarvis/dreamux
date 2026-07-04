@@ -129,6 +129,129 @@ final class E2EStateDumpTests: XCTestCase {
         XCTAssertEqual(plans[0]["status"] as? String, "ready")
     }
 
+    // MARK: - Ordering disposition (runsAfter / declaresParallel)
+
+    func testInitiativePlanCarriesRunsAfterOmittingParallel() throws {
+        let plan = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-widget-phase-2.md"),
+            contents: """
+            # Widget Phase 2 Implementation Plan
+
+            **Runs:** after docs/plans/2026-07-08-widget-phase-1.md
+
+            ### Task 1: Only
+            - [ ] a
+            """)
+        let initiative = Initiative(
+            id: "widget", title: "Widget", spec: nil, plans: [plan], supportingDocs: [])
+        let entry = try onlyEntry(E2EStateDump.initiativesPayload(
+            [initiative], relativePath: relativePath, status: { _ in .ready }))
+        let plans = try XCTUnwrap(entry["plans"] as? [[String: Any]])
+        XCTAssertEqual(plans[0]["runsAfter"] as? String,
+                       "docs/plans/2026-07-08-widget-phase-1.md")
+        XCTAssertFalse(plans[0].keys.contains("declaresParallel"),
+                       "an after-blocker plan is not parallel")
+    }
+
+    func testInitiativePlanCarriesParallelOmittingRunsAfter() throws {
+        let plan = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-widget-phase-2.md"),
+            contents: """
+            # Widget Phase 2 Implementation Plan
+
+            **Runs:** parallel
+
+            ### Task 1: Only
+            - [ ] a
+            """)
+        let initiative = Initiative(
+            id: "widget", title: "Widget", spec: nil, plans: [plan], supportingDocs: [])
+        let entry = try onlyEntry(E2EStateDump.initiativesPayload(
+            [initiative], relativePath: relativePath, status: { _ in .ready }))
+        let plans = try XCTUnwrap(entry["plans"] as? [[String: Any]])
+        XCTAssertEqual(plans[0]["declaresParallel"] as? Bool, true)
+        XCTAssertFalse(plans[0].keys.contains("runsAfter"),
+                       "a parallel plan names no blocker")
+    }
+
+    func testInitiativePlanOmitsBothDispositionsWhenHeaderAbsent() throws {
+        let plan = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-widget.md"),
+            contents: """
+            # Widget Implementation Plan
+
+            ### Task 1: Only
+            - [ ] a
+            """)
+        let initiative = Initiative(
+            id: "widget", title: "Widget", spec: nil, plans: [plan], supportingDocs: [])
+        let entry = try onlyEntry(E2EStateDump.initiativesPayload(
+            [initiative], relativePath: relativePath, status: { _ in .ready }))
+        let plans = try XCTUnwrap(entry["plans"] as? [[String: Any]])
+        XCTAssertFalse(plans[0].keys.contains("runsAfter"))
+        XCTAssertFalse(plans[0].keys.contains("declaresParallel"))
+    }
+
+    /// The flat `plans` dump carries the same disposition fields as the
+    /// initiatives view, each omitted (not null) when the plan doesn't
+    /// declare it — and still reports the pre-existing path/status/step
+    /// fields the extraction preserved.
+    func testFlatPlansPayloadReportsDispositionPerPlan() throws {
+        let blocked = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-widget-phase-2.md"),
+            contents: """
+            # Widget Phase 2 Implementation Plan
+
+            **Runs:** after docs/plans/2026-07-08-widget-phase-1.md
+
+            ### Task 1: Only
+            - [x] a
+            - [ ] b
+            """)
+        let parallel = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-gizmo.md"),
+            contents: """
+            # Gizmo Implementation Plan
+
+            **Runs:** parallel
+
+            ### Task 1: Only
+            - [ ] a
+            """)
+        let plain = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-doohickey.md"),
+            contents: """
+            # Doohickey Implementation Plan
+
+            ### Task 1: Only
+            - [ ] a
+            """)
+
+        let payload = E2EStateDump.flatPlansPayload(
+            [blocked, parallel, plain], relativePath: relativePath, status: { _ in .ready })
+        XCTAssertEqual(payload.count, 3)
+
+        // Pre-existing flat fields survive the extraction.
+        XCTAssertEqual(payload[0]["path"] as? String,
+                       "docs/plans/2026-07-08-widget-phase-2.md")
+        XCTAssertEqual(payload[0]["status"] as? String, "ready")
+        XCTAssertEqual(payload[0]["checkedSteps"] as? Int, 1)
+        XCTAssertEqual(payload[0]["totalSteps"] as? Int, 2)
+
+        // after-blocker: runsAfter present, declaresParallel omitted.
+        XCTAssertEqual(payload[0]["runsAfter"] as? String,
+                       "docs/plans/2026-07-08-widget-phase-1.md")
+        XCTAssertFalse(payload[0].keys.contains("declaresParallel"))
+
+        // parallel: declaresParallel present, runsAfter omitted.
+        XCTAssertEqual(payload[1]["declaresParallel"] as? Bool, true)
+        XCTAssertFalse(payload[1].keys.contains("runsAfter"))
+
+        // plain: neither disposition key.
+        XCTAssertFalse(payload[2].keys.contains("runsAfter"))
+        XCTAssertFalse(payload[2].keys.contains("declaresParallel"))
+    }
+
     private func onlyEntry(_ payload: [[String: Any]]) throws -> [String: Any] {
         XCTAssertEqual(payload.count, 1)
         return try XCTUnwrap(payload.first)

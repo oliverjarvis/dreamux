@@ -34,13 +34,49 @@ enum E2EStateDump {
         }
     }
 
+    /// One entry per plan for the flat `plans` dump `stateReply` keeps
+    /// alongside the richer `initiatives` grouping for compatibility.
+    /// Extracted here (like `initiativesPayload`) so the plan-shape
+    /// fields stay unit-testable without standing up the socket server.
+    /// Paths are project-relative (via `relativePath`); `status` is the
+    /// derived lifecycle value.
+    static func flatPlansPayload(
+        _ plans: [PlanDoc],
+        relativePath: (PlanDoc) -> String,
+        status: (PlanDoc) -> PlanStatus
+    ) -> [[String: Any]] {
+        plans.map { plan in
+            var entry: [String: Any] = [
+                "path": relativePath(plan),
+                "status": status(plan).rawValue,
+                "checkedSteps": plan.checkedSteps,
+                "totalSteps": plan.totalSteps,
+            ]
+            addDisposition(&entry, for: plan)
+            return entry
+        }
+    }
+
+    /// Attaches the plan's ordering disposition — `runsAfter` (the blocker
+    /// path when the plan declares `**Runs:** after <plan>`) and
+    /// `declaresParallel: true` (when it opts in via `**Runs:** parallel`)
+    /// — to a payload entry. Both are omitted when absent, matching
+    /// `specPath`'s omitted-not-null convention, so a driver reads a
+    /// missing key as "that disposition wasn't declared" rather than a
+    /// null. They are mutually exclusive on a well-formed header but dumped
+    /// independently, straight from the parsed fields.
+    private static func addDisposition(_ entry: inout [String: Any], for plan: PlanDoc) {
+        if let runsAfter = plan.runsAfter { entry["runsAfter"] = runsAfter }
+        if plan.declaresParallel { entry["declaresParallel"] = true }
+    }
+
     private static func planPayload(
         _ plan: PlanDoc,
         ordinal: Int,
         relativePath: (PlanDoc) -> String,
         status: (PlanDoc) -> PlanStatus
     ) -> [String: Any] {
-        [
+        var entry: [String: Any] = [
             "path": relativePath(plan),
             "status": status(plan).rawValue,
             "ordinal": ordinal,
@@ -57,5 +93,7 @@ enum E2EStateDump {
                 return payload
             },
         ]
+        addDisposition(&entry, for: plan)
+        return entry
     }
 }
