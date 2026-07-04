@@ -31,6 +31,12 @@ enum FileTabKind: String, Sendable {
             // UTType reports svg as an image, but be explicit: NSImage
             // renders it natively and we never want Monaco XML mode.
             return .image
+        case "ts", "mts", "cts", "tsx":
+            // UTType maps `ts` to MPEG-2 transport stream (conforms to
+            // .movie) — in a dev tool the TypeScript family is code.
+            // `m2ts`, the real container extension, still falls through
+            // to the UTType path and stays video.
+            return .code
         case "":
             return .code
         default:

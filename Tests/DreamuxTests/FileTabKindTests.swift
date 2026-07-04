@@ -14,6 +14,16 @@ final class FileTabKindTests: XCTestCase {
         XCTAssertEqual(FileTabKind.kind(forPathExtension: "svg"), .image)
     }
 
+    /// UTType calls `ts` an MPEG-2 transport stream — in a dev tool the
+    /// TypeScript family must be code; only `m2ts` stays video.
+    func testTypeScriptFamilyIsCodeNotVideo() {
+        for ext in ["ts", "mts", "cts", "tsx"] {
+            XCTAssertEqual(FileTabKind.kind(forPathExtension: ext), .code,
+                           "\(ext) must open in Monaco")
+        }
+        XCTAssertEqual(FileTabKind.kind(forPathExtension: "m2ts"), .video)
+    }
+
     func testUTTypeConformanceFallback() {
         XCTAssertEqual(FileTabKind.kind(forPathExtension: "png"), .image)
         XCTAssertEqual(FileTabKind.kind(forPathExtension: "heic"), .image)
