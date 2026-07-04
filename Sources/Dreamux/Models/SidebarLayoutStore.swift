@@ -13,6 +13,10 @@ final class SidebarLayoutStore {
     var plansExpanded: Bool {
         didSet { if plansExpanded != oldValue { save() } }
     }
+    /// The Files section (flat plan/spec file list above Plans & Specs).
+    var filesExpanded: Bool {
+        didSet { if filesExpanded != oldValue { save() } }
+    }
     /// Auto-run parallel plans on discovery (spec: Decisions §1). Default
     /// OFF — a `**Runs:** parallel` plan lands `ready` for an explicit Run
     /// click until the user opts into zero-friction launching.
@@ -30,6 +34,7 @@ final class SidebarLayoutStore {
         tiles = Self.reconcile(loaded?.tiles ?? SidebarTile.allCases)
         featureOrder = loaded?.features ?? []
         plansExpanded = loaded?.plansExpanded ?? true
+        filesExpanded = loaded?.filesExpanded ?? false
         autoRunParallel = loaded?.autoRunParallel ?? false
     }
 
@@ -66,6 +71,7 @@ final class SidebarLayoutStore {
         var tiles: [SidebarTile]
         var features: [String]
         var plansExpanded: Bool?
+        var filesExpanded: Bool?
         var autoRunParallel: Bool?
     }
 
@@ -86,7 +92,8 @@ final class SidebarLayoutStore {
 
     private func save() {
         let payload = Payload(tiles: tiles, features: featureOrder,
-                              plansExpanded: plansExpanded, autoRunParallel: autoRunParallel)
+                              plansExpanded: plansExpanded, filesExpanded: filesExpanded,
+                              autoRunParallel: autoRunParallel)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(payload) else { return }

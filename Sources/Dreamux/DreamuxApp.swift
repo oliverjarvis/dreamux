@@ -23,6 +23,11 @@ struct DreamuxApp: App {
         WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
             ProjectRootView(projectID: $projectID, projects: projects)
         }
+        // One THIN toolbar spanning the whole window (traffic lights
+        // inline, sidebar toggles beside them, no title text) — every
+        // column starts below it instead of a full-height sidebar
+        // swallowing the titlebar.
+        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .commands {
             ProjectCommands()
             FileExplorerCommands()

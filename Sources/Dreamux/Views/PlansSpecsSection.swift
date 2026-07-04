@@ -771,9 +771,12 @@ struct PlansSpecsSection: View {
             .help(isExpanded ? "Collapse phase" : "Expand phase")
 
             // The row itself jumps the plan doc to the phase's `## `
-            // heading (and expands the phase — you clicked into it).
+            // heading and TOGGLES the phase — whatever a click opens, a
+            // click closes.
             Button {
-                withAnimation(.snappy(duration: 0.18)) { expandedPhaseOverrides[key] = true }
+                withAnimation(.snappy(duration: 0.18)) {
+                    expandedPhaseOverrides[key] = !isExpanded
+                }
                 if let line = group.tasks.first?.phaseLine ?? group.tasks.first?.line {
                     onOpenDocAtLine(plan.fileURL, line)
                 }
@@ -1029,7 +1032,10 @@ struct PlansSpecsSection: View {
         @ViewBuilder menu: () -> Menu = { EmptyView() },
         @ViewBuilder body: () -> Body
     ) -> some View {
-        ZStack(alignment: .trailing) {
+        // The controls are LAYOUT siblings of the row body, not an overlay
+        // — the title truncates before ever reaching them, instead of the
+        // hover cluster floating over the text.
+        HStack(spacing: 4) {
             Button { onOpenDoc(doc.fileURL) } label: {
                 body()
                     .padding(.horizontal, 10)
@@ -1038,13 +1044,6 @@ struct PlansSpecsSection: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background {
-                if hoveredDocURL == doc.fileURL {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
-                        .padding(.horizontal, 4)
-                }
-            }
             .contextMenu {
                 if canRun {
                     Button("Run Plan…") { onRunPlan(doc) }
@@ -1076,6 +1075,13 @@ struct PlansSpecsSection: View {
                     }
                 }
                 .padding(.trailing, 12)
+            }
+        }
+        .background {
+            if hoveredDocURL == doc.fileURL {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
             }
         }
         .onHover { hovering in

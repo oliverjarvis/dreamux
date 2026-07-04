@@ -19,7 +19,7 @@ struct ContentView: View {
 
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var showProjectsRail = true
 
     private var store: WorkspaceStore { session.store }
     private var repoStore: RepoStore { session.repoStore }
@@ -36,42 +36,52 @@ struct ContentView: View {
     private var currentProject: Project? { projects.project(id: currentProjectID) }
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            ProjectsRail(
-                projects: projects,
-                currentProjectID: currentProjectID,
-                onSelect: onSwitchProject
-            )
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
-        } detail: {
-            // The project rail stays the native, full-height split-view
-            // sidebar. The Work-Items column reaches the top of the content
-            // area; the compact project header sits right of it, above the
-            // terminal tabs.
-            HSplitView {
-                WorkspaceSidebar(
-                    store: store,
-                    repoStore: repoStore,
-                    runners: runners,
-                    layout: layout,
-                    sidebarMode: $sidebarMode,
-                    docStore: docStore,
-                    planRunner: planRunner,
-                    planQueue: planQueue,
-                    gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
-                    gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
-                    onOpenDoc: openFile,
-                    onOpenDocAtLine: { openFile($0, atLine: $1) },
-                    onCourseCorrectionNudge: { plan, summary, priority in
-                        session.enqueueCourseCorrectionNudge(
-                            plan: plan, summary: summary, priority: priority)
-                    },
-                    autoRunFailure: { session.autoRunFailures[$0] }
+        // Cursor-style chrome: ONE thin toolbar spans the whole window
+        // (traffic lights inline, both sidebar toggles beside them) and
+        // every column — projects rail, work items, content, inspector —
+        // starts below it. No NavigationSplitView: its macOS shape is a
+        // full-height sidebar that swallows the titlebar, exactly what
+        // this layout retires.
+        HStack(spacing: 0) {
+            if showProjectsRail {
+                ProjectsRail(
+                    projects: projects,
+                    currentProjectID: currentProjectID,
+                    onSelect: onSwitchProject
                 )
+                .frame(width: 210)
+                Divider()
+            }
+            HSplitView {
+                VStack(spacing: 0) {
+                    // The project identity heads its own column: the rail
+                    // picks a project, this column shows that project's
+                    // work.
+                    projectHeaderRow
+                    WorkspaceSidebar(
+                        store: store,
+                        repoStore: repoStore,
+                        runners: runners,
+                        layout: layout,
+                        sidebarMode: $sidebarMode,
+                        docStore: docStore,
+                        planRunner: planRunner,
+                        planQueue: planQueue,
+                        gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
+                        gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
+                        onOpenDoc: openFile,
+                        onOpenDocAtLine: { openFile($0, atLine: $1) },
+                        onCourseCorrectionNudge: { plan, summary, priority in
+                            session.enqueueCourseCorrectionNudge(
+                                plan: plan, summary: summary, priority: priority)
+                        },
+                        autoRunFailure: { session.autoRunFailures[$0] }
+                    )
+                }
                 .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 
                 VStack(spacing: 0) {
-                    projectHeaderRow
+                    contextHeaderRow
                     mainPane
                 }
                 // maxHeight keeps the HSplitView vertically greedy in every
@@ -80,15 +90,23 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        // The project identity lives in `projectHeaderRow` above the
-        // terminal tabs, so the macOS titlebar title is blanked.
+        // The window title is the thin toolbar itself; no text title.
         .navigationTitle("")
-        // The file-explorer toggle lives in the native titlebar. It has no
-        // `.keyboardShortcut` on purpose: a shortcut on a toolbar item isn't
-        // dispatched while the Ghostty terminal NSView is first responder
-        // (it just rings the bell) — ⌥⌘E lives in `FileExplorerCommands`
-        // instead (see the comment on `focusedSceneValue` below).
+        // Both sidebar toggles live in the toolbar, Cursor-style. Neither
+        // carries a `.keyboardShortcut` on purpose: a shortcut on a toolbar
+        // item isn't dispatched while the Ghostty terminal NSView is first
+        // responder (it just rings the bell) — ⌥⌘E lives in
+        // `FileExplorerCommands` instead (see `focusedSceneValue` below).
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) { showProjectsRail.toggle() }
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .foregroundStyle(showProjectsRail ? Color.accentColor : Color.secondary)
+                }
+                .help("Toggle projects sidebar")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showFileTree.toggle()
@@ -180,8 +198,8 @@ struct ContentView: View {
     }
 
     /// Compact project identity — a small accent-gradient glyph and the
-    /// project name — pinned above the terminal tabs, right of the
-    /// Work-Items column. Replaces the old full-width hero band.
+    /// project name — heading the Work-Items column (the rail picks the
+    /// project; this column is that project's work).
     private var projectHeaderRow: some View {
         let name = currentProject?.name ?? ""
         return HStack(spacing: 8) {
@@ -211,6 +229,37 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    /// Thin context strip above the tab bar: the title of the plan behind
+    /// the active workspace (ledger record first, filename-derived branch
+    /// as fallback), else the workspace's own name for ad-hoc work, else
+    /// nothing worth saying (fresh project).
+    private var contextHeaderRow: some View {
+        HStack(spacing: 6) {
+            Text(activeContextTitle ?? " ")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var activeContextTitle: String? {
+        guard let workspace = store.activeWorkspace else { return nil }
+        if let plan = docStore.plans.first(where: { plan in
+            let path = docStore.relativePath(of: plan)
+            let feature = docStore.ledger.recordForPlan(path)?.featureName
+                ?? PlanDoc.branchName(forFileName: plan.fileURL.lastPathComponent)
+            return feature == workspace.name
+        }) {
+            return plan.title
+        }
+        return workspace.name
     }
 
     /// Open a file (clicked in the tree) as a Monaco tab in the active

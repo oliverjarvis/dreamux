@@ -42,7 +42,6 @@ struct WorkspaceSidebar: View {
     @State private var isWorking = false
     @State private var pendingClose: Workspace?
     @State private var pendingMerge: Workspace?
-    @State private var repositoriesExpanded = false
     @State private var switchNotice: SwitchNotice?
     @State private var runningPlan: PlanDoc?
     @State private var showNewPlan = false
@@ -191,6 +190,8 @@ struct WorkspaceSidebar: View {
                 onReorder: { layout.persistTiles() }
             )
 
+            filesSection
+
             PlansSpecsSection(
                 docStore: docStore,
                 layout: layout,
@@ -233,48 +234,88 @@ struct WorkspaceSidebar: View {
 
             switchNoticeIfAny
 
-            // Ad hoc work items — workspaces with no plan behind them
-            // (plan-backed workspaces render only on their Plans & Specs
-            // rows). Two independent concerns drive this section:
-            //   1. Showing the rows — ad-hoc workspaces are repo-independent:
-            //      `store.addWorkspace()` makes repo-less scratch workspaces
-            //      (⌘⇧T "New Workspace", the Web Browser tile, planning
-            //      sessions), and this list is their only home, so it must
-            //      render whenever any ad-hoc workspace exists.
-            //   2. Reaching the `+` — the header hosts the sole Add Feature
-            //      affordance, which needs a repository to branch from; when
-            //      repos exist we also render the section so that `+` (and
-            //      the empty-state copy that points at it) is reachable.
-            // So render on either condition; the `+` itself is disabled (not
-            // hidden) when there are no repositories. The row list is further
-            // gated on there actually being ad-hoc workspaces.
-            if !adHocWorkspaces.isEmpty || !repoStore.repositories.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    adHocHeader
-                    if !adHocWorkspaces.isEmpty {
-                        VStack(spacing: 2) {
-                            ForEach(adHocWorkspaces) { workspace in
-                                featureRow(workspace) { featureRowBody(workspace) }
-                                    .onDrag {
-                                        draggingWorkspace = workspace
-                                        return NSItemProvider(object: workspace.id.uuidString as NSString)
-                                    }
-                                    .onDrop(of: [.text], delegate: ReorderDropDelegate(
-                                        item: workspace,
-                                        items: adHocWorkspacesBinding,
-                                        dragging: $draggingWorkspace,
-                                        onReorder: { store.persistFeatureOrder() }
-                                    ))
-                            }
-                        }
-                    }
-                }
-            }
+            // The Ad hoc section is retired for now (user call, 2026-07-04)
+            // — plan-less scratch workspaces are reachable via ⌘1-9/⌘⇧T
+            // only, and Add Feature is dormant with it. `adHocWorkspaces`
+            // and its tests stay for when it returns.
 
             VStack(alignment: .leading, spacing: 6) {
+                // Repositories are always visible — the list is short and
+                // hiding it made "why can't I run a plan?" undiagnosable.
                 repositoriesHeader
-                if repositoriesExpanded {
-                    card { repoRows }
+                card {
+                    repoRows
+                    addRepositoryRow
+                }
+            }
+        }
+    }
+
+    /// Full-width "＋ Add repository" row at the bottom of the repo card —
+    /// the affordance a bare `+` icon was too easy to miss for.
+    private var addRepositoryRow: some View {
+        Button {
+            showAddRepo = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Add repository")
+                    .font(.callout)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Collapsible flat list of every plan/spec/doc file in the project —
+    /// the raw-files view; Plans & Specs below it stays the work-centric
+    /// grouping.
+    private var filesSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) { layout.filesExpanded.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(layout.filesExpanded ? 90 : 0))
+                    Text("Files")
+                        .font(.system(size: 11, weight: .semibold))
+                        .kerning(0.6)
+                        .textCase(.uppercase)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if layout.filesExpanded {
+                VStack(spacing: 1) {
+                    ForEach(docStore.docs) { doc in
+                        Button { onOpenDoc(doc.fileURL) } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc.text")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                                Text(doc.fileURL.lastPathComponent)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
@@ -506,74 +547,25 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// The Ad hoc section header: the section label plus the `+` that opens
-    /// the Add Feature sheet — the only ad-hoc creation entry point now that
-    /// the Features list is gone. Creating a feature needs a repository to
-    /// branch from, so the `+` is disabled (not hidden) with no repositories,
-    /// keeping the affordance visible for the empty-state copy to point at.
-    /// Mirrors `repositoriesHeader`'s trailing `+`.
-    private var adHocHeader: some View {
+    // MARK: - Repositories
+
+    /// Always-visible section label — the repo list is short, and hiding
+    /// it made "why can't I run a plan?" undiagnosable. Adding lives in
+    /// the full-width `addRepositoryRow` at the bottom of the card.
+    private var repositoriesHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text("Ad hoc")
+            Text("Repositories")
                 .font(.system(size: 11, weight: .semibold))
                 .kerning(0.6)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Button { showAddFeature = true } label: {
-                Image(systemName: isWorking ? "hourglass" : "plus")
+            if isWorking {
+                Image(systemName: "hourglass")
                     .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 18, height: 18)
                     .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
+                    .help("Working…")
             }
-            .buttonStyle(.plain)
-            .disabled(repoStore.repositories.isEmpty || isWorking)
-            .help(repoStore.repositories.isEmpty
-                  ? "Add a repository before creating features."
-                  : (isWorking ? "Adding…" : "New Feature"))
-        }
-        .padding(.bottom, 2)
-    }
-
-    // MARK: - Repositories
-
-    private var repositoriesHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Button {
-                withAnimation(.snappy(duration: 0.18)) { repositoriesExpanded.toggle() }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(repositoriesExpanded ? 90 : 0))
-                    Text("Repositories")
-                        .font(.system(size: 11, weight: .semibold))
-                        .kerning(0.6)
-                        .textCase(.uppercase)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                if !repositoriesExpanded {
-                    withAnimation(.snappy(duration: 0.18)) { repositoriesExpanded = true }
-                }
-                showAddRepo = true
-            } label: {
-                Image(systemName: isWorking ? "hourglass" : "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 18, height: 18)
-                    .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isWorking)
-            .help(isWorking ? "Working…" : "Add Repository")
         }
         .padding(.bottom, 2)
     }
