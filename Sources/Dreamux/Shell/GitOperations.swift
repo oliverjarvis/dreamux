@@ -401,6 +401,29 @@ enum GitOperations {
             .map(String.init)
     }
 
+    /// The top-level paths a worktree currently touches vs its checkout —
+    /// the "territory" a running plan occupies, for the intake digest.
+    /// Uses `diff --name-only` (the parseable form of `git diff --stat`),
+    /// maps each changed path to its first segment, and returns the deduped
+    /// set in stable order. Tolerant by contract: a missing worktree or any
+    /// git failure yields an empty list, so intake treats "can't tell" the
+    /// same as "nothing to report" rather than failing the whole digest.
+    static func diffStatTopLevelPaths(in worktreeURL: URL) async -> [String] {
+        guard let output = try? await runGit(
+            ["diff", "--name-only"],
+            in: worktreeURL
+        ) else { return [] }
+
+        var seen: Set<String> = []
+        var topLevel: [String] = []
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let head = line.split(separator: "/", maxSplits: 1).first.map(String.init)
+                ?? String(line)
+            if seen.insert(head).inserted { topLevel.append(head) }
+        }
+        return topLevel
+    }
+
     /// Abort an in-progress merge so the worktree returns to a clean
     /// state. Best-effort.
     static func abortMerge(in worktreeURL: URL) async {
