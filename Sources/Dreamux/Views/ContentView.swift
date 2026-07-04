@@ -24,6 +24,8 @@ struct ContentView: View {
     /// Session-only, like the old HSplitView divider position.
     @State private var workItemsWidth: CGFloat = 250
     @State private var splitDragBaseWidth: CGFloat?
+    /// New Project sheet fired from the collapsed rail stub.
+    @State private var showCreateProject = false
 
     private var store: WorkspaceStore { session.store }
     private var repoStore: RepoStore { session.repoStore }
@@ -64,15 +66,10 @@ struct ContentView: View {
                 .frame(width: 210)
             } else {
                 // Collapsed stub: a slim glass column keeping the traffic
-                // lights and the toggle — the card never hosts the lights
-                // (they collided with its header), and the toggle stays
-                // in one stable place in both states.
-                VStack(spacing: 10) {
-                    Color.clear.frame(height: 26)
-                    railToggle
-                    Spacer(minLength: 0)
-                }
-                .frame(width: 76)
+                // lights and the toggle — plus the projects as glyph
+                // buttons (tooltip = full name), a mini switcher.
+                collapsedRailStub
+                    .frame(width: 76)
             }
             // Custom split, NOT HSplitView: the NSSplitView behind it
             // restores its own pane sizes and OVERFLOWS whatever width
@@ -248,6 +245,66 @@ struct ContentView: View {
             }
     }
 
+    /// The collapsed rail: traffic lights float over the top, then the
+    /// toggle, then one tinted glyph per project (click switches, hover
+    /// tooltip carries the full name), and New Project at the bottom.
+    private var collapsedRailStub: some View {
+        VStack(spacing: 10) {
+            Color.clear.frame(height: 26)
+            railToggle
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 8) {
+                    ForEach(projects.projects) { project in
+                        stubProjectButton(project)
+                    }
+                }
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+            }
+            Button {
+                showCreateProject = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New Project")
+            .padding(.bottom, 12)
+        }
+        .sheet(isPresented: $showCreateProject) {
+            CreateProjectSheet(store: projects) { project in
+                onSwitchProject(project.id)
+            }
+        }
+    }
+
+    private func stubProjectButton(_ project: Project) -> some View {
+        let selected = project.id == currentProjectID
+        return Button {
+            onSwitchProject(project.id)
+        } label: {
+            ProjectGlyph(name: project.name, size: 34)
+                .opacity(selected ? 1 : 0.55)
+                .overlay {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(project.name)
+        .contextMenu {
+            Button("Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
+            }
+        }
+    }
+
     /// Sidebar-left toggle — lives at the trailing edge of the rail's top
     /// zone while the rail shows, and at the leading edge of the card's
     /// project header when it's hidden. No `.keyboardShortcut` on purpose
@@ -272,20 +329,7 @@ struct ContentView: View {
     private var projectHeaderRow: some View {
         let name = currentProject?.name ?? ""
         return HStack(spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.accentColor, Color.accentColor.opacity(0.55)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                Text(String(name.prefix(1)).uppercased())
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 20, height: 20)
+            ProjectGlyph(name: name, size: 20)
 
             Text(name)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -386,6 +430,44 @@ enum SidebarMode: Hashable {
     case workspace
     case run(workspaceID: UUID)
     case signals
+}
+
+// MARK: - Project glyph
+
+/// The project's letter badge, tinted deterministically from its name so
+/// every project keeps a stable, distinct color — shared by the card's
+/// project header and the collapsed rail's switcher buttons.
+struct ProjectGlyph: View {
+    let name: String
+    let size: CGFloat
+
+    private static let palette: [Color] = [
+        .blue, .purple, .pink, .orange, .teal, .indigo, .green, .red,
+    ]
+
+    private var tint: Color {
+        // Stable across launches (String.hashValue is per-process seeded).
+        let sum = name.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
+        let index = abs(sum) % Self.palette.count
+        return Self.palette[index]
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [tint, tint.opacity(0.55)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            Text(String(name.prefix(1)).uppercased())
+                .font(.system(size: size * 0.42, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+        }
+        .frame(width: size, height: size)
+    }
 }
 
 // MARK: - Inset panel chrome
