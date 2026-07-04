@@ -77,6 +77,15 @@ enum CourseCorrection {
     /// the change on its own — no manual refresh, and this never touches
     /// `DocStore`. `date` is injected so the write stays deterministic in
     /// tests.
+    ///
+    /// Known limitation: this is a read-modify-write of a file the
+    /// running agent also whole-file-writes (checkbox ticks, and Monaco
+    /// saves) — a write landing inside our few-ms window is clobbered,
+    /// last writer wins. Accepted: the window is tiny, ticks are sparse,
+    /// and a lost tick self-heals when the agent next saves. Callers on
+    /// a RUNNING plan should still prefer applying while the feature's
+    /// shells are quiescent when they're already waiting for quiescence
+    /// to deliver the nudge.
     @MainActor
     static func apply(
         to fileURL: URL,
