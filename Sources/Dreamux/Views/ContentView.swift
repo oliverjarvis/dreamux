@@ -77,11 +77,7 @@ struct ContentView: View {
                         autoRunFailure: { session.autoRunFailures[$0] }
                     )
                 }
-                .panelCard()
-                .padding(.leading, showProjectsRail ? 4 : 8)
-                .padding(.trailing, 4)
-                .padding(.vertical, 8)
-                .frame(minWidth: 228, idealWidth: 258, maxWidth: 388)
+                .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 
                 VStack(spacing: 0) {
                     contextHeaderRow
@@ -91,15 +87,18 @@ struct ContentView: View {
                 // mode — without a height-flexible child the split collapses
                 // under the header row.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .panelCard()
-                .padding(.leading, 4)
-                .padding(.trailing, 8)
-                .padding(.vertical, 8)
             }
+            // ONE full-height card holding the work-items column AND the
+            // content/tabs together (connected, no gutter between them),
+            // floating on the glass backdrop next to the rail.
+            .panelCard()
+            .padding(.leading, showProjectsRail ? 2 : 8)
+            .padding(.trailing, 8)
+            .padding(.vertical, 8)
         }
-        // The inset backdrop the panels float on — the rail sits flat on
-        // it; the gutters between cards are the separation (no hairlines).
-        .background(Color(nsColor: .underPageBackgroundColor).ignoresSafeArea())
+        // Behind-window vibrancy: the rail sits on real glass (desktop
+        // blur), like the reference chrome.
+        .background(VisualEffectBackground().ignoresSafeArea())
         // The window title is the thin toolbar itself; no text title.
         .navigationTitle("")
         // Both sidebar toggles live in the toolbar, Cursor-style. Neither
@@ -319,6 +318,20 @@ enum SidebarMode: Hashable {
 }
 
 // MARK: - Inset panel chrome
+
+/// Behind-window sidebar vibrancy — the desktop blurs through, which
+/// SwiftUI's in-window Materials can't do.
+struct VisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
 
 extension View {
     /// The floating-panel treatment (Codex/Linear-style): the view becomes
