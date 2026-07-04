@@ -272,9 +272,9 @@ struct WorkspaceSidebar: View {
         .buttonStyle(.plain)
     }
 
-    /// Collapsible flat list of every plan/spec/doc file in the project —
-    /// the raw-files view; Plans & Specs below it stays the work-centric
-    /// grouping.
+    /// Collapsible raw-files view of the orchestration docs, grouped by
+    /// their subfolder (plans/, specs/, loose) — Plans & Specs below it
+    /// stays the work-centric grouping.
     private var filesSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
@@ -285,7 +285,7 @@ struct WorkspaceSidebar: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(layout.filesExpanded ? 90 : 0))
-                    Text("Files")
+                    Text("Orchestration Files")
                         .font(.system(size: 11, weight: .semibold))
                         .kerning(0.6)
                         .textCase(.uppercase)
@@ -297,28 +297,58 @@ struct WorkspaceSidebar: View {
             .buttonStyle(.plain)
 
             if layout.filesExpanded {
-                VStack(spacing: 1) {
-                    ForEach(docStore.docs) { doc in
-                        Button { onOpenDoc(doc.fileURL) } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "doc.text")
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.tertiary)
-                                Text(doc.fileURL.lastPathComponent)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1).truncationMode(.middle)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 3)
-                            .contentShape(Rectangle())
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(orchestrationFolders, id: \.folder) { group in
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                            Text(group.folder)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                            Spacer(minLength: 0)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 4)
+                        .padding(.bottom, 1)
+                        ForEach(group.docs) { doc in
+                            Button { onOpenDoc(doc.fileURL) } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "doc.text")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.tertiary)
+                                    Text(doc.fileURL.lastPathComponent)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.leading, 24)
+                                .padding(.trailing, 10)
+                                .padding(.vertical, 3)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// Orchestration docs grouped by their project-relative subfolder
+    /// (`docs/plans`, `docs/specs`, …), folders sorted by name and files
+    /// by filename within each.
+    private var orchestrationFolders: [(folder: String, docs: [PlanDoc])] {
+        Dictionary(grouping: docStore.docs) { doc in
+            let dir = (docStore.relativePath(of: doc) as NSString).deletingLastPathComponent
+            return dir.isEmpty ? "." : dir
+        }
+        .sorted { $0.key < $1.key }
+        .map { (folder: $0.key,
+                docs: $0.value.sorted {
+                    $0.fileURL.lastPathComponent < $1.fileURL.lastPathComponent
+                }) }
     }
 
     private static let browserHomepage = URL(string: "https://www.google.com")!

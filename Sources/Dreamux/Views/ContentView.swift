@@ -226,7 +226,9 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        // Exactly the rail header's height, so the bottom hairline runs
+        // continuously across both columns.
+        .frame(height: 36)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
     }

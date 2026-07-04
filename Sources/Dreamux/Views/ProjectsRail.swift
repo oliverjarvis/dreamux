@@ -23,29 +23,41 @@ struct ProjectsRail: View {
 
     var body: some View {
         List(selection: selectionBinding) {
-            Section("Projects") {
-                ForEach(projects.projects) { project in
-                    Label(project.name, systemImage: "folder")
-                        .tag(project.id)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(project.rootPath.path)
-                        .contextMenu {
-                            Button("Open in New Window") {
-                                openInNewWindow(project.id)
-                            }
-                            Button("Show in Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
-                            }
-                            Divider()
-                            Button("Move to Trash…", role: .destructive) {
-                                pendingDelete = project
-                            }
+            ForEach(projects.projects) { project in
+                Label(project.name, systemImage: "folder")
+                    .tag(project.id)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(project.rootPath.path)
+                    .contextMenu {
+                        Button("Open in New Window") {
+                            openInNewWindow(project.id)
                         }
-                }
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
+                        }
+                        Divider()
+                        Button("Move to Trash…", role: .destructive) {
+                            pendingDelete = project
+                        }
+                    }
             }
         }
         .listStyle(.sidebar)
+        // Header band matching the work-items column's project header
+        // (same height, same bottom hairline) so the horizontal separator
+        // runs continuously across both columns instead of jumping.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Text("Projects")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .overlay(alignment: .bottom) { Divider() }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             newProjectBar
         }
