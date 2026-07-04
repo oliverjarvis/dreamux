@@ -11,6 +11,7 @@ enum AppearanceSettings {
     static let backdropDimKey = "appearanceBackdropDim"
     static let backdropTintKey = "appearanceBackdropTint"  // hex, "" = black
     static let cardColorKey = "appearanceCardColor"        // hex, "" = system
+    static let cardOpacityKey = "appearanceCardOpacity"    // 0.5...1
 
     /// "#RRGGBB" → Color (sRGB). Empty/garbage → nil.
     static func color(fromHex hex: String) -> Color? {
@@ -44,6 +45,7 @@ struct SettingsView: View {
     @AppStorage(AppearanceSettings.backdropDimKey) private var backdropDim = 0.28
     @AppStorage(AppearanceSettings.backdropTintKey) private var backdropTintHex = ""
     @AppStorage(AppearanceSettings.cardColorKey) private var cardColorHex = ""
+    @AppStorage(AppearanceSettings.cardOpacityKey) private var cardOpacity = 1.0
 
     /// ColorPicker bindings bridged onto the persisted hex strings.
     private func colorBinding(_ hex: Binding<String>, fallback: Color) -> Binding<Color> {
@@ -92,6 +94,16 @@ struct SettingsView: View {
                     selection: colorBinding($backdropTintHex, fallback: .black),
                     supportsOpacity: false
                 )
+                LabeledContent("Card transparency") {
+                    HStack(spacing: 10) {
+                        Slider(value: $cardOpacity, in: 0.5...1.0)
+                            .frame(width: 180)
+                        Text("\(Int(cardOpacity * 100))%")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                }
                 LabeledContent("Card background") {
                     HStack(spacing: 10) {
                         ColorPicker(
@@ -109,7 +121,7 @@ struct SettingsView: View {
             } header: {
                 Text("Colors & transparency")
             } footer: {
-                Text("With glass off, the backdrop is the solid backdrop color. Everything applies immediately.")
+                Text("With glass off, the backdrop is the solid backdrop color. Card transparency lets the glass show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
                     .foregroundStyle(.secondary)
             }
         }

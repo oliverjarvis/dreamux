@@ -52,6 +52,19 @@ final class TabSession: Identifiable {
             builder.withCustom("keybind", "alt+super+down=unbind")
         }
 
+        // Card transparency (appearance setting): Ghostty paints its own
+        // background, so a translucent card needs the surface itself to
+        // go translucent too. Read at tab creation — existing surfaces
+        // keep the opacity they were born with.
+        let cardOpacity = UserDefaults.standard
+            .object(forKey: "appearanceCardOpacity") as? Double ?? 1.0
+        let applyOpacity: (inout TerminalConfiguration.Builder) -> Void = { builder in
+            if cardOpacity < 1 {
+                builder.withCustom(
+                    "background-opacity", String(format: "%.2f", cardOpacity))
+            }
+        }
+
         let theme = TerminalTheme(
             light: TerminalConfiguration { builder in
                 builder.withFontSize(14)
@@ -59,6 +72,7 @@ final class TabSession: Identifiable {
                 builder.withCursorStyleBlink(true)
                 builder.withWindowPaddingX(8)
                 builder.withWindowPaddingY(8)
+                applyOpacity(&builder)
                 releaseGhosttyShortcuts(&builder)
             },
             dark: TerminalConfiguration { builder in
@@ -67,6 +81,7 @@ final class TabSession: Identifiable {
                 builder.withCursorStyleBlink(true)
                 builder.withWindowPaddingX(8)
                 builder.withWindowPaddingY(8)
+                applyOpacity(&builder)
                 releaseGhosttyShortcuts(&builder)
             }
         )

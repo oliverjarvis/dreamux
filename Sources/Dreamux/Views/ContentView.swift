@@ -37,13 +37,15 @@ struct ContentView: View {
     @AppStorage(AppearanceSettings.backdropDimKey) private var backdropDim = 0.28
     @AppStorage(AppearanceSettings.backdropTintKey) private var backdropTintHex = ""
     @AppStorage(AppearanceSettings.cardColorKey) private var cardColorHex = ""
+    @AppStorage(AppearanceSettings.cardOpacityKey) private var cardOpacity = 1.0
 
     private var backdropTint: Color {
         AppearanceSettings.color(fromHex: backdropTintHex) ?? .black
     }
     private var cardFill: Color {
-        AppearanceSettings.color(fromHex: cardColorHex)
-            ?? Color(nsColor: .windowBackgroundColor)
+        (AppearanceSettings.color(fromHex: cardColorHex)
+            ?? Color(nsColor: .windowBackgroundColor))
+            .opacity(cardOpacity)
     }
 
     private var store: WorkspaceStore { session.store }
