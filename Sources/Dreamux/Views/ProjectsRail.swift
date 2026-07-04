@@ -56,7 +56,14 @@ struct ProjectsRail: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
-            .overlay(alignment: .bottom) { Divider() }
+            // Explicit hairline, not Divider(): inside safeAreaInset
+            // content a Divider infers a VERTICAL orientation and renders
+            // as a floating centered tick.
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor))
+                    .frame(height: 1)
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             newProjectBar

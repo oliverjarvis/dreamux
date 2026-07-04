@@ -50,7 +50,13 @@ struct ContentView: View {
                     onSelect: onSwitchProject
                 )
                 .frame(width: 210)
-                Divider()
+                // Explicit full-height hairline for the column edge —
+                // a bare Divider() here got lost against the two
+                // differing background materials.
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
             }
             HSplitView {
                 VStack(spacing: 0) {
