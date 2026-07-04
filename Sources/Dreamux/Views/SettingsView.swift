@@ -7,8 +7,8 @@ enum AppearanceSettings {
     static let cardShadowKey = "appearanceCardShadow"
     static let edgeInsetsKey = "appearanceEdgeInsets"
     static let cornerRadiusKey = "appearanceCornerRadius"
-    static let glassKey = "appearanceGlassBackdrop"
-    static let backdropDimKey = "appearanceBackdropDim"
+    /// 1 = raw desktop glass, 0 = solid backdrop color.
+    static let backdropTransparencyKey = "appearanceBackdropTransparency"
     static let backdropTintKey = "appearanceBackdropTint"  // hex, "" = black
     static let cardColorKey = "appearanceCardColor"        // hex, "" = system
     static let cardOpacityKey = "appearanceCardOpacity"    // 0.5...1
@@ -41,8 +41,8 @@ struct SettingsView: View {
     @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
     @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
     @AppStorage(AppearanceSettings.cornerRadiusKey) private var cornerRadius = 16.0
-    @AppStorage(AppearanceSettings.glassKey) private var glassBackdrop = true
-    @AppStorage(AppearanceSettings.backdropDimKey) private var backdropDim = 0.28
+    @AppStorage(AppearanceSettings.backdropTransparencyKey)
+    private var backdropTransparency = 0.72
     @AppStorage(AppearanceSettings.backdropTintKey) private var backdropTintHex = ""
     @AppStorage(AppearanceSettings.cardColorKey) private var cardColorHex = ""
     @AppStorage(AppearanceSettings.cardOpacityKey) private var cardOpacity = 1.0
@@ -77,20 +77,18 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Glass backdrop (desktop blur)", isOn: $glassBackdrop)
-                LabeledContent("Backdrop dimming") {
+                LabeledContent("Backdrop transparency") {
                     HStack(spacing: 10) {
-                        Slider(value: $backdropDim, in: 0...0.9)
+                        Slider(value: $backdropTransparency, in: 0...1)
                             .frame(width: 180)
-                            .disabled(!glassBackdrop)
-                        Text("\(Int(backdropDim * 100))%")
+                        Text("\(Int(backdropTransparency * 100))%")
                             .font(.callout.monospacedDigit())
                             .foregroundStyle(.secondary)
                             .frame(width: 44, alignment: .trailing)
                     }
                 }
                 ColorPicker(
-                    glassBackdrop ? "Backdrop tint" : "Backdrop color",
+                    "Backdrop color",
                     selection: colorBinding($backdropTintHex, fallback: .black),
                     supportsOpacity: false
                 )
@@ -121,7 +119,7 @@ struct SettingsView: View {
             } header: {
                 Text("Colors & transparency")
             } footer: {
-                Text("With glass off, the backdrop is the solid backdrop color. Card transparency lets the glass show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
+                Text("Backdrop transparency runs from solid color (0%) to raw desktop glass (100%). Card transparency lets the backdrop show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
                     .foregroundStyle(.secondary)
             }
         }

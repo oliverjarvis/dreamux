@@ -29,12 +29,14 @@ struct ContentView: View {
     @State private var splitDragBaseWidth: CGFloat?
     /// New Project sheet fired from the collapsed rail stub.
     @State private var showCreateProject = false
+    /// The active workspace's git HEAD summary (header chip) — polled.
+    @State private var gitStatus: GitHeadStatus?
     /// Appearance knobs (Settings window) — applied live.
     @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
     @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
     @AppStorage(AppearanceSettings.cornerRadiusKey) private var cornerRadius = 16.0
-    @AppStorage(AppearanceSettings.glassKey) private var glassBackdrop = true
-    @AppStorage(AppearanceSettings.backdropDimKey) private var backdropDim = 0.28
+    @AppStorage(AppearanceSettings.backdropTransparencyKey)
+    private var backdropTransparency = 0.72
     @AppStorage(AppearanceSettings.backdropTintKey) private var backdropTintHex = ""
     @AppStorage(AppearanceSettings.cardColorKey) private var cardColorHex = ""
     @AppStorage(AppearanceSettings.cardOpacityKey) private var cardOpacity = 1.0
@@ -146,20 +148,13 @@ struct ContentView: View {
         // window's physical top edge — the rail's 38pt top zone provides
         // the traffic-light clearance instead.
         .ignoresSafeArea(edges: .top)
-        // Backdrop per the appearance settings: glass (behind-window
-        // vibrancy) dimmed by a tint scrim — the scrim keeps the backdrop
-        // reliably darker than the card on any wallpaper — or, with
-        // glass off, the solid backdrop color.
+        // Backdrop per the appearance settings: behind-window glass with
+        // the backdrop color layered at (1 - transparency) — 100% is raw
+        // desktop blur, 0% is the solid color.
         .background {
-            Group {
-                if glassBackdrop {
-                    VisualEffectBackground()
-                        .overlay(backdropTint.opacity(backdropDim))
-                } else {
-                    backdropTint
-                }
-            }
-            .ignoresSafeArea()
+            VisualEffectBackground()
+                .overlay(backdropTint.opacity(1 - backdropTransparency))
+                .ignoresSafeArea()
         }
         .inspector(isPresented: $showFileTree) {
             FileTreePanel(
@@ -210,6 +205,15 @@ struct ContentView: View {
             docStore.reconcileLedger(
                 existingFeatureNames: Set(store.workspaces.map(\.name)))
             planQueue.startPolling()
+        }
+        // Header git chip: re-resolve on workspace changes and keep a
+        // slow poll so external commits/edits show up. The chip data is
+        // three cheap git calls against the active worktree.
+        .task(id: store.activeID) {
+            while !Task.isCancelled {
+                gitStatus = await resolveGitStatus()
+                try? await Task.sleep(for: .seconds(5))
+            }
         }
         .onChange(of: e2eBridge?.pendingSidebarMode) { _, _ in
             consumePendingSidebarModeIfAny()
@@ -390,6 +394,38 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
+            // Git chip: the active workspace's worktree branch, HEAD
+            // short-SHA, and working-tree diff totals.
+            if let git = gitStatus {
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                        Text(git.branch)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(git.shortSHA)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                    if git.insertions > 0 || git.deletions > 0 {
+                        HStack(spacing: 4) {
+                            Text("+\(git.insertions)")
+                                .foregroundStyle(.green)
+                            Text("−\(git.deletions)")
+                                .foregroundStyle(.red)
+                        }
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    }
+                }
+                .font(.system(size: 11))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule().fill(Color.primary.opacity(0.05)))
+                .help("HEAD of the active workspace's worktree")
+            }
             // The file-explorer toggle lives in the card's own header,
             // reference-style — there is no window toolbar. ⌥⌘E is the
             // shortcut path (FileExplorerCommands).
@@ -411,6 +447,26 @@ struct ContentView: View {
         .frame(height: 36)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
+    }
+
+    /// The header chip's data: find the active workspace's worktree (its
+    /// branch across linked repos, else the first repo's default-branch
+    /// checkout for scratch workspaces) and summarize HEAD + diff totals.
+    private func resolveGitStatus() async -> GitHeadStatus? {
+        guard let workspace = store.activeWorkspace else { return nil }
+        let repos = repoStore.repositories
+        let candidates = workspace.linkedRepoIDs.isEmpty
+            ? repos
+            : repos.filter { workspace.linkedRepoIDs.contains($0.name) }
+        guard let repo = candidates.first else { return nil }
+        var worktree = await GitOperations.worktreeURL(
+            forBranch: workspace.name, in: repo.rootURL)
+        if worktree == nil {
+            worktree = await GitOperations.worktreeURL(
+                forBranch: repo.defaultBranch, in: repo.rootURL)
+        }
+        guard let worktree else { return nil }
+        return await GitOperations.headStatus(in: worktree)
     }
 
     private var activeContextTitle: String? {

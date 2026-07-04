@@ -624,3 +624,62 @@ private final class OutputAccumulator: @unchecked Sendable {
         return lines
     }
 }
+
+// MARK: - Header status chip
+
+/// HEAD summary for the card header's git chip: branch, short SHA, and
+/// working-tree diff totals (staged + unstaged vs HEAD).
+struct GitHeadStatus: Equatable, Sendable {
+    var branch: String
+    var shortSHA: String
+    var insertions: Int
+    var deletions: Int
+}
+
+extension GitOperations {
+    /// The worktree checked out on `branch` for the repo at `repoRootURL`
+    /// (porcelain `worktree list`), or nil when no worktree has it.
+    static func worktreeURL(forBranch branch: String, in repoRootURL: URL) async -> URL? {
+        guard let output = try? await runGit(
+            ["worktree", "list", "--porcelain"], in: repoRootURL)
+        else { return nil }
+        var path: URL?
+        for raw in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("worktree ") {
+                path = URL(fileURLWithPath: String(line.dropFirst("worktree ".count)))
+            } else if line.hasPrefix("branch refs/heads/") {
+                if String(line.dropFirst("branch refs/heads/".count)) == branch {
+                    return path
+                }
+            }
+        }
+        return nil
+    }
+
+    static func headStatus(in worktreeURL: URL) async -> GitHeadStatus? {
+        guard let sha = try? await runGit(
+            ["rev-parse", "--short", "HEAD"], in: worktreeURL)
+        else { return nil }
+        let branch = (try? await runGit(
+            ["rev-parse", "--abbrev-ref", "HEAD"], in: worktreeURL)) ?? ""
+        let numstat = (try? await runGit(
+            ["diff", "HEAD", "--numstat"], in: worktreeURL)) ?? ""
+        var insertions = 0
+        var deletions = 0
+        for line in numstat.split(separator: "\n") {
+            let parts = line.split(separator: "\t")
+            // Binary files report "-" for both counts; Int() skips them.
+            if parts.count >= 2 {
+                insertions += Int(parts[0]) ?? 0
+                deletions += Int(parts[1]) ?? 0
+            }
+        }
+        return GitHeadStatus(
+            branch: branch.trimmingCharacters(in: .whitespacesAndNewlines),
+            shortSHA: sha.trimmingCharacters(in: .whitespacesAndNewlines),
+            insertions: insertions,
+            deletions: deletions
+        )
+    }
+}
