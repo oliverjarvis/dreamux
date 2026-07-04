@@ -301,7 +301,8 @@ final class ProjectSession {
             projectID: project.id,
             docStore: docStore,
             planRunner: planRunner,
-            planQueue: planQueue
+            planQueue: planQueue,
+            nudgeCenter: nudgeCenter
         )
     }
 }

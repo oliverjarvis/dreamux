@@ -184,7 +184,12 @@ Field notes:
   Both follow `specPath`'s omitted-not-null convention — `runsAfter` is
   **omitted** when the plan names no blocker, `declaresParallel`
   **omitted** when the plan doesn't explicitly opt into parallel — and
-  are mutually exclusive on a well-formed header.
+  are mutually exclusive on a well-formed header. A plan with a parked
+  live nudge (a course correction or intake-integrate re-read waiting on
+  the agent's quiescence) also carries `pendingNudges` — the count of
+  nudges parked for it (0 or 1; at most one parks per plan). It follows
+  the same omitted-not-null convention: **omitted** (never `0`) when no
+  nudge is parked. See `courseCorrect`.
 - `initiatives` mirrors `DocStore.initiatives` — the same work grouped
   into families (spec + ordered plans + supporting docs) the sidebar
   renders. Entries come in **store order** (newest member date first),
@@ -194,9 +199,10 @@ Field notes:
   initiative has no spec), `docPaths` (supporting docs — roadmaps,
   extra specs), and `plans`, each with its 1-based `ordinal`
   (execution order), derived `status` (as in `plans`), the same
-  `runsAfter` / `declaresParallel` disposition fields the flat `plans`
-  entries carry (each omitted when not declared), and a per-`tasks`
-  checkbox rollup (`title`, `checked`, `total`). `tasks` reports every
+  `runsAfter` / `declaresParallel` disposition and `pendingNudges` fields
+  the flat `plans` entries carry (each omitted when not declared / no
+  nudge parked), and a per-`tasks` checkbox rollup (`title`, `checked`,
+  `total`). `tasks` reports every
   parsed heading — a heading with no checkboxes dumps as `total: 0` even
   though the sidebar hides such rows, and its `title` may be empty for
   steps that precede the first heading. Each task also carries `phase`,
@@ -621,6 +627,52 @@ advances the queue past it does it drop out of `entries`.
 ← {"ok":true,"state":"atGate","entries":["docs/plans/2026-07-02-x.md"],
    "current":"docs/plans/2026-07-02-x.md"}
 ```
+
+### `courseCorrect`
+
+File a course correction against a plan, driving the same submit as the
+sidebar's *Course correct…* sheet (its context-menu entry points can't
+be harness-driven, so this command is the only way to exercise the
+flow). Writes a tracked **fix-task** into the plan file — `### Task N.k:
+Fix — <summary> *(course correction, <date>)*` with a single checkbox
+step, at the anchor phase's end (same `CourseCorrection.apply` the sheet
+calls) — and, when the plan is **live** (`running`/`awaitingReview`),
+parks the priority-worded nudge on the plan's live agent, delivered
+under the usual quiescence + gate rail.
+
+`{"cmd": "courseCorrect", "plan": "docs/plans/…md", "text": "…",
+"priority": "now"|"next"|"queue", "task"?: "…", "phase"?: "…"}`
+
+- `plan` — the target plan's project-relative path (must match a plan in
+  the current doc scan).
+- `text` — the observation; its first line becomes the fix-task heading
+  summary, the whole text the step body. Must be non-empty.
+- `priority` — the nudge wording: `now` (pause the current task, do the
+  fix, resume), `next` (finish the current task, then the fix), `queue`
+  (pick the fix up in document order).
+- `task`? — anchor the fix-task under a specific task, matched by its
+  exact heading title or a **unique** substring. Ambiguous or unmatched
+  substrings error.
+- `phase`? — anchor under a `## ` phase by name. Ignored when `task` is
+  given (a task is the more specific anchor).
+- Neither `task` nor `phase` → the fix-task lands in the plan's current
+  phase (the plan-row default).
+
+The fix-task is written for any plan; the nudge is parked only for a
+live one — an idle/ready/merged plan gets the tracked task and
+`nudged: false`. A nudge parked while the plan sits at a merge gate
+stays parked (the gate rail), observable as `pendingNudges` on the
+plan's `state` entry.
+
+```
+→ {"cmd":"courseCorrect","plan":"docs/plans/2026-07-02-x.md",
+   "text":"the retry backoff is unbounded","priority":"next",
+   "task":"Task 3"}
+← {"ok":true,"path":"docs/plans/2026-07-02-x.md","nudged":true}
+```
+
+Errors (`{"ok":false,"error":…}`): unknown `plan`, empty `text`, an
+invalid `priority` token, and an ambiguous or unmatched `task`.
 
 ### `quit`
 

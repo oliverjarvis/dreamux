@@ -12,10 +12,15 @@ enum E2EStateDump {
     /// project-relative (via `relativePath`); `specPath` is omitted when
     /// the initiative has no spec. Each plan carries its 1-based `ordinal`
     /// (execution order within the family) and a per-task checkbox rollup.
+    ///
+    /// `pendingNudges` reports the count of parked live nudges for a plan
+    /// (Task 4); it defaults to "none" so the pre-nudge call sites keep
+    /// their exact shape.
     static func initiativesPayload(
         _ initiatives: [Initiative],
         relativePath: (PlanDoc) -> String,
-        status: (PlanDoc) -> PlanStatus
+        status: (PlanDoc) -> PlanStatus,
+        pendingNudges: (PlanDoc) -> Int = { _ in 0 }
     ) -> [[String: Any]] {
         initiatives.map { initiative in
             var entry: [String: Any] = [
@@ -24,7 +29,8 @@ enum E2EStateDump {
                 "docPaths": initiative.supportingDocs.map(relativePath),
                 "plans": initiative.plans.enumerated().map { index, plan in
                     planPayload(plan, ordinal: index + 1,
-                                relativePath: relativePath, status: status)
+                                relativePath: relativePath, status: status,
+                                pendingNudges: pendingNudges)
                 },
             ]
             if let spec = initiative.spec {
@@ -43,7 +49,8 @@ enum E2EStateDump {
     static func flatPlansPayload(
         _ plans: [PlanDoc],
         relativePath: (PlanDoc) -> String,
-        status: (PlanDoc) -> PlanStatus
+        status: (PlanDoc) -> PlanStatus,
+        pendingNudges: (PlanDoc) -> Int = { _ in 0 }
     ) -> [[String: Any]] {
         plans.map { plan in
             var entry: [String: Any] = [
@@ -53,6 +60,7 @@ enum E2EStateDump {
                 "totalSteps": plan.totalSteps,
             ]
             addDisposition(&entry, for: plan)
+            addPendingNudges(&entry, count: pendingNudges(plan))
             return entry
         }
     }
@@ -70,11 +78,20 @@ enum E2EStateDump {
         if plan.declaresParallel { entry["declaresParallel"] = true }
     }
 
+    /// Attach `pendingNudges` when the plan has at least one parked live
+    /// nudge, omitting it (not `0`) otherwise — the same omitted-not-null
+    /// convention `runsAfter`/`specPath` follow, so a driver reads a missing
+    /// key as "no nudge parked".
+    private static func addPendingNudges(_ entry: inout [String: Any], count: Int) {
+        if count > 0 { entry["pendingNudges"] = count }
+    }
+
     private static func planPayload(
         _ plan: PlanDoc,
         ordinal: Int,
         relativePath: (PlanDoc) -> String,
-        status: (PlanDoc) -> PlanStatus
+        status: (PlanDoc) -> PlanStatus,
+        pendingNudges: (PlanDoc) -> Int
     ) -> [String: Any] {
         var entry: [String: Any] = [
             "path": relativePath(plan),
@@ -94,6 +111,7 @@ enum E2EStateDump {
             },
         ]
         addDisposition(&entry, for: plan)
+        addPendingNudges(&entry, count: pendingNudges(plan))
         return entry
     }
 }

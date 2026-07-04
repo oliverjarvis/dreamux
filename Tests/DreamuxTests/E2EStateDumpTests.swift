@@ -252,6 +252,60 @@ final class E2EStateDumpTests: XCTestCase {
         XCTAssertFalse(payload[2].keys.contains("declaresParallel"))
     }
 
+    // MARK: - Pending nudges (Task 4)
+
+    /// The flat `plans` dump carries `pendingNudges` for a plan with a
+    /// parked course-correction/re-read nudge, and OMITS it (never `0`,
+    /// matching `runsAfter`'s convention) for a plan with none.
+    func testFlatPlansPayloadReportsPendingNudgesOmittingZero() throws {
+        let nudged = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-nudged.md"),
+            contents: "# Nudged Implementation Plan\n\n### Task 1: Only\n- [ ] a")
+        let quiet = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-quiet.md"),
+            contents: "# Quiet Implementation Plan\n\n### Task 1: Only\n- [ ] a")
+
+        let payload = E2EStateDump.flatPlansPayload(
+            [nudged, quiet], relativePath: relativePath, status: { _ in .running },
+            pendingNudges: { $0.fileURL.lastPathComponent == "2026-07-08-nudged.md" ? 1 : 0 })
+
+        XCTAssertEqual(payload[0]["pendingNudges"] as? Int, 1)
+        XCTAssertFalse(payload[1].keys.contains("pendingNudges"),
+                       "a plan with no parked nudge omits the key, never dumps 0")
+    }
+
+    /// The initiatives view carries `pendingNudges` per plan on the same
+    /// omitted-when-0 convention.
+    func testInitiativePlanReportsPendingNudgesOmittingZero() throws {
+        let running = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-phase-1.md"),
+            contents: "# Phase 1 Implementation Plan\n\n### Task 1: Only\n- [ ] a")
+        let queued = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-phase-2.md"),
+            contents: "# Phase 2 Implementation Plan\n\n### Task 1: Only\n- [ ] a")
+        let initiative = Initiative(
+            id: "widget", title: "Widget", spec: nil,
+            plans: [running, queued], supportingDocs: [])
+
+        let entry = try onlyEntry(E2EStateDump.initiativesPayload(
+            [initiative], relativePath: relativePath, status: { _ in .running },
+            pendingNudges: { $0.fileURL.lastPathComponent == "2026-07-08-phase-1.md" ? 1 : 0 }))
+        let plans = try XCTUnwrap(entry["plans"] as? [[String: Any]])
+        XCTAssertEqual(plans[0]["pendingNudges"] as? Int, 1)
+        XCTAssertFalse(plans[1].keys.contains("pendingNudges"))
+    }
+
+    /// The parameter defaults to "no nudges", so the field is absent when a
+    /// caller doesn't thread a nudge center (the pre-Task-4 call sites).
+    func testPendingNudgesOmittedByDefault() throws {
+        let plan = PlanDoc.parse(
+            fileURL: URL(fileURLWithPath: "/proj/docs/plans/2026-07-08-plain.md"),
+            contents: "# Plain Implementation Plan\n\n### Task 1: Only\n- [ ] a")
+        let payload = E2EStateDump.flatPlansPayload(
+            [plan], relativePath: relativePath, status: { _ in .ready })
+        XCTAssertFalse(payload[0].keys.contains("pendingNudges"))
+    }
+
     private func onlyEntry(_ payload: [[String: Any]]) throws -> [String: Any] {
         XCTAssertEqual(payload.count, 1)
         return try XCTUnwrap(payload.first)

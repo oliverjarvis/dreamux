@@ -51,6 +51,7 @@ final class E2EProjectHandles {
     weak var docStore: DocStore?
     weak var planRunner: PlanRunCoordinator?
     weak var planQueue: PlanQueueController?
+    weak var nudgeCenter: PlanNudgeCenter?
     let bridge = E2EBridge()
 
     init(projectID: UUID) {
@@ -120,18 +121,23 @@ final class E2ERegistry {
         handles.signals = signals
     }
 
-    /// Called from ContentView.onAppear alongside the run stores.
+    /// Called from ContentView.onAppear alongside the run stores. The nudge
+    /// center rides along so the `state` dump can report `pendingNudges` per
+    /// plan and `courseCorrect` can park into the same live center the sheet
+    /// delivers through.
     func registerDocStores(
         projectID: UUID,
         docStore: DocStore,
         planRunner: PlanRunCoordinator,
-        planQueue: PlanQueueController
+        planQueue: PlanQueueController,
+        nudgeCenter: PlanNudgeCenter
     ) {
         guard E2EMode.isActive else { return }
         let handles = handles(forProject: projectID)
         handles.docStore = docStore
         handles.planRunner = planRunner
         handles.planQueue = planQueue
+        handles.nudgeCenter = nudgeCenter
     }
 
     func unregister(projectID: UUID) {

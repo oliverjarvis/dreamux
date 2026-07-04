@@ -97,6 +97,8 @@ enum E2ECommands {
             return handleListDocs()
         case "runPlan":
             return await handleRunPlan(request)
+        case "courseCorrect":
+            return try courseCorrect(request: request)
         case "enqueuePlan":
             return handleQueueMutation(request) { $0.enqueue($1) }
         case "startQueue":
@@ -207,18 +209,26 @@ enum E2ECommands {
             let featureExists: (String) -> Bool = { name in
                 workspaceStore.workspaces.contains { $0.name == name }
             }
+            // Parked live nudges for a plan (Task 4): keyed by the plan's
+            // project-relative path in the center, at most one per plan.
+            let pendingNudges: (PlanDoc) -> Int = { plan in
+                guard let center = handles.nudgeCenter else { return 0 }
+                return center.pending[docStore.relativePath(of: plan)] == nil ? 0 : 1
+            }
             // The flat `plans` dump stays for compatibility; the
             // `initiatives` grouping is the richer, structured view. Both
             // go through E2EStateDump so their shape is unit-tested.
             payload["plans"] = E2EStateDump.flatPlansPayload(
                 docStore.plans,
                 relativePath: { docStore.relativePath(of: $0) },
-                status: { docStore.status(for: $0, featureExists: featureExists) }
+                status: { docStore.status(for: $0, featureExists: featureExists) },
+                pendingNudges: pendingNudges
             )
             payload["initiatives"] = E2EStateDump.initiativesPayload(
                 docStore.initiatives,
                 relativePath: { docStore.relativePath(of: $0) },
-                status: { docStore.status(for: $0, featureExists: featureExists) }
+                status: { docStore.status(for: $0, featureExists: featureExists) },
+                pendingNudges: pendingNudges
             )
         } else {
             payload["plans"] = [Any]()
@@ -546,6 +556,81 @@ enum E2ECommands {
         } catch {
             return ["ok": false, "error": error.localizedDescription]
         }
+    }
+
+    /// File a course correction against a plan, driving the SAME submit the
+    /// course-correct sheet runs (context menus aren't harness-drivable, so
+    /// this is the only way to exercise the flow end to end). It resolves
+    /// the plan + anchor + priority through `CourseCorrectCommand` (the pure
+    /// resolver the unit tests pin), then writes the tracked fix-task via
+    /// `CourseCorrection.apply` and — only for a live plan — parks the
+    /// priority-worded nudge on the project's `PlanNudgeCenter`, reusing
+    /// `PlanPrompts.courseCorrection` and the center's own delivery path.
+    /// No parallel writer or nudge engine: the same functions the sheet
+    /// calls, in the same order.
+    ///
+    /// The nudge is parked only when the plan reads `running` or
+    /// `awaitingReview` (the sheet's gate), via the center's own
+    /// queue-gate-folding `status` closure; the gate rail and quiescence
+    /// discipline then live in `deliverPending`, exactly as in production.
+    /// Reply: `{"ok": true, "path": <relative>, "nudged": <bool>}`.
+    private static func courseCorrect(request: [String: Any]) throws -> [String: Any] {
+        let handles = try activeHandles()
+        guard let docStore = handles.docStore else {
+            throw CommandError(message: "no doc store registered")
+        }
+        docStore.refresh()
+
+        let resolved: CourseCorrectCommand.Resolved
+        do {
+            resolved = try CourseCorrectCommand.resolve(
+                plans: docStore.plans,
+                relativePath: { docStore.relativePath(of: $0) },
+                plan: request["plan"] as? String,
+                task: request["task"] as? String,
+                phase: request["phase"] as? String,
+                text: request["text"] as? String,
+                priority: request["priority"] as? String)
+        } catch let error as CourseCorrectCommand.ResolveError {
+            throw CommandError(message: error.message)
+        }
+
+        let summary = CourseCorrection.summaryLine(from: resolved.text)
+        try CourseCorrection.apply(
+            to: resolved.doc.fileURL, anchor: resolved.anchor,
+            summary: summary, body: resolved.text, date: correctionDate())
+
+        let path = docStore.relativePath(of: resolved.doc)
+        var nudged = false
+        if let center = handles.nudgeCenter,
+           let status = center.status(path),
+           status == .running || status == .awaitingReview,
+           let feature = docStore.ledger.recordForPlan(path)?.featureName {
+            center.enqueue(
+                planPath: path,
+                featureName: feature,
+                prompt: PlanPrompts.courseCorrection(
+                    taskTitle: summary, priority: resolved.priority, planRelativePath: path),
+                createdAt: Date())
+            center.deliverPending()
+            nudged = true
+        }
+        return ["ok": true, "path": path, "nudged": nudged]
+    }
+
+    /// `yyyy-MM-dd` for the fix-task's `*(course correction, <date>)*`
+    /// marker — the real clock, matching `PlansSpecsSection`'s formatter, so
+    /// the written task is byte-identical to a sheet submission on the same
+    /// day.
+    private static let correctionDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static func correctionDate() -> String {
+        correctionDateFormatter.string(from: Date())
     }
 
     /// Shared plumbing for `enqueuePlan`/`startQueue`/`stopQueue`: resolve
