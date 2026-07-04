@@ -37,6 +37,28 @@ enum ClaudePromptDriver {
             // not sending anything at all.
             command = Self.claudeCommand(prompt)
         }
+        deliver(command, into: session)
+    }
+
+    /// Type a single line into an ALREADY-RUNNING agent's REPL — the live
+    /// `claude` session a plan is executing in — echo-verified. Unlike
+    /// `send`, this does NOT wrap the text in a `claude …` invocation (the
+    /// agent is up and waiting for input; the line IS the message) and it
+    /// does not shell-quote — the bytes are typed verbatim into the REPL,
+    /// then a newline submits. Used by `PlanNudgeCenter` to fold appended
+    /// tasks and course corrections into a running plan through the same
+    /// quiescence + echo discipline `send` uses.
+    static func type(_ line: String, into session: TabSession) {
+        deliver(line + "\n", into: session)
+    }
+
+    /// The shared echo-verified delivery loop. A still-booting zle silently
+    /// DISCARDS typed input (its terminal setup runs tcsetattr with
+    /// TCSAFLUSH) and no timing heuristic is safe, so delivery is verified
+    /// by echo: wait for the shell to fall quiet, send, then watch for ANY
+    /// output newer than the send — silence means the bytes were flushed,
+    /// so wait and send again; the first send that lands ends the loop.
+    private static func deliver(_ command: String, into session: TabSession) {
         Task {
             let deadline = Date().addingTimeInterval(45)
             // Don't even attempt before the shell has said anything —

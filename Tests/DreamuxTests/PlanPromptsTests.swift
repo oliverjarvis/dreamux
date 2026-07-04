@@ -137,4 +137,65 @@ final class PlanPromptsTests: XCTestCase {
             idea: "x", intakeDigest: Self.sampleDigest)
         XCTAssertTrue(p.contains("Disposition:"))
     }
+
+    // MARK: - Nudge prompts (Task 2)
+
+    /// Fix now interrupts: pause the current task, do the fix, then
+    /// resume. Names the plan file; one typed REPL line.
+    func testCourseCorrectionFixNowPausesAndResumes() {
+        let p = PlanPrompts.courseCorrection(
+            taskTitle: "Task 3.1: Fix — rope not severed",
+            priority: .now,
+            planRelativePath: "docs/plans/2026-07-04-snip.md")
+        XCTAssertTrue(p.contains("docs/plans/2026-07-04-snip.md"))
+        XCTAssertTrue(p.contains("Task 3.1: Fix — rope not severed"))
+        XCTAssertTrue(p.lowercased().contains("pause"))
+        XCTAssertTrue(p.lowercased().contains("resume"))
+        XCTAssertFalse(p.contains("\n"), "a nudge is a single typed REPL line")
+    }
+
+    /// Fix next finishes the current task cleanly, then does the fix
+    /// before anything else.
+    func testCourseCorrectionFixNextFinishesCurrentFirst() {
+        let p = PlanPrompts.courseCorrection(
+            taskTitle: "Fix the thing", priority: .next,
+            planRelativePath: "docs/plans/x.md")
+        XCTAssertTrue(p.contains("docs/plans/x.md"))
+        XCTAssertTrue(p.lowercased().contains("finish your current task"))
+        XCTAssertTrue(p.lowercased().contains("before anything else"))
+        XCTAssertFalse(p.contains("\n"))
+    }
+
+    /// Add to queue reaches the fix in document order.
+    func testCourseCorrectionAddToQueuePicksUpInOrder() {
+        let p = PlanPrompts.courseCorrection(
+            taskTitle: "Fix the thing", priority: .queue,
+            planRelativePath: "docs/plans/x.md")
+        XCTAssertTrue(p.contains("docs/plans/x.md"))
+        XCTAssertTrue(p.lowercased().contains("appended"))
+        XCTAssertTrue(p.lowercased().contains("document order"))
+        XCTAssertFalse(p.contains("\n"))
+    }
+
+    /// A multi-line task title collapses to a single line so the whole
+    /// nudge stays one typed REPL line.
+    func testCourseCorrectionCollapsesMultilineTaskTitle() {
+        let p = PlanPrompts.courseCorrection(
+            taskTitle: "Fix\n  the   rope\nnow", priority: .next,
+            planRelativePath: "docs/plans/x.md")
+        XCTAssertTrue(p.contains("Fix the rope now"))
+        XCTAssertFalse(p.contains("\n"))
+    }
+
+    /// The intake-integrate re-read nudge names the appended range and
+    /// the plan file, one typed line.
+    func testPlanUpdatedNamesRangeAndFile() {
+        let p = PlanPrompts.planUpdated(
+            taskRange: "Task 5–Task 7", planRelativePath: "docs/plans/x.md")
+        XCTAssertTrue(p.contains("docs/plans/x.md"))
+        XCTAssertTrue(p.contains("Task 5–Task 7"))
+        XCTAssertTrue(p.lowercased().contains("re-read"))
+        XCTAssertTrue(p.lowercased().contains("appended"))
+        XCTAssertFalse(p.contains("\n"))
+    }
 }

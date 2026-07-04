@@ -210,6 +210,7 @@ final class WorkspaceSession {
         fileDirtyObservers.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
         if planningTabID == tabId { planningTabID = nil }
+        if agentTabID == tabId { agentTabID = nil }
     }
 
     private func handleDidSplitPane(newPane: PaneID) {
@@ -280,6 +281,30 @@ final class WorkspaceSession {
         controller.createTab(title: title, icon: icon)
         nextTabCwdOverride = nil
         guard let id = lastCreatedTabID else { return nil }
+        return tabSessions[id]
+    }
+
+    /// Tab id of this feature's plan-execution agent terminal — the tab a
+    /// plan run typed its kickoff into. Tracked like `planningTabID` so the
+    /// nudge center can reach the live agent to type re-read / course-
+    /// correction prompts; cleared when the tab closes.
+    private var agentTabID: TabID?
+
+    /// Open the plan-execution agent terminal and remember it, so a later
+    /// nudge can be typed into this same live agent. Same mechanics as
+    /// `openAgentTab`, plus the tracking.
+    @discardableResult
+    func openPlanAgentTab(at path: String, title: String, icon: String) -> TabSession? {
+        let tab = openAgentTab(at: path, title: title, icon: icon)
+        agentTabID = lastCreatedTabID
+        return tab
+    }
+
+    /// This feature's live plan-execution agent terminal, or nil when none
+    /// is open (never run, or the tab was closed). The nudge center types
+    /// into it.
+    func agentTabSession() -> TabSession? {
+        guard let id = agentTabID else { return nil }
         return tabSessions[id]
     }
 

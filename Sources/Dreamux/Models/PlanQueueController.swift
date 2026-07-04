@@ -23,6 +23,13 @@ final class PlanQueueController {
     @ObservationIgnored var requestMerge: (String) -> Void = { _ in }
     @ObservationIgnored var now: () -> Date = Date.init
 
+    /// Additive side-effect run on every poll cycle, independent of the
+    /// queue's state machine (wired in `ProjectSession` to retry parked
+    /// nudge delivery). The queue's transitions are untouched by it — it is
+    /// a plain "the poller ticked" hook, the natural quiet-moment retry the
+    /// spec calls for.
+    @ObservationIgnored var onPoll: () -> Void = {}
+
     // MARK: - State
 
     private(set) var entries: [String]
@@ -190,6 +197,7 @@ final class PlanQueueController {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 guard let self else { return }
+                self.onPoll()
                 if self.state != .idle { self.tick() }
             }
         }

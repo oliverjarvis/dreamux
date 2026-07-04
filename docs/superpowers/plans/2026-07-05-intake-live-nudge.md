@@ -21,11 +21,11 @@
 
 ### Task 2: Nudge delivery engine
 
-- [ ] **Step 1:** `Sources/Dreamux/Shell/PlanNudgeCenter.swift` (`@MainActor @Observable`): holds pending nudges keyed by plan path — `{featureName, prompt, createdAt}`. `deliverIfQuiescent(session:)` sends via the same echo-verified pattern `ClaudePromptDriver` uses into the feature's agent tab; retries from `PlanQueueController`'s existing poll tick (additive hook, no state-machine change) and from a session-quiescence check. Gate rail enforced here: skip delivery while the plan's status is `atGate`/`awaitingReview`.
-- [ ] **Step 2:** Nudge prompts in `PlanPrompts`: `courseCorrection(taskTitle:priority:)` — Fix now ("pause your current task, do <task> first, then resume"), Fix next ("finish your current task, then do <task> before anything else"), Add to queue ("new task appended; pick it up in order") — and `planUpdated(taskRange:)` for intake-integrate appends.
-- [ ] **Step 3:** Appended-task detection for intake-integrate: DocStore refresh callback compares totals for running plans (previous parse vs new); growth without a course-correction marker → `planUpdated` nudge enqueued.
-- [ ] **Step 4:** Tests: nudge-center state machine (park → deliver on quiescence, gate rail, no double-delivery), prompt content per priority, growth detection (injected before/after PlanDocs).
-- [ ] **Step 5: `swift test` green.**
+- [x] **Step 1:** `Sources/Dreamux/Shell/PlanNudgeCenter.swift` (`@MainActor @Observable`): holds pending nudges keyed by plan path — `{featureName, prompt, createdAt}`. `deliverIfQuiescent(session:)` sends via the same echo-verified pattern `ClaudePromptDriver` uses into the feature's agent tab; retries from `PlanQueueController`'s existing poll tick (additive hook, no state-machine change) and from a session-quiescence check. Gate rail enforced here: skip delivery while the plan's status is `atGate`/`awaitingReview`.
+- [x] **Step 2:** Nudge prompts in `PlanPrompts`: `courseCorrection(taskTitle:priority:)` — Fix now ("pause your current task, do <task> first, then resume"), Fix next ("finish your current task, then do <task> before anything else"), Add to queue ("new task appended; pick it up in order") — and `planUpdated(taskRange:)` for intake-integrate appends.
+- [x] **Step 3:** Appended-task detection for intake-integrate: DocStore refresh callback compares totals for running plans (previous parse vs new); growth without a course-correction marker → `planUpdated` nudge enqueued.
+- [x] **Step 4:** Tests: nudge-center state machine (park → deliver on quiescence, gate rail, no double-delivery), prompt content per priority, growth detection (injected before/after PlanDocs).
+- [x] **Step 5: `swift test` green.**
 
 ### Task 3: Course-correct sheet + entry points
 

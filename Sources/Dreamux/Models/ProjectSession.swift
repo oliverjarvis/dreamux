@@ -26,6 +26,7 @@ final class ProjectSession {
     let docStore: DocStore
     let planRunner: PlanRunCoordinator
     let planQueue: PlanQueueController
+    let nudgeCenter: PlanNudgeCenter
 
     /// Non-e2e channel for the plan queue's "merge and continue" gate
     /// action: `WorkspaceSidebar` owns the merge sheet's presentation
@@ -120,6 +121,8 @@ final class ProjectSession {
             )
         }
 
+        let nudgeCenter = PlanNudgeCenter()
+
         self.store = store
         self.repoStore = repoStore
         self.layout = layout
@@ -130,6 +133,7 @@ final class ProjectSession {
         self.docStore = docStore
         self.planRunner = planRunner
         self.planQueue = planQueue
+        self.nudgeCenter = nudgeCenter
 
         // Needs `self` for the gate channel, so it's wired after the
         // stored properties. Weak: the queue is owned by this bundle and
@@ -146,6 +150,37 @@ final class ProjectSession {
             // bundle-local channel the sidebar also observes.
             self.pendingGateMergeWorkspaceID = workspace.id
         }
+
+        // Live nudges (Phase 2): the center parks a one-line prompt for a
+        // running plan and delivers it into that feature's agent tab under
+        // the same quiescence + echo discipline every programmatic send
+        // obeys. Every terminal-touching effect is a closure resolved here;
+        // the center itself stays PTY-free (and unit-testable).
+        nudgeCenter.status = { [weak self] path in
+            guard let self else { return nil }
+            // Fold the queue's merge gate into `awaitingReview` so the gate
+            // rail holds even after a course correction adds an unchecked
+            // step (which would otherwise flip the derived status back to
+            // `running` and let a nudge slip past the gate).
+            if self.planQueue.state == .atGate, self.planQueue.currentPlanPath == path {
+                return .awaitingReview
+            }
+            guard let doc = self.docStore.docs.first(
+                where: { self.docStore.relativePath(of: $0) == path }) else { return nil }
+            return self.docStore.status(for: doc) { name in
+                self.store.workspaces.contains { $0.name == name }
+            }
+        }
+        nudgeCenter.isQuiescent = { [weak self] path in
+            self?.agentTab(forPlan: path)?.isShellQuiescent(for: 0.4) ?? false
+        }
+        nudgeCenter.send = { [weak self] path, prompt in
+            guard let tab = self?.agentTab(forPlan: path) else { return }
+            ClaudePromptDriver.type(prompt, into: tab)
+        }
+        // Retry parked nudges on the queue's existing poll cadence — an
+        // additive hook, no state-machine change.
+        planQueue.onPoll = { [weak self] in self?.nudgeCenter.deliverPending() }
 
         // Intake enactment: every docs rescan (1) auto-enqueues any freshly
         // discovered `**Runs:** after <blocker>` plan behind its blocker, and
@@ -174,7 +209,28 @@ final class ProjectSession {
                 hasAutoRun: { self.planQueue.hasAutoRun($0) },
                 markAutoRun: { self.planQueue.markAutoRun($0) },
                 launch: { self.autoRunPlan($0) })
+            // Detect intake-integrate appends to running plans and park a
+            // re-read nudge, then try to deliver any parked nudge now that
+            // the scan is fresh (the refresh-side retry the spec calls for,
+            // alongside the queue poll tick).
+            self.nudgeCenter.noteRefresh(
+                docs: self.docStore.docs,
+                relativePath: { self.docStore.relativePath(of: $0) },
+                status: statusOf,
+                featureName: { self.docStore.ledger.recordForPlan($0)?.featureName },
+                now: Date.init)
+            self.nudgeCenter.deliverPending()
         }
+    }
+
+    /// The live plan-execution agent terminal for a plan path, via the
+    /// ledger's feature name and that feature's workspace session — the
+    /// tab the nudge center probes for quiescence and types into.
+    private func agentTab(forPlan planPath: String) -> TabSession? {
+        guard let feature = docStore.ledger.recordForPlan(planPath)?.featureName,
+              let workspace = store.workspaces.first(where: { $0.name == feature })
+        else { return nil }
+        return store.session(for: workspace).agentTabSession()
     }
 
     /// Launch a plan under the auto-run toggle: the same worktree+terminal

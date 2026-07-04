@@ -56,4 +56,19 @@ final class WorkspaceSessionFileTabTests: XCTestCase {
         XCTAssertNotNil(returned)
         XCTAssertEqual(returned?.cwd, sandbox.root.path)
     }
+
+    @MainActor
+    func testOpenPlanAgentTabIsReachableForNudges() {
+        let session = WorkspaceSession(
+            workspace: Workspace(name: "f", workingDirectory: sandbox.root.path)
+        )
+        XCTAssertNil(session.agentTabSession(), "no agent tab before a plan runs")
+
+        let opened = session.openPlanAgentTab(
+            at: sandbox.root.path, title: "plan: x", icon: "text.badge.checkmark")
+        // The plan agent tab is tracked, so the nudge center can reach the
+        // same live agent to type into.
+        XCTAssertNotNil(opened)
+        XCTAssertIdentical(session.agentTabSession(), opened)
+    }
 }

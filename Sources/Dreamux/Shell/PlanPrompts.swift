@@ -1,5 +1,22 @@
 import Foundation
 
+/// Delivery priority for a course correction (spec: "Phase 2 — course
+/// correction" — Fix now / Fix next / Add to queue, default Fix next).
+/// Raw values double as the e2e `courseCorrect` command's `priority`
+/// tokens (`now|next|queue`).
+enum CorrectionPriority: String, CaseIterable, Sendable {
+    case now, next, queue
+
+    /// Human label for the sheet's picker (Task 3).
+    var label: String {
+        switch self {
+        case .now: return "Fix now"
+        case .next: return "Fix next"
+        case .queue: return "Add to queue"
+        }
+    }
+}
+
 /// The prompts Dreamux types into claude sessions for plan work. Kept
 /// as pure functions so tests can pin the contract (file paths named,
 /// checkbox-ticking instruction present) without a PTY.
@@ -81,6 +98,48 @@ enum PlanPrompts {
         reference checkouts for grounding exact file paths and code.
         """
         return withIntake(base, digest: intakeDigest)
+    }
+
+    /// The course-correction nudge typed into a RUNNING plan's live agent
+    /// (spec: "Phase 2 — course correction"). One typed REPL line carrying
+    /// the chosen delivery priority: Fix now interrupts the current task,
+    /// Fix next waits for it to finish, Add to queue reaches the fix in
+    /// document order. Names the plan file and the fix-task so the agent
+    /// can locate the tracked task the app just wrote. `taskTitle` collapses
+    /// to one line — the whole nudge stays a single line the driver types
+    /// into the agent's REPL.
+    static func courseCorrection(
+        taskTitle: String,
+        priority: CorrectionPriority,
+        planRelativePath: String
+    ) -> String {
+        let task = collapse(taskTitle)
+        switch priority {
+        case .now:
+            return "Course correction filed in \(planRelativePath): pause your current task, "
+                + "do \"\(task)\" first, then resume where you left off."
+        case .next:
+            return "Course correction filed in \(planRelativePath): finish your current task "
+                + "cleanly, then do \"\(task)\" before anything else."
+        case .queue:
+            return "Course correction filed in \(planRelativePath): a new task \"\(task)\" was "
+                + "appended — pick it up in document order after your current work."
+        }
+    }
+
+    /// The re-read nudge for intake-integrate appends to a RUNNING plan
+    /// (spec: "Phase 2 — integrating into a RUNNING plan"). One typed REPL
+    /// line naming the plan file and the appended task range; the agent
+    /// re-reads the plan and folds the new work into what's left.
+    static func planUpdated(taskRange: String, planRelativePath: String) -> String {
+        "The plan file \(planRelativePath) has been updated — new tasks were appended "
+            + "(\(taskRange)). Re-read the plan and fold them into your remaining work."
+    }
+
+    /// Collapse every run of whitespace (including newlines) to one space
+    /// and trim, so a multi-line title becomes a single typed line.
+    private static func collapse(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
     /// Append the intake block to a kickoff prompt, or return it unchanged

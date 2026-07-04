@@ -74,7 +74,7 @@ final class PlanRunCoordinator {
             : PlanPrompts.runPlan(planRelativePath: pathInFeature, docsLinkName: docsLink)
 
         let session = workspaceStore.session(for: workspace)
-        if let tab = session.openAgentTab(
+        if let tab = session.openPlanAgentTab(
             at: featureDir.path,
             title: "plan: \(branchName)",
             icon: "text.badge.checkmark") {
