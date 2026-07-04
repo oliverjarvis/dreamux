@@ -45,6 +45,16 @@ struct ProjectsRail: View {
                         }
                     }
             }
+            // New Project rides directly below the last project, one of
+            // the rows rather than a pinned bottom bar.
+            Button {
+                showCreate = true
+            } label: {
+                Label("New Project", systemImage: "plus")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Create a new project")
         }
         .listStyle(.sidebar)
         // The rail sits flat on the window's inset backdrop, like the
@@ -79,9 +89,6 @@ struct ProjectsRail: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
             }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            newProjectBar
         }
         .onAppear { projects.refresh() }
         .sheet(isPresented: $showCreate) {
@@ -128,25 +135,6 @@ struct ProjectsRail: View {
                 if let id = newValue, id != currentProjectID { onSelect(id) }
             }
         )
-    }
-
-    /// "＋ New Project" pinned beneath the list as a native bottom bar.
-    private var newProjectBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-            Button {
-                showCreate = true
-            } label: {
-                Label("New Project", systemImage: "plus")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-            }
-            .buttonStyle(.plain)
-            .help("Create a new project")
-        }
-        
     }
 
     /// Delete and, when the row was the project this window is showing,

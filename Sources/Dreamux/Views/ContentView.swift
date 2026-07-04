@@ -260,22 +260,29 @@ struct ContentView: View {
                     ForEach(projects.projects) { project in
                         stubProjectButton(project)
                     }
+                    // New Project rides directly below the last glyph, a
+                    // tile in the same shape as the project buttons.
+                    Button {
+                        showCreateProject = true
+                    } label: {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(
+                                Color.white.opacity(0.18), style:
+                                StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .frame(width: 34, height: 34)
+                            .overlay {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("New Project")
                 }
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity)
             }
-            Button {
-                showCreateProject = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("New Project")
-            .padding(.bottom, 12)
         }
         .sheet(isPresented: $showCreateProject) {
             CreateProjectSheet(store: projects) { project in
