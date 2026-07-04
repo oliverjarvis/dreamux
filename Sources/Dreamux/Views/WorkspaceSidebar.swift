@@ -36,6 +36,9 @@ struct WorkspaceSidebar: View {
     /// forwarded straight into `PlansSpecsSection`.
     let autoRunFailure: (String) -> String?
 
+    /// Collapsed subfolders inside Orchestration Files (absent = open).
+    @State private var collapsedFolders: Set<String> = []
+    @State private var hoveredOrchestrationURL: URL?
     @State private var showAddFeature = false
     @State private var showAddRepo = false
     @State private var addError: String?
@@ -299,36 +302,11 @@ struct WorkspaceSidebar: View {
             if layout.filesExpanded {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(orchestrationFolders, id: \.folder) { group in
-                        HStack(spacing: 6) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                            Text(group.folder)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.top, 4)
-                        .padding(.bottom, 1)
-                        ForEach(group.docs) { doc in
-                            Button { onOpenDoc(doc.fileURL) } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "doc.text")
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(.tertiary)
-                                    Text(doc.fileURL.lastPathComponent)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1).truncationMode(.middle)
-                                    Spacer(minLength: 0)
-                                }
-                                .padding(.leading, 24)
-                                .padding(.trailing, 10)
-                                .padding(.vertical, 3)
-                                .contentShape(Rectangle())
+                        orchestrationFolderRow(group)
+                        if !collapsedFolders.contains(group.folder) {
+                            ForEach(group.docs) { doc in
+                                orchestrationFileRow(doc)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -336,9 +314,85 @@ struct WorkspaceSidebar: View {
         }
     }
 
+    private func orchestrationFolderRow(
+        _ group: (folder: String, docs: [PlanDoc])
+    ) -> some View {
+        let collapsed = collapsedFolders.contains(group.folder)
+        return Button {
+            withAnimation(.snappy(duration: 0.18)) {
+                if collapsed { collapsedFolders.remove(group.folder) }
+                else { collapsedFolders.insert(group.folder) }
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+                Image(systemName: "folder")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Text(group.folder)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text("\(group.docs.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func orchestrationFileRow(_ doc: PlanDoc) -> some View {
+        Button { onOpenDoc(doc.fileURL) } label: {
+            HStack(spacing: 7) {
+                Image(systemName: doc.kind == .plan ? "checklist"
+                      : (doc.kind == .spec ? "doc.text.magnifyingglass" : "doc.text"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                Text(doc.fileURL.lastPathComponent)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 30)
+            .padding(.trailing, 10)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if hoveredOrchestrationURL == doc.fileURL {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
+            }
+        }
+        .onHover { hovering in
+            if hovering { hoveredOrchestrationURL = doc.fileURL }
+            else if hoveredOrchestrationURL == doc.fileURL { hoveredOrchestrationURL = nil }
+        }
+        .contextMenu {
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([doc.fileURL])
+            }
+            Button("Copy Path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(doc.fileURL.path, forType: .string)
+            }
+        }
+    }
+
     /// Orchestration docs grouped by their project-relative subfolder
-    /// (`docs/plans`, `docs/specs`, …), folders sorted by name and files
-    /// by filename within each.
+    /// (`docs/plans`, `docs/specs`, …), folders sorted by name. Files sort
+    /// newest-first — the date-prefixed names make alphabetical order
+    /// oldest-first, which buries the docs you're actually working on.
     private var orchestrationFolders: [(folder: String, docs: [PlanDoc])] {
         Dictionary(grouping: docStore.docs) { doc in
             let dir = (docStore.relativePath(of: doc) as NSString).deletingLastPathComponent
@@ -347,7 +401,7 @@ struct WorkspaceSidebar: View {
         .sorted { $0.key < $1.key }
         .map { (folder: $0.key,
                 docs: $0.value.sorted {
-                    $0.fileURL.lastPathComponent < $1.fileURL.lastPathComponent
+                    $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent
                 }) }
     }
 
