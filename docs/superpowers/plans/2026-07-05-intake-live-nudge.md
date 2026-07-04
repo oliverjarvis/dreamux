@@ -29,20 +29,20 @@
 
 ### Task 3: Course-correct sheet + entry points
 
-- [ ] **Step 1:** `CourseCorrectSheet` (house sheet style, like `NewPlanSheet`): anchor description header, multiline text field, `Picker` — Fix now / Fix next / Add to queue, default Fix next. Submit → fix-task write (Task 1) + nudge enqueue (Task 2) when the plan is running; idle plans just get the task (no nudge).
-- [ ] **Step 2:** Entry points in `PlansSpecsSection`: *Course correct…* context-menu item on task rows, phase rows, and the plan row; the clicked row supplies the anchor (plan row → nil anchor → current phase).
-- [ ] **Step 3:** Sidebar: fix-tasks render like any task (they are); the appended task's `*(course correction, …)*` suffix renders as-is in v1.
-- [ ] **Step 4:** Build + tests green; sheet-open wiring verified in Task 5's GUI pass (context menus aren't harness-drivable).
+- [x] **Step 1:** `CourseCorrectSheet` (house sheet style, like `NewPlanSheet`): anchor description header, multiline text field, `Picker` — Fix now / Fix next / Add to queue, default Fix next. Submit → fix-task write (Task 1) + nudge enqueue (Task 2) when the plan is running; idle plans just get the task (no nudge).
+- [x] **Step 2:** Entry points in `PlansSpecsSection`: *Course correct…* context-menu item on task rows, phase rows, and the plan row; the clicked row supplies the anchor (plan row → nil anchor → current phase).
+- [x] **Step 3:** Sidebar: fix-tasks render like any task (they are); the appended task's `*(course correction, …)*` suffix renders as-is in v1.
+- [x] **Step 4:** Build + tests green; sheet-open wiring verified in Task 5's GUI pass (context menus aren't harness-drivable).
 
 ### Task 4: e2e observability
 
-- [ ] **Step 1:** e2e command `courseCorrect {"plan": <path>, "task"?: <title>, "text": …, "priority": "now|next|queue"}` driving the same code path as the sheet (needed because context menus can't be driven); `state` plan payloads gain `pendingNudges: Int`.
-- [ ] **Step 2:** PROTOCOL.md documents both.
-- [ ] **Step 3:** Unit tests for the command's parameter resolution; scenario steps in Task 5.
-- [ ] **Step 4: `swift test` green.**
+- [x] **Step 1:** e2e command `courseCorrect {"plan": <path>, "task"?: <title>, "text": …, "priority": "now|next|queue"}` driving the same code path as the sheet (needed because context menus can't be driven); `state` plan payloads gain `pendingNudges: Int`.
+- [x] **Step 2:** PROTOCOL.md documents both.
+- [x] **Step 3:** Unit tests for the command's parameter resolution; scenario steps in Task 5.
+- [x] **Step 4: `swift test` green.**
 
 ### Task 5: Whole-branch verification
 
-- [ ] **Step 1:** Full build (zero warnings from changed files) + suite.
-- [ ] **Step 2:** GUI/e2e: run a fixture plan (real agent via runPlan), `courseCorrect` with Fix next → assert the fix-task appears in the plan file and the row expansion (`state` dump), and the nudge lands in the agent's terminal (`terminalText` contains the priority wording) once quiescent; verify the gate rail by driving the queue to `atGate` and confirming the nudge parks (`pendingNudges` stays 1).
-- [ ] **Step 3:** Update the spec status once merged.
+- [x] **Step 1:** Full build (zero warnings from changed files) + suite.
+- [x] **Step 2:** GUI/e2e: run a fixture plan (real agent via runPlan), `courseCorrect` with Fix next → assert the fix-task appears in the plan file and the row expansion (`state` dump), and the nudge lands in the agent's terminal (`terminalText` contains the priority wording) once quiescent; verify the gate rail by driving the queue to `atGate` and confirming the nudge parks (`pendingNudges` stays 1).
+- [x] **Step 3:** Update the spec status once merged.
