@@ -64,6 +64,38 @@ final class ProjectSessionTests: XCTestCase {
                         "statusForPlan must reach the bundle's DocStore")
     }
 
+    func testDocStoreRefreshAutoEnqueuesWaitingPlan() throws {
+        let project = try sandbox.makeProject(named: "alpha")
+
+        func writePlan(_ relativePath: String, _ contents: String) throws {
+            let url = project.rootPath.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try contents.write(to: url, atomically: true, encoding: .utf8)
+        }
+        try writePlan("docs/plans/2026-07-04-blocker.md", """
+        # Blocker Implementation Plan
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        try writePlan("docs/plans/2026-07-04-waiter.md", """
+        # Waiter Implementation Plan
+
+        **Runs:** after docs/plans/2026-07-04-blocker.md
+
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+
+        let session = ProjectSession(project: project)
+        // The bundle wires DocStore.onRefresh to intake enactment; a scan
+        // of a never-run blocker leaves the waiter appended (the caption,
+        // not the queue slot, carries "after" while the blocker is idle).
+        session.docStore.refresh()
+
+        XCTAssertEqual(session.planQueue.entries, ["docs/plans/2026-07-04-waiter.md"])
+    }
+
     func testRequestMergeParksWorkspaceOnGateChannel() throws {
         let project = try sandbox.makeProject(named: "alpha")
         let session = ProjectSession(project: project)

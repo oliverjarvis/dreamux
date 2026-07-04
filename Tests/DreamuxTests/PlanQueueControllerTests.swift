@@ -43,6 +43,70 @@ final class PlanQueueControllerTests: XCTestCase {
         XCTAssertEqual(reloaded.entries, ["docs/plans/a.md", "docs/plans/b.md"])
     }
 
+    // MARK: - ensureQueued (intake enactment, Task 4)
+
+    func testEnsureQueuedInsertsAfterBlockerMidQueue() {
+        controller.enqueue("docs/plans/x.md")
+        controller.enqueue("docs/plans/blocker.md")
+        controller.enqueue("docs/plans/y.md")
+        controller.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        XCTAssertEqual(controller.entries,
+                       ["docs/plans/x.md", "docs/plans/blocker.md",
+                        "docs/plans/new.md", "docs/plans/y.md"])
+    }
+
+    func testEnsureQueuedLandsBehindRunningBlocker() async {
+        controller.enqueue("docs/plans/blocker.md")
+        controller.enqueue("docs/plans/y.md")
+        controller.start()
+        await settle(until: { !ran.isEmpty })
+        XCTAssertEqual(controller.currentPlanPath, "docs/plans/blocker.md")
+        controller.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        // The running blocker still holds its queue slot, so the new plan
+        // slots immediately behind it — never ahead of it, never enqueuing
+        // the blocker a second time.
+        XCTAssertEqual(controller.entries,
+                       ["docs/plans/blocker.md", "docs/plans/new.md", "docs/plans/y.md"])
+    }
+
+    func testEnsureQueuedAppendsWhenBlockerAbsent() {
+        controller.enqueue("docs/plans/x.md")
+        controller.enqueue("docs/plans/y.md")
+        // Blocker is neither queued nor running: never enqueue it
+        // implicitly — append and let the caption carry the relationship.
+        controller.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        XCTAssertEqual(controller.entries,
+                       ["docs/plans/x.md", "docs/plans/y.md", "docs/plans/new.md"])
+        XCTAssertFalse(controller.entries.contains("docs/plans/blocker.md"),
+                       "the blocker is never enqueued as a side effect")
+    }
+
+    func testEnsureQueuedIsIdempotent() {
+        controller.enqueue("docs/plans/blocker.md")
+        controller.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        controller.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        XCTAssertEqual(controller.entries,
+                       ["docs/plans/blocker.md", "docs/plans/new.md"],
+                       "a second call adds no duplicate")
+    }
+
+    func testEnsureQueuedNoOpsWhenPathIsRunning() async {
+        controller.enqueue("docs/plans/a.md")
+        controller.start()
+        await settle(until: { !ran.isEmpty })
+        // `a.md` is the running plan; enacting it again must not re-add it.
+        controller.ensureQueued("docs/plans/a.md", after: "docs/plans/blocker.md")
+        XCTAssertEqual(controller.entries, ["docs/plans/a.md"])
+    }
+
+    func testEnsureQueuedPersists() {
+        controller.enqueue("docs/plans/blocker.md")
+        controller.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        let reloaded = PlanQueueController(project: project)
+        XCTAssertEqual(reloaded.entries,
+                       ["docs/plans/blocker.md", "docs/plans/new.md"])
+    }
+
     func testStartRunsFirstEntry() async {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/b.md")

@@ -58,6 +58,29 @@ final class PlanQueueController {
         save()
     }
 
+    /// Intake enactment (spec: "Enactment (app side)"): place `path` in the
+    /// queue *behind* its blocker without ever enqueuing the blocker itself.
+    /// No-op when `path` is already queued or is the running plan. When the
+    /// blocker holds a queue slot, `path` slots immediately after it (so a
+    /// running blocker — still in `entries` — gets its waiter right behind
+    /// it); when the blocker is running but no longer holds a slot, `path`
+    /// goes to the front so it runs next; otherwise the blocker is neither
+    /// queued nor running and `path` appends, the row caption carrying the
+    /// "after" relationship. Additive: persists like `enqueue`, and the
+    /// state machine, gates, and persistence format are untouched.
+    func ensureQueued(_ path: String, after blockerPath: String) {
+        guard !path.isEmpty else { return }
+        guard !entries.contains(path), currentPlanPath != path else { return }
+        if let index = entries.firstIndex(of: blockerPath) {
+            entries.insert(path, at: index + 1)
+        } else if currentPlanPath == blockerPath {
+            entries.insert(path, at: 0)
+        } else {
+            entries.append(path)
+        }
+        save()
+    }
+
     func remove(_ path: String) {
         entries.removeAll { $0 == path }
         if currentPlanPath == path { currentPlanPath = nil }

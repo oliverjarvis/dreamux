@@ -120,6 +120,22 @@ final class ProjectSession {
             )
         }
 
+        // Intake enactment: every docs rescan auto-enqueues any freshly
+        // discovered `**Runs:** after <blocker>` plan behind its blocker.
+        // Weak captures — the queue and stores are owned by this bundle.
+        docStore.onRefresh = { [weak docStore, weak store, weak planQueue] in
+            guard let docStore, let store, let planQueue else { return }
+            IntakeEnactment.enact(
+                docs: docStore.docs,
+                queue: planQueue,
+                relativePath: { docStore.relativePath(of: $0) },
+                status: { doc in
+                    docStore.status(for: doc) { name in
+                        store.workspaces.contains { $0.name == name }
+                    }
+                })
+        }
+
         self.store = store
         self.repoStore = repoStore
         self.layout = layout

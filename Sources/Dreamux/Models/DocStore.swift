@@ -25,6 +25,12 @@ final class DocStore {
     @ObservationIgnored private var watchers: [DispatchSourceFileSystemObject] = []
     @ObservationIgnored private var debounce: Task<Void, Never>?
 
+    /// Fired at the end of every `refresh()`, once `docs`/`initiatives` and
+    /// the watchers reflect the fresh scan. `ProjectSession` sets this to run
+    /// intake enactment (auto-enqueue `**Runs:** after` plans) against the
+    /// new inventory. Default no-op so DocStore stands alone in tests/previews.
+    @ObservationIgnored var onRefresh: () -> Void = {}
+
     init(project: Project) {
         projectRoot = project.rootPath
         docsRoot = project.rootPath.appendingPathComponent("docs", isDirectory: true)
@@ -90,6 +96,7 @@ final class DocStore {
 
         regroup(bodies: bodies)
         rebuildWatchers(for: directories + docs.map(\.fileURL))
+        onRefresh()
     }
 
     // MARK: - Views over the scan
