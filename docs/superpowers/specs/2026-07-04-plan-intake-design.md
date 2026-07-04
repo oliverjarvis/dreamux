@@ -1,7 +1,7 @@
 # Plan Intake — Parallel / Wait / Integrate — Design
 
 **Date:** 2026-07-04
-**Status:** Draft — awaiting approval
+**Status:** Approved 2026-07-04 (open questions resolved in chat — see Decisions)
 
 ## Problem
 
@@ -88,6 +88,37 @@ Appending tasks to a file whose agent already read it needs a nudge:
   the enactment refuses (falls back to `wait` behind it) if it
   happens anyway.
 
+### Phase 2 — course correction (added 2026-07-04)
+
+Corrections are the third intake flow, sharing the nudge machinery: a
+completed-looking task turns out wrong (the rope drops the candy but
+isn't visually severed) while the agent is phases ahead. Waiting for
+the plan to finish, or typing untracked prose into the agent's
+terminal, are both failures — corrections must be tracked tasks with
+delivery priority.
+
+- **Entry points:** *Course correct…* in the context menu of task
+  rows, phase rows, and the plan row — one sheet behind all three.
+  The clicked row is the anchor; the plan-level entry (no natural
+  anchor, e.g. "the whole game feels stiff") defaults the anchor to
+  the phase holding the current task.
+- **The sheet:** a text field for the observation plus a delivery
+  picker — **Fix now / Fix next / Add to queue**, **default Fix
+  next** (finish the current task cleanly, then do the fix before
+  anything else; Fix now interrupts mid-task and accepts the
+  half-done-worktree risk; Add to queue reaches it in document
+  order). Deeper queue semantics (reordering multiple corrections,
+  Spotify-style queue management) are deliberately deferred.
+- **On send:** a fix-task is written into the plan file under the
+  anchor phase — `### Task N.k: Fix — <summary> *(course correction,
+  <date>)*` with a checkbox step from the typed text — then the
+  running agent gets the quiescence-gated nudge whose wording carries
+  the chosen priority. The task is real: it renders in the expansion,
+  counts in progress, and the whole-branch review covers it.
+- Same rail as integrate: a plan at a merge gate or `awaitingReview`
+  refuses course-correct delivery (the fix-task is still written; the
+  nudge parks until the plan resumes or the user re-runs it).
+
 ## Sidebar surfacing
 
 No new sections. The disposition is visible where work already lives:
@@ -107,20 +138,24 @@ No new sections. The disposition is visible where work already lives:
   another).
 - Multi-idea batching in one New Plan session.
 
-## Open questions (decide before planning)
+## Decisions (resolved 2026-07-04)
 
-1. **Auto-run parallel plans?** When the disposition is `parallel`,
-   should the app launch the run immediately (zero-friction, matches
-   "throw ideas at the wall") or leave the row `ready` for an explicit
-   Run click (today's behavior, one more click)? Proposal: a per-
-   project toggle, default OFF (explicit Run) until trust builds.
-2. **Phase split.** Ship Phase 1 (digest + disposition + enactment for
-   parallel/wait/integrate-into-idle) first, Phase 2 (live-agent
-   nudge) behind it — or both in one go? Proposal: two plans, same
-   spec, staged like features-retirement.
-3. **`**Runs:**` grammar.** `after <relative path>` only, or allow
-   `after <feature name>`? Proposal: path only (unambiguous, matches
-   `**Spec:**`).
+1. **Auto-run parallel plans:** per-project toggle, **default OFF** —
+   parallel plans land `ready` for an explicit Run click until the
+   user opts into zero-friction launching.
+2. **Phase split:** **two staged plans.** Plan 1: digest +
+   disposition + enactment for parallel / wait / integrate-into-idle.
+   Plan 2: the live-agent nudge for running plans + course
+   correction (added 2026-07-04 — same delivery machinery, so they
+   ship together).
+4. **Course-correct delivery (resolved in chat):** all three
+   priorities ship — Fix now / Fix next / Add to queue — **default
+   Fix next**; both row-anchored and plan-level entry points ship in
+   v1 (same sheet, anchor is a parameter).
+3. **`**Runs:**` grammar: path only** — `after <project-relative
+   path>`, parsed with the same token discipline as `**Spec:**`. A
+   blocker path that doesn't resolve degrades to plain `ready` with a
+   visible `after <missing>` caption, never a silent drop.
 
 ## Verification
 
