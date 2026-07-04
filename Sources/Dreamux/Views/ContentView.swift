@@ -32,6 +32,19 @@ struct ContentView: View {
     /// Appearance knobs (Settings window) — applied live.
     @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
     @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
+    @AppStorage(AppearanceSettings.cornerRadiusKey) private var cornerRadius = 16.0
+    @AppStorage(AppearanceSettings.glassKey) private var glassBackdrop = true
+    @AppStorage(AppearanceSettings.backdropDimKey) private var backdropDim = 0.28
+    @AppStorage(AppearanceSettings.backdropTintKey) private var backdropTintHex = ""
+    @AppStorage(AppearanceSettings.cardColorKey) private var cardColorHex = ""
+
+    private var backdropTint: Color {
+        AppearanceSettings.color(fromHex: backdropTintHex) ?? .black
+    }
+    private var cardFill: Color {
+        AppearanceSettings.color(fromHex: cardColorHex)
+            ?? Color(nsColor: .windowBackgroundColor)
+    }
 
     private var store: WorkspaceStore { session.store }
     private var repoStore: RepoStore { session.repoStore }
@@ -121,7 +134,7 @@ struct ContentView: View {
             // together (connected, no gutter between them) — full height
             // under the chrome bar, flush with the window bottom, inset
             // only on the sides.
-            .panelCard(shadow: cardShadow)
+            .panelCard(radius: cornerRadius, shadow: cardShadow, fill: cardFill)
             .padding(.leading, edgeInsets ? 6 : 0)
             .padding([.top, .bottom, .trailing], edgeInsets ? 10 : 0)
         }
@@ -131,15 +144,20 @@ struct ContentView: View {
         // window's physical top edge — the rail's 38pt top zone provides
         // the traffic-light clearance instead.
         .ignoresSafeArea(edges: .top)
-        // Behind-window vibrancy with a dark scrim: the rail and chrome
-        // bar sit on real glass (desktop blur), and the scrim keeps the
-        // backdrop reliably darker than the card on any wallpaper — an
-        // unscrimmed glass gutter next to a dark card reads as nothing
-        // (the "missing" inset the red-backdrop probe disproved).
+        // Backdrop per the appearance settings: glass (behind-window
+        // vibrancy) dimmed by a tint scrim — the scrim keeps the backdrop
+        // reliably darker than the card on any wallpaper — or, with
+        // glass off, the solid backdrop color.
         .background {
-            VisualEffectBackground()
-                .overlay(Color.black.opacity(0.28))
-                .ignoresSafeArea()
+            Group {
+                if glassBackdrop {
+                    VisualEffectBackground()
+                        .overlay(backdropTint.opacity(backdropDim))
+                } else {
+                    backdropTint
+                }
+            }
+            .ignoresSafeArea()
         }
         .inspector(isPresented: $showFileTree) {
             FileTreePanel(
@@ -148,7 +166,7 @@ struct ContentView: View {
                 tree: fileTree,
                 onOpenFile: openFile
             )
-            .panelCard()
+            .panelCard(radius: cornerRadius, shadow: cardShadow, fill: cardFill)
             .padding(8)
             .background(Color(nsColor: .underPageBackgroundColor).ignoresSafeArea())
             .inspectorColumnWidth(min: 220, ideal: 280, max: 480)
@@ -505,16 +523,20 @@ extension View {
     /// The floating-panel treatment (Codex/Linear-style): the view becomes
     /// a rounded card on the window's darker backdrop, separated from its
     /// neighbors by gutters instead of hairlines.
-    func panelCard(shadow: Bool = true) -> some View {
+    func panelCard(
+        radius: CGFloat = 16, shadow: Bool = true, fill: Color? = nil
+    ) -> some View {
         // ignoresSafeAreaEdges: [] keeps the fill inside the card's own
         // bounds (the default .all lets an edge-touching background bleed
         // into safe areas). Stroke + shadow carry the "floating card"
         // read on dark themes, where fill-vs-backdrop contrast alone is
-        // too subtle; the shadow is a Settings appearance knob.
-        background(Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        // too subtle; radius/shadow/fill are Settings appearance knobs.
+        background(
+            fill ?? Color(nsColor: .windowBackgroundColor),
+            ignoresSafeAreaEdges: [])
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
             )
             .shadow(color: .black.opacity(shadow ? 0.35 : 0), radius: 14, y: 2)
