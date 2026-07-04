@@ -190,6 +190,28 @@ final class PlanNudgeCenterTests: XCTestCase {
         XCTAssertNil(IntakeGrowthDetector.appendedTaskRange(before: doc, after: doc))
     }
 
+    func testCombinedRefreshNudgesOnlyTheUnmarkedAppends() {
+        // One refresh coalesces a course-correction fix-task AND two
+        // intake-integrate appends. Suppressing on ANY marker would drop
+        // the integrate nudge forever (the snapshot advances), so the
+        // re-read nudge must fire for exactly the unmarked pair.
+        let after = parse("""
+        # X Implementation Plan
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        ### Task 1.1: Fix — rope *(course correction, 2026-07-04)*
+        - [ ] **Step 1: fix**
+        ### Task 2: b *(added 2026-07-04)*
+        - [ ] **Step 1: u**
+        ### Task 3: c *(added 2026-07-04)*
+        - [ ] **Step 1: v**
+        """)
+        XCTAssertEqual(
+            IntakeGrowthDetector.appendedTaskRange(before: parse(oneTask), after: after),
+            "Task 2–Task 3",
+            "the range covers the unmarked integrate appends, not the fix-task")
+    }
+
     func testStepsAddedToExistingTaskWithoutNewTaskDoesNotNudge() {
         // totalSteps grew, but no NEW task heading appeared — nothing to
         // "re-read and fold in", so no nudge.
@@ -246,6 +268,29 @@ final class PlanNudgeCenterTests: XCTestCase {
             docs: [parse(twoTasks)], relativePath: { _ in path },
             status: { _ in .ready }, featureName: { _ in "x" }, now: { Date() })
         XCTAssertTrue(center.pending.isEmpty, "a non-running plan's growth is not nudged")
+    }
+
+    func testNoteRefreshNudgesUnmarkedAppendsAlongsideAFixTask() {
+        let center = PlanNudgeCenter()
+        let path = "docs/plans/2026-07-04-x.md"
+        let combined = """
+        # X Implementation Plan
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        ### Task 1.1: Fix — rope *(course correction, 2026-07-04)*
+        - [ ] **Step 1: fix**
+        ### Task 2: b *(added 2026-07-04)*
+        - [ ] **Step 1: u**
+        """
+        center.noteRefresh(
+            docs: [parse(oneTask)], relativePath: { _ in path },
+            status: { _ in .running }, featureName: { _ in "x" }, now: { Date() })
+        center.noteRefresh(
+            docs: [parse(combined)], relativePath: { _ in path },
+            status: { _ in .running }, featureName: { _ in "x" }, now: { Date() })
+        let nudge = center.pending[path]
+        XCTAssertNotNil(nudge, "the integrate append still owes a re-read nudge")
+        XCTAssertTrue(nudge?.prompt.contains("Task 2") ?? false)
     }
 
     func testNoteRefreshSuppressesCourseCorrectionGrowth() {

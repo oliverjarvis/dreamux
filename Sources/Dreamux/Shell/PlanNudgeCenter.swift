@@ -86,8 +86,17 @@ final class PlanNudgeCenter {
     /// nudge that clears both is delivered and removed. Anything gated or
     /// busy stays parked for a later tick. Safe to call repeatedly — a
     /// removed nudge is never re-sent.
+    ///
+    /// "Sent" here means send *initiation*: the injected `send` kicks off
+    /// the async echo-verified delivery, which can still fail (the agent
+    /// starts streaming between the quiescence check and the type). We
+    /// deliberately remove on initiation rather than re-queue — the earlier
+    /// quiescence gate makes failure unlikely, and not re-queuing is what
+    /// guarantees no double-delivery.
     func deliverPending() {
-        for (path, nudge) in pending where deliverable(path) {
+        // Iterate a snapshot of the pairs so mutating `pending` below is
+        // plainly safe.
+        for (path, nudge) in Array(pending) where deliverable(path) {
             send(path, nudge.prompt)
             pending[path] = nil
         }
@@ -141,18 +150,23 @@ enum IntakeGrowthDetector {
     /// The appended task-number range between two parses of the same plan,
     /// or `nil` when there's nothing to nudge: `totalSteps` didn't grow, no
     /// genuinely new task heading appeared (e.g. a step added to an
-    /// existing task), or the new tasks are course corrections (which carry
-    /// their own nudge). Detection keys on task TITLES, not positions, so a
-    /// fix-task inserted mid-document is still recognized as new.
+    /// existing task), or every new task is a course correction (which
+    /// carries its own nudge). Detection keys on task TITLES, not positions,
+    /// so a fix-task inserted mid-document is still recognized as new.
+    ///
+    /// The course-correction marker only suppresses the MARKED tasks: a
+    /// refresh that coalesces a fix-task and one or more intake-integrate
+    /// appends still owes the re-read nudge for the unmarked subset (the
+    /// snapshot advances either way, so suppressing on any marker would drop
+    /// the integrate nudge forever). The range is derived from the unmarked
+    /// tasks alone.
     static func appendedTaskRange(before: PlanDoc, after: PlanDoc) -> String? {
         guard after.totalSteps > before.totalSteps else { return nil }
         let beforeTitles = Set(before.tasks.map(\.title))
         let newTasks = after.tasks.filter { !$0.title.isEmpty && !beforeTitles.contains($0.title) }
-        guard !newTasks.isEmpty else { return nil }
-        guard !newTasks.contains(where: { $0.title.contains("*(course correction") }) else {
-            return nil
-        }
-        return range(of: newTasks)
+        let integrateTasks = newTasks.filter { !$0.title.contains("*(course correction") }
+        guard !integrateTasks.isEmpty else { return nil }
+        return range(of: integrateTasks)
     }
 
     /// A `Task 5` / `Task 5–Task 7` range from the appended tasks' leading
