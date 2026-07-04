@@ -44,9 +44,9 @@ struct ProjectsRail: View {
             }
         }
         .listStyle(.sidebar)
-        // Header band matching the work-items column's project header
-        // (same height, same bottom hairline) so the horizontal separator
-        // runs continuously across both columns instead of jumping.
+        // The rail sits flat on the window's inset backdrop, like the
+        // reference chrome — no material of its own, no hairlines.
+        .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
                 Text("Projects")
@@ -56,14 +56,6 @@ struct ProjectsRail: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
-            // Explicit hairline, not Divider(): inside safeAreaInset
-            // content a Divider infers a VERTICAL orientation and renders
-            // as a floating centered tick.
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor))
-                    .frame(height: 1)
-            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             newProjectBar
@@ -131,7 +123,7 @@ struct ProjectsRail: View {
             .buttonStyle(.plain)
             .help("Create a new project")
         }
-        .background(.bar)
+        
     }
 
     /// Delete and, when the row was the project this window is showing,

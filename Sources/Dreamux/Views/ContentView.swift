@@ -77,7 +77,11 @@ struct ContentView: View {
                         autoRunFailure: { session.autoRunFailures[$0] }
                     )
                 }
-                .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
+                .panelCard()
+                .padding(.leading, showProjectsRail ? 4 : 8)
+                .padding(.trailing, 4)
+                .padding(.vertical, 8)
+                .frame(minWidth: 228, idealWidth: 258, maxWidth: 388)
 
                 VStack(spacing: 0) {
                     contextHeaderRow
@@ -87,21 +91,15 @@ struct ContentView: View {
                 // mode — without a height-flexible child the split collapses
                 // under the header row.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .panelCard()
+                .padding(.leading, 4)
+                .padding(.trailing, 8)
+                .padding(.vertical, 8)
             }
         }
-        // The rail's edge is ONE hairline drawn on top, spanning the full
-        // window height (up under the toolbar too) — segments assembled
-        // from siblings kept losing chunks to materials and safe areas.
-        .overlay(alignment: .topLeading) {
-            if showProjectsRail {
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor))
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)
-                    .offset(x: 210)
-                    .ignoresSafeArea(edges: [.top, .bottom])
-            }
-        }
+        // The inset backdrop the panels float on — the rail sits flat on
+        // it; the gutters between cards are the separation (no hairlines).
+        .background(Color(nsColor: .underPageBackgroundColor).ignoresSafeArea())
         // The window title is the thin toolbar itself; no text title.
         .navigationTitle("")
         // Both sidebar toggles live in the toolbar, Cursor-style. Neither
@@ -136,6 +134,9 @@ struct ContentView: View {
                 tree: fileTree,
                 onOpenFile: openFile
             )
+            .panelCard()
+            .padding(8)
+            .background(Color(nsColor: .underPageBackgroundColor).ignoresSafeArea())
             .inspectorColumnWidth(min: 220, ideal: 280, max: 480)
         }
         // The file explorer is toggled from the View menu (⌥⌘E, see
@@ -315,6 +316,22 @@ enum SidebarMode: Hashable {
     case workspace
     case run(workspaceID: UUID)
     case signals
+}
+
+// MARK: - Inset panel chrome
+
+extension View {
+    /// The floating-panel treatment (Codex/Linear-style): the view becomes
+    /// a rounded card on the window's darker backdrop, separated from its
+    /// neighbors by gutters instead of hairlines.
+    func panelCard() -> some View {
+        background(Color(nsColor: .windowBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+            )
+    }
 }
 
 // MARK: - File-explorer focused value
