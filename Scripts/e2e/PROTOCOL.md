@@ -190,7 +190,9 @@ Field notes:
   per-`tasks` checkbox rollup (`title`, `checked`, `total`). `tasks`
   reports every parsed heading — a heading with no checkboxes dumps as
   `total: 0` even though the sidebar hides such rows, and its `title`
-  may be empty for steps that precede the first heading. All paths are
+  may be empty for steps that precede the first heading. Each task also
+  carries `phase`, the `## ` section it falls under in single-file
+  phased plans (omitted when the plan has no sections). All paths are
   project-relative. The flat `plans` array above stays for
   compatibility.
 - `queue` mirrors `PlanQueueController`: `{"state":

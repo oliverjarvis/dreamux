@@ -49,6 +49,11 @@ struct PlansSpecsSection: View {
     /// Plan rows expanded to their task list, keyed by plan file path.
     /// Deliberately not persisted — a per-session affordance.
     @State private var expandedPlans: Set<String> = []
+    /// User overrides of a phase group's expansion inside a plan's task
+    /// list, keyed by `<plan path>#<phase>`. Absence means "follow the
+    /// default" — only the phase holding the current task starts open.
+    /// Not persisted.
+    @State private var expandedPhaseOverrides: [String: Bool] = [:]
     /// User overrides of a multi-plan family's expansion, keyed by
     /// initiative id. Absence means "follow the default" — expanded while a
     /// child is in flight (see `isInitiativeExpanded`); once the user
@@ -633,16 +638,76 @@ struct PlansSpecsSection: View {
 
     /// Task rows for an expanded plan: ✓ (all steps checked), ▶ + `← current`
     /// (first task with an unchecked step), else ○ — with per-task counts.
+    /// Single-file phased plans (tasks under two or more `## Phase …`
+    /// sections) get collapsible phase rows with per-phase rollups; the
+    /// phase holding the current task starts open.
     @ViewBuilder
     private func planTasks(_ plan: PlanDoc) -> some View {
         let tasks = renderableTasks(plan)
-        let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
-        ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
-            taskRow(task, isCurrent: index == currentIndex)
+        if PlanPhases.shouldGroup(tasks) {
+            let groups = PlanPhases.groups(tasks)
+            let currentGroup = PlanPhases.currentGroupIndex(groups)
+            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                phaseBlock(group, plan: plan, isCurrentGroup: index == currentGroup)
+            }
+        } else {
+            flatTaskRows(tasks, indent: 28)
         }
     }
 
-    private func taskRow(_ task: PlanTask, isCurrent: Bool) -> some View {
+    @ViewBuilder
+    private func flatTaskRows(_ tasks: [PlanTask], indent: CGFloat) -> some View {
+        let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
+        ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
+            taskRow(task, isCurrent: index == currentIndex, indent: indent)
+        }
+    }
+
+    @ViewBuilder
+    private func phaseBlock(
+        _ group: PlanPhases.Group,
+        plan: PlanDoc,
+        isCurrentGroup: Bool
+    ) -> some View {
+        // The current phase starts open; a user toggle overrides.
+        let key = "\(plan.fileURL.path)#\(group.phase ?? "")"
+        let isExpanded = expandedPhaseOverrides[key] ?? isCurrentGroup
+        Button {
+            withAnimation(.snappy(duration: 0.18)) {
+                expandedPhaseOverrides[key] = !isExpanded
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 7, weight: .semibold))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    .frame(width: 14)
+                Text(group.phase ?? "Steps")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1).truncationMode(.tail)
+                if isCurrentGroup {
+                    Text("← current")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Text("\(group.checkedSteps)/\(group.totalSteps)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.leading, 28)
+            .padding(.trailing, 12)
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        if isExpanded {
+            flatTaskRows(group.tasks, indent: 42)
+        }
+    }
+
+    private func taskRow(_ task: PlanTask, isCurrent: Bool, indent: CGFloat) -> some View {
         let checked = task.steps.filter(\.checked).count
         let total = task.steps.count
         let allChecked = checked == total
@@ -655,7 +720,7 @@ struct PlansSpecsSection: View {
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(tint)
                 .frame(width: 14)
-            Text(task.title)
+            Text(task.title.isEmpty ? "Steps" : task.title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.tail)
@@ -669,7 +734,7 @@ struct PlansSpecsSection: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.tertiary)
         }
-        .padding(.leading, 28)
+        .padding(.leading, indent)
         .padding(.trailing, 12)
         .padding(.vertical, 2)
     }

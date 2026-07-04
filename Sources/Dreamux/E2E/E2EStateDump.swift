@@ -45,11 +45,16 @@ enum E2EStateDump {
             "status": status(plan).rawValue,
             "ordinal": ordinal,
             "tasks": plan.tasks.map { task in
-                [
+                var payload: [String: Any] = [
                     "title": task.title,
                     "checked": task.steps.filter(\.checked).count,
                     "total": task.steps.count,
-                ] as [String: Any]
+                ]
+                // `## ` section the task falls under (single-file phased
+                // plans) — omitted when the plan has no sections, matching
+                // specPath's omitted-not-null convention.
+                if let phase = task.phase { payload["phase"] = phase }
+                return payload
             },
         ]
     }

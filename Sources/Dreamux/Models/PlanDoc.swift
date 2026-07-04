@@ -3,10 +3,19 @@ import Foundation
 /// A `### Task N:` heading and the checkbox steps beneath it. The title
 /// is the full heading text (e.g. `Task 1: File-kind classifier`); the
 /// synthetic bucket for checkboxes that precede any heading carries an
-/// empty title.
+/// empty title. `phase` is the `## ` section the task falls under
+/// (`Phase 1 — Core mechanic`), nil when the plan has no H2 sections —
+/// single-file phased plans group their expansion rows by it.
 struct PlanTask: Equatable {
     let title: String
     let steps: [PlanStep]
+    let phase: String?
+
+    init(title: String, steps: [PlanStep], phase: String? = nil) {
+        self.title = title
+        self.steps = steps
+        self.phase = phase
+    }
 }
 
 /// One `- [ ]` / `- [x]` checkbox line, with the readable title left
@@ -53,18 +62,33 @@ struct PlanDoc: Identifiable, Equatable {
         // Tasks accumulate in the same pass. Each checkbox that bumps the
         // counters above also appends a step here, so the totals and the
         // per-task sums can never drift.
-        var tasks: [(title: String, steps: [PlanStep])] = []
+        var tasks: [(title: String, phase: String?, steps: [PlanStep])] = []
+        // The `## ` section the parser is currently inside — recorded on
+        // each task so single-file phased plans can group by it.
+        var currentPhase: String?
         func appendStep(_ step: PlanStep) {
             if tasks.isEmpty {
                 // Checkboxes before any heading go in a synthetic untitled
                 // bucket, created only when such steps actually exist.
-                tasks.append((title: "", steps: [step]))
+                tasks.append((title: "", phase: currentPhase, steps: [step]))
             } else {
                 tasks[tasks.count - 1].steps.append(step)
             }
         }
 
+        // Fenced code blocks routinely contain lines that LOOK like
+        // headings or checkboxes (```md examples, `## ` comments in
+        // ```bash) — matching them would miscount steps or stamp phantom
+        // phases. Track the fence state and skip everything inside.
+        var insideFence = false
+
         for line in lines {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                insideFence.toggle()
+                continue
+            }
+            if insideFence { continue }
+
             if firstH1 == nil, line.hasPrefix("# ") {
                 firstH1 = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
             }
@@ -77,15 +101,25 @@ struct PlanDoc: Identifiable, Equatable {
 
             if line.hasPrefix("### ") {
                 let heading = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
-                if heading.range(of: #"^Task\s+\d+\s*[:—]"#, options: .regularExpression) != nil {
+                // Dotted numbering (`Task 0.1:`) is what phased
+                // single-file plans produce — accept any depth.
+                if heading.range(of: #"^Task\s+\d+(?:\.\d+)*\s*[:—]"#, options: .regularExpression) != nil {
                     hasTaskHeading = true
-                    tasks.append((title: heading, steps: []))
+                    tasks.append((title: heading, phase: currentPhase, steps: []))
                 } else if hasTaskHeading {
                     // A bare `### …` heading opens a task only once we're
                     // past the first Task heading (later phases sometimes
                     // drop the `Task N:` prefix).
-                    tasks.append((title: heading, steps: []))
+                    tasks.append((title: heading, phase: currentPhase, steps: []))
                 }
+                continue
+            }
+
+            if line.hasPrefix("## ") {
+                // H2 opens a section; tasks record the one they fall
+                // under. Generic sections (Global Constraints, …) carry
+                // no tasks, so they never surface as phases.
+                currentPhase = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 continue
             }
 
@@ -117,7 +151,7 @@ struct PlanDoc: Identifiable, Equatable {
             specReference: specReference,
             checkedSteps: checked,
             totalSteps: total,
-            tasks: tasks.map { PlanTask(title: $0.title, steps: $0.steps) }
+            tasks: tasks.map { PlanTask(title: $0.title, steps: $0.steps, phase: $0.phase) }
         )
     }
 

@@ -263,4 +263,80 @@ final class PlanDocTests: XCTestCase {
         assertCountsMatchSteps(d)
         XCTAssertGreaterThan(d.totalSteps, 0)
     }
+
+    /// The single-file phased shape claude produces in the wild: `## Phase
+    /// N — …` sections with dotted `### Task N.M:` headings. Dotted
+    /// numbering must open tasks (integer-only matching dumped all 211
+    /// steps of a real plan into the untitled bucket), and each task must
+    /// record its section.
+    func testSingleFilePhasedPlanParsesDottedTasksAndPhases() {
+        let d = doc("2026-07-04-snip.md", """
+        # Snip Implementation Plan
+
+        ## Global Constraints
+
+        No checkboxes here.
+
+        ## Phase 0 — Scaffold (Milestone 1)
+
+        ### Task 0.1: Project scaffold
+        - [x] **Step 1: init**
+        - [ ] **Step 2: tooling**
+
+        ### Task 0.2: Vector math
+        - [ ] **Step 1: segments**
+
+        ## Phase 1 — Core mechanic (Milestone 2)
+
+        ### Task 1.1: Event bus
+        - [ ] **Step 1: types**
+        """)
+        XCTAssertEqual(d.kind, .plan)
+        XCTAssertEqual(d.tasks.map(\.title),
+                       ["Task 0.1: Project scaffold", "Task 0.2: Vector math", "Task 1.1: Event bus"])
+        XCTAssertEqual(d.tasks.map(\.phase),
+                       ["Phase 0 — Scaffold (Milestone 1)",
+                        "Phase 0 — Scaffold (Milestone 1)",
+                        "Phase 1 — Core mechanic (Milestone 2)"])
+        XCTAssertEqual(d.checkedSteps, 1)
+        XCTAssertEqual(d.totalSteps, 4)
+        assertCountsMatchSteps(d)
+    }
+
+    /// Plans are fence-heavy (a real one carries 181 ``` blocks) and
+    /// fenced examples routinely contain heading- and checkbox-shaped
+    /// lines — none of them may count or open phases/tasks.
+    func testFencedCodeBlocksAreInvisibleToTheParser() {
+        let d = doc("2026-07-04-fenced.md", """
+        # Fenced Implementation Plan
+
+        ## Phase 0 — Real
+
+        ### Task 0.1: real work
+        - [ ] **Step 1: real step**
+
+        ```md
+        ## Phase 99 — phantom
+        ### Task 99.1: phantom
+        - [ ] phantom step
+        - [x] phantom step
+        ```
+
+        - [x] **Step 2: also real, after the fence**
+        """)
+        XCTAssertEqual(d.tasks.map(\.title), ["Task 0.1: real work"])
+        XCTAssertEqual(d.tasks.map(\.phase), ["Phase 0 — Real"])
+        XCTAssertEqual(d.totalSteps, 2)
+        XCTAssertEqual(d.checkedSteps, 1)
+        assertCountsMatchSteps(d)
+    }
+
+    func testUnsectionedPlanTasksCarryNilPhase() {
+        let d = doc("2026-07-02-flat.md", """
+        # Flat Implementation Plan
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertEqual(d.tasks.map(\.phase), [nil])
+    }
 }
