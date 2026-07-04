@@ -74,31 +74,34 @@ enum IntakeEnactment {
     }
 
     /// Auto-run enactment (spec: "Enactment (app side)"). For every plan that
-    /// `shouldAutoRun` and hasn't already been auto-run, invoke `launch` and
-    /// record its `relativePath` in `enacted`.
+    /// `shouldAutoRun` and hasn't already been auto-run (`hasAutoRun`), record
+    /// it (`markAutoRun`) and then `launch` it.
     ///
-    /// Edge-triggered off `enacted`, mirroring the queue's `enactedBlockers`
-    /// discipline: a plan fires at most once, and a plan that was auto-run and
-    /// later reset to `.ready` (its worktree closed, ledger record lost) is
-    /// never relaunched — the record, not the live status, is the trigger.
-    /// The path is recorded before `launch` runs, so a failed launch does not
-    /// re-fire on the next refresh (no provisioning loop); the user can still
-    /// Run it by hand.
+    /// Edge-triggered off the fired-once record, mirroring the queue's
+    /// `enactedBlockers` discipline: a plan fires at most once, and a plan that
+    /// was auto-run and later reset to `.ready` (its worktree closed, ledger
+    /// record pruned) is never relaunched — the record, not the live status,
+    /// is the trigger. Because the record is *persisted* (see
+    /// `PlanQueueController.markAutoRun`), that guarantee holds across a
+    /// relaunch of the app, not just within a session. The path is recorded
+    /// before `launch` runs, so a failed launch does not re-fire on the next
+    /// refresh (no provisioning loop); the user can still Run it by hand.
     @MainActor
     static func enactAutoRun(
         docs: [PlanDoc],
         toggleOn: Bool,
         relativePath: (PlanDoc) -> String,
         status: (PlanDoc) -> PlanStatus,
-        enacted: inout Set<String>,
+        hasAutoRun: (String) -> Bool,
+        markAutoRun: (String) -> Void,
         launch: (PlanDoc) -> Void
     ) {
         guard toggleOn else { return }
         for plan in docs where plan.kind == .plan {
             let path = relativePath(plan)
-            guard !enacted.contains(path) else { continue }
+            guard !hasAutoRun(path) else { continue }
             guard shouldAutoRun(doc: plan, status: status(plan), toggleOn: toggleOn) else { continue }
-            enacted.insert(path)
+            markAutoRun(path)
             launch(plan)
         }
     }

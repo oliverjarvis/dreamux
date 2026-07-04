@@ -75,56 +75,80 @@ final class IntakeAutoRunTests: XCTestCase {
 
     func testEnactAutoRunLaunchesEligiblePlanOnce() {
         let plan = planDoc("2026-07-04-x.md", parallel: true)
-        var enacted: Set<String> = []
+        var fired: Set<String> = []
         var launched: [String] = []
-        let launch: (PlanDoc) -> Void = { launched.append($0.fileURL.lastPathComponent) }
 
         IntakeEnactment.enactAutoRun(
             docs: [plan], toggleOn: true,
             relativePath: { $0.fileURL.lastPathComponent },
-            status: { _ in .ready }, enacted: &enacted, launch: launch)
+            status: { _ in .ready },
+            hasAutoRun: { fired.contains($0) },
+            markAutoRun: { fired.insert($0) },
+            launch: { launched.append($0.fileURL.lastPathComponent) })
         XCTAssertEqual(launched, ["2026-07-04-x.md"], "the eligible parallel plan launches")
 
-        // Next refresh: still ready + parallel + toggle on, but the pair has
-        // enacted — it must NOT relaunch (edge-triggered off `enacted`).
+        // Next refresh in the same session: still ready + parallel + toggle
+        // on, but the fired record suppresses a relaunch.
         IntakeEnactment.enactAutoRun(
             docs: [plan], toggleOn: true,
             relativePath: { $0.fileURL.lastPathComponent },
-            status: { _ in .ready }, enacted: &enacted, launch: launch)
+            status: { _ in .ready },
+            hasAutoRun: { fired.contains($0) },
+            markAutoRun: { fired.insert($0) },
+            launch: { launched.append($0.fileURL.lastPathComponent) })
         XCTAssertEqual(launched, ["2026-07-04-x.md"], "auto-run fires at most once per plan")
     }
 
-    func testResetToReadyDoesNotRelaunch() {
+    /// The fired-once guarantee must survive a RELAUNCH, not just a refresh:
+    /// auto-run a parallel plan, then simulate a restart by loading a
+    /// brand-new `PlanQueueController` from the same on-disk file. The plan is
+    /// still `.ready` (its feature was closed and the ledger record pruned)
+    /// and the toggle still on — but the persisted record suppresses the
+    /// relaunch. This is the regression the in-memory-only set missed.
+    func testAutoRunRecordSurvivesRestart() throws {
+        let sandbox = try TestSandbox()
+        defer { sandbox.destroy() }
+        let project = try sandbox.makeProject(named: "demo")
         let plan = planDoc("2026-07-04-x.md", parallel: true)
-        var enacted: Set<String> = []
-        var launched: [String] = []
-        let launch: (PlanDoc) -> Void = { launched.append($0.fileURL.lastPathComponent) }
+        let key: (PlanDoc) -> String = { $0.fileURL.lastPathComponent }
 
-        // Auto-run, then the plan goes running, then it is reset back to
-        // `.ready` (worktree closed, ledger record lost). The enacted record
-        // — not the live status — is the trigger, so it never relaunches.
+        // First boot: the queue records the auto-run and persists it.
+        let firstBoot = PlanQueueController(project: project)
+        var firstLaunches: [String] = []
         IntakeEnactment.enactAutoRun(
-            docs: [plan], toggleOn: true,
-            relativePath: { $0.fileURL.lastPathComponent },
-            status: { _ in .ready }, enacted: &enacted, launch: launch)
+            docs: [plan], toggleOn: true, relativePath: key, status: { _ in .ready },
+            hasAutoRun: { firstBoot.hasAutoRun($0) },
+            markAutoRun: { firstBoot.markAutoRun($0) },
+            launch: { firstLaunches.append(key($0)) })
+        XCTAssertEqual(firstLaunches, ["2026-07-04-x.md"])
+
+        // Restart: a fresh controller loaded from disk still knows it fired.
+        let secondBoot = PlanQueueController(project: project)
+        XCTAssertTrue(secondBoot.hasAutoRun("2026-07-04-x.md"),
+                      "the fired-once record loaded from disk")
+        var secondLaunches: [String] = []
         IntakeEnactment.enactAutoRun(
-            docs: [plan], toggleOn: true,
-            relativePath: { $0.fileURL.lastPathComponent },
-            status: { _ in .ready }, enacted: &enacted, launch: launch)
-        XCTAssertEqual(launched, ["2026-07-04-x.md"], "a reset plan is never relaunched")
+            docs: [plan], toggleOn: true, relativePath: key, status: { _ in .ready },
+            hasAutoRun: { secondBoot.hasAutoRun($0) },
+            markAutoRun: { secondBoot.markAutoRun($0) },
+            launch: { secondLaunches.append(key($0)) })
+        XCTAssertTrue(secondLaunches.isEmpty,
+                      "a plan auto-run before restart is never relaunched")
     }
 
     func testToggleOffEnactsNothing() {
         let plan = planDoc("2026-07-04-x.md", parallel: true)
-        var enacted: Set<String> = []
+        var fired: Set<String> = []
         var launched: [String] = []
         IntakeEnactment.enactAutoRun(
             docs: [plan], toggleOn: false,
             relativePath: { $0.fileURL.lastPathComponent },
-            status: { _ in .ready }, enacted: &enacted,
+            status: { _ in .ready },
+            hasAutoRun: { fired.contains($0) },
+            markAutoRun: { fired.insert($0) },
             launch: { launched.append($0.fileURL.lastPathComponent) })
         XCTAssertTrue(launched.isEmpty, "no launch while the toggle is off")
-        XCTAssertTrue(enacted.isEmpty, "and nothing is recorded — turning it on later still fires")
+        XCTAssertTrue(fired.isEmpty, "and nothing is recorded — turning it on later still fires")
     }
 
     // MARK: - afterCaption

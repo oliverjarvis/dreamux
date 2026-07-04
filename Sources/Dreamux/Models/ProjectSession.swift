@@ -43,12 +43,6 @@ final class ProjectSession {
 
     @ObservationIgnored private var didBootstrap = false
 
-    /// Plans this session has already auto-run under the parallel toggle, by
-    /// relative path. Auto-run is edge-triggered off this set (the twin of
-    /// `PlanQueueController.enactedBlockers`): each plan fires at most once,
-    /// and one that was auto-run then reset to `.ready` is never relaunched.
-    @ObservationIgnored private var autoRunEnacted: Set<String> = []
-
     init(project: Project) {
         self.project = project
 
@@ -177,7 +171,8 @@ final class ProjectSession {
                 toggleOn: self.layout.autoRunParallel,
                 relativePath: { self.docStore.relativePath(of: $0) },
                 status: statusOf,
-                enacted: &self.autoRunEnacted,
+                hasAutoRun: { self.planQueue.hasAutoRun($0) },
+                markAutoRun: { self.planQueue.markAutoRun($0) },
                 launch: { self.autoRunPlan($0) })
         }
     }

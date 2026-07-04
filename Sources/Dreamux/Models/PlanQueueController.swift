@@ -39,6 +39,17 @@ final class PlanQueueController {
     /// again. Persisted next to `entries` in the same save file.
     @ObservationIgnored private(set) var enactedBlockers: [String: String] = [:]
 
+    /// Plans already auto-run under the parallel toggle, by relative path.
+    /// Intake auto-run is edge-triggered off this set the way enqueue is off
+    /// `enactedBlockers`: a plan fires at most once, and — because the record
+    /// is what triggers, not the plan's live status — a plan that was auto-run
+    /// then reset to `.ready` (its feature closed, its ledger record pruned)
+    /// is never relaunched, even across a relaunch of the app. Persisted next
+    /// to `enactedBlockers` in the same save file; NEVER pruned (a brand-new
+    /// plan file that reuses a retired path stays suppressed — the same
+    /// accepted trade-off `enactedBlockers` makes).
+    @ObservationIgnored private(set) var autoRanPlans: Set<String> = []
+
     /// How long an unchanged, quiescent session may sit before the
     /// queue asks for attention.
     static let stallThreshold: TimeInterval = 120
@@ -57,6 +68,7 @@ final class PlanQueueController {
         state = loaded?.state ?? .idle
         currentPlanPath = loaded?.currentPlanPath
         enactedBlockers = loaded?.enactedBlockers ?? [:]
+        autoRanPlans = Set(loaded?.autoRanPlans ?? [])
     }
 
     // MARK: - Mutations
@@ -105,6 +117,21 @@ final class PlanQueueController {
                 entries.append(path)
             }
         }
+        save()
+    }
+
+    /// Whether `path` has already been auto-run under the parallel toggle —
+    /// the edge-trigger read for intake auto-run (survives relaunch).
+    func hasAutoRun(_ path: String) -> Bool {
+        autoRanPlans.contains(path)
+    }
+
+    /// Record that `path` was auto-run under the parallel toggle so it never
+    /// fires again. Idempotent and persisted; call it before the launch so a
+    /// failed launch can't re-fire on the next watcher tick.
+    func markAutoRun(_ path: String) {
+        guard !path.isEmpty, !autoRanPlans.contains(path) else { return }
+        autoRanPlans.insert(path)
         save()
     }
 
@@ -275,6 +302,9 @@ final class PlanQueueController {
         // still decode (missing → no pairs enacted yet), never resetting a
         // resumed queue on upgrade.
         var enactedBlockers: [String: String]?
+        // Same backward-compat discipline: absent in pre-auto-run files
+        // (missing → nothing auto-run yet). Sorted array for a stable file.
+        var autoRanPlans: [String]?
     }
 
     private static func load(from url: URL) -> Payload? {
@@ -284,7 +314,7 @@ final class PlanQueueController {
 
     private func save() {
         let payload = Payload(entries: entries, state: state, currentPlanPath: currentPlanPath,
-                              enactedBlockers: enactedBlockers)
+                              enactedBlockers: enactedBlockers, autoRanPlans: autoRanPlans.sorted())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(payload) else { return }

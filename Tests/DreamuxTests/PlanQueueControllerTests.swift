@@ -121,6 +121,19 @@ final class PlanQueueControllerTests: XCTestCase {
                       "an already-enacted pair does not re-add after a reload")
     }
 
+    func testAutoRanPlansPersistAndSuppressAfterReload() {
+        controller.markAutoRun("docs/plans/parallel.md")
+        controller.markAutoRun("docs/plans/parallel.md")   // idempotent
+        XCTAssertTrue(controller.hasAutoRun("docs/plans/parallel.md"))
+        // The fired-once set round-trips: a reloaded controller (a relaunch of
+        // the app) still reports the plan as auto-run, so intake auto-run
+        // never relaunches it even after its feature was closed.
+        let reloaded = PlanQueueController(project: project)
+        XCTAssertTrue(reloaded.hasAutoRun("docs/plans/parallel.md"),
+                      "the auto-run record survives relaunch")
+        XCTAssertFalse(reloaded.hasAutoRun("docs/plans/other.md"))
+    }
+
     func testStartRunsFirstEntry() async {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/b.md")
