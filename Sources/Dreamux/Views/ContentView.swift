@@ -62,6 +62,17 @@ struct ContentView: View {
                     }
                 )
                 .frame(width: 210)
+            } else {
+                // Collapsed stub: a slim glass column keeping the traffic
+                // lights and the toggle — the card never hosts the lights
+                // (they collided with its header), and the toggle stays
+                // in one stable place in both states.
+                VStack(spacing: 10) {
+                    Color.clear.frame(height: 26)
+                    railToggle
+                    Spacer(minLength: 0)
+                }
+                .frame(width: 76)
             }
             // Custom split, NOT HSplitView: the NSSplitView behind it
             // restores its own pane sizes and OVERFLOWS whatever width
@@ -108,7 +119,7 @@ struct ContentView: View {
             // under the chrome bar, flush with the window bottom, inset
             // only on the sides.
             .panelCard()
-            .padding(.leading, showProjectsRail ? 6 : 10)
+            .padding(.leading, 6)
             .padding([.top, .bottom, .trailing], 10)
         }
         // The hidden titlebar still RESERVES a ~33pt top safe area, which
@@ -261,12 +272,6 @@ struct ContentView: View {
     private var projectHeaderRow: some View {
         let name = currentProject?.name ?? ""
         return HStack(spacing: 8) {
-            // Rail hidden → this header is the window's top-left: clear
-            // the floating traffic lights and host the rail toggle.
-            if !showProjectsRail {
-                Color.clear.frame(width: 66, height: 1)
-                railToggle
-            }
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(
