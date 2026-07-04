@@ -95,6 +95,11 @@ struct ContentView: View {
             .panelCard()
             .padding(.leading, showProjectsRail ? 2 : 8)
             .padding(.trailing, 8)
+            // 1pt, NOT 0: a card exactly flush with the safe-area top
+            // triggers SwiftUI's edge-extension heuristic and the whole
+            // layout slides up under the toolbar, clipping the headers
+            // and tab bar (verified empirically both ways).
+            .padding(.top, 1)
         }
         // Behind-window vibrancy: the rail sits on real glass (desktop
         // blur), like the reference chrome.
@@ -338,7 +343,11 @@ extension View {
     /// a rounded card on the window's darker backdrop, separated from its
     /// neighbors by gutters instead of hairlines.
     func panelCard() -> some View {
-        background(Color(nsColor: .windowBackgroundColor))
+        // ignoresSafeAreaEdges: [] keeps the fill inside the card's own
+        // bounds (the default .all lets an edge-touching background bleed
+        // into safe areas). The layout-level guard against under-toolbar
+        // extension is the 1pt top inset at the call site.
+        background(Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
