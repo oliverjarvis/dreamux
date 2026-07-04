@@ -4,7 +4,8 @@ import Foundation
 /// non-merged plan the planning agent needs to pick a disposition
 /// (parallel / wait / integrate) for a fresh idea. It rides *inside* the
 /// New Plan kickoff prompt, so it is terse, self-describing, and hard-
-/// capped — the caller fences it in a code block; this type never does.
+/// capped — the caller bounds it with `--- Current work in flight ---`
+/// delimiters (see `PlanPrompts.withIntake`); this type never does.
 ///
 /// `render` is a pure function (input order in, same bytes out, no I/O);
 /// `build` is the async assembly that reads the live `DocStore` and, for
