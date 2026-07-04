@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The right-side file explorer (a native `.inspector` panel). Presents
+/// The right-side file explorer — the card's third column. Presents
 /// the active feature's linked-repo worktrees as one tree — each repo a
 /// top-level node — and opens a file as a Monaco editor tab on click.
 struct FileTreePanel: View {
@@ -30,6 +30,9 @@ struct FileTreePanel: View {
                     }
                 }
                 .listStyle(.sidebar)
+                // No material of its own — the tree lives inside the
+                // card and shares its fill/transparency.
+                .scrollContentBackground(.hidden)
                 .id(reloadToken)
             }
         }

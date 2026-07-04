@@ -140,17 +140,23 @@ struct ContentView: View {
                 // The file tree is a third column INSIDE the card — the
                 // native .inspector brought its own material and backdrop
                 // and squared off the card's trailing corner at the seam.
+                // It slides in from the card's trailing edge (masked by
+                // the card's clip).
                 if showFileTree {
-                    fileTreeHandle
-                    FileTreePanel(
-                        store: store,
-                        repoStore: repoStore,
-                        tree: fileTree,
-                        onOpenFile: openFile
-                    )
-                    .frame(width: fileTreeWidth)
+                    HStack(spacing: 0) {
+                        fileTreeHandle
+                        FileTreePanel(
+                            store: store,
+                            repoStore: repoStore,
+                            tree: fileTree,
+                            onOpenFile: openFile
+                        )
+                        .frame(width: fileTreeWidth)
+                    }
+                    .transition(.move(edge: .trailing))
                 }
             }
+            .animation(.snappy(duration: 0.22), value: showFileTree)
             // ONE card holding the work-items column AND the content/tabs
             // together (connected, no gutter between them) — full height
             // under the chrome bar, flush with the window bottom, inset
