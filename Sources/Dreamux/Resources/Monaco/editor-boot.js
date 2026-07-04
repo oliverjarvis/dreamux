@@ -72,7 +72,8 @@ require(['vs/editor/editor.main'], function () {
     language: 'plaintext',
     theme: 'vs',
     automaticLayout: true,
-    minimap: { enabled: true }
+    minimap: { enabled: true },
+    fontSize: 14
   });
 
   editor.onDidChangeModelContent(function () {

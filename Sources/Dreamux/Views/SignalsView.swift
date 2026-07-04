@@ -335,7 +335,7 @@ private struct SignalRow: View {
                 .frame(width: 96, alignment: .leading)
 
             Text(entry.level.label)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 1)
@@ -373,7 +373,7 @@ private struct Chip: View {
     var body: some View {
         Button(action: onTap) {
             Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(isEnabled ? Color.white : tint)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 2)

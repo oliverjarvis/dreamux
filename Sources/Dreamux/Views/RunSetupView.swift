@@ -269,7 +269,7 @@ struct RunSetupView: View {
                         runners.reload(from: runConfig.rawTOML)
                     } label: {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
@@ -280,7 +280,7 @@ struct RunSetupView: View {
                             NSWorkspace.shared.activateFileViewerSelecting([runConfig.configURL])
                         } label: {
                             Image(systemName: "folder")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
@@ -591,7 +591,7 @@ private struct RunnerRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.orange)
                 Text("This runner crashed quickly.")
                     .font(.caption.weight(.semibold))
@@ -655,12 +655,12 @@ private struct RunnerRow: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                 Text(label)
                     .font(.caption.weight(.medium))
                 if !isDisabled {
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                 }
             }
             .foregroundStyle(status.isRunning ? Color.green : Color.primary)

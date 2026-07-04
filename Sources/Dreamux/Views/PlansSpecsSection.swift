@@ -141,11 +141,11 @@ struct PlansSpecsSection: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(layout.plansExpanded ? 90 : 0))
                     Text("Plans & Specs")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .kerning(0.6)
                         .textCase(.uppercase)
                         .foregroundStyle(.secondary)
@@ -157,7 +157,7 @@ struct PlansSpecsSection: View {
 
             Button { docStore.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .frame(width: 18, height: 18)
                     .foregroundStyle(.secondary)
                     .contentShape(Rectangle())
@@ -167,7 +167,7 @@ struct PlansSpecsSection: View {
 
             Button(action: onNewPlan) {
                 Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .frame(width: 18, height: 18)
                     .foregroundStyle(.secondary)
                     .contentShape(Rectangle())
@@ -317,12 +317,12 @@ struct PlansSpecsSection: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .frame(width: chevronColumnWidth, height: 18)
                 Image(systemName: glyph)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(anyRunning ? Color.green : Color.secondary)
                     .frame(width: 18)
                 Text(initiative.title)
@@ -472,7 +472,7 @@ struct PlansSpecsSection: View {
                 queue.remove(path)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
             .buttonStyle(.plain)
@@ -597,7 +597,7 @@ struct PlansSpecsSection: View {
                     if let feature = openableFeature {
                         Button { onOpenFeature(feature) } label: {
                             Image(systemName: "arrow.right.circle")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .frame(width: 22, height: 22)
                                 .contentShape(Rectangle())
@@ -637,7 +637,7 @@ struct PlansSpecsSection: View {
                 HStack(spacing: 8) {
                     Color.clear.frame(width: chevronColumnWidth, height: 18)
                     Image(systemName: status.glyph)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(status == .running ? Color.green : Color.secondary)
                         .frame(width: 18)
                     VStack(alignment: .leading, spacing: 2) {
@@ -709,7 +709,7 @@ struct PlansSpecsSection: View {
             withAnimation(.snappy(duration: 0.18)) { togglePlan(plan) }
         } label: {
             Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
                 .frame(width: chevronColumnWidth, height: 18)
@@ -762,7 +762,7 @@ struct PlansSpecsSection: View {
                 }
             } label: {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .frame(width: 16, height: 20)
                     .contentShape(Rectangle())
@@ -835,7 +835,7 @@ struct PlansSpecsSection: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: glyph)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: 16)
                 Text(task.title.isEmpty ? "Steps" : task.title)
@@ -975,7 +975,7 @@ struct PlansSpecsSection: View {
         docRow(spec, canRun: false) {
             HStack(spacing: 8) {
                 Image(systemName: PlanStatus.specOnly.glyph)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.orange)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
@@ -1065,7 +1065,7 @@ struct PlansSpecsSection: View {
                     if canRun && !hasRunControls {
                         Button { onRunPlan(doc) } label: {
                             Image(systemName: "play.fill")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 22, height: 22)
                                 .background(Circle().fill(Color.accentColor))
@@ -1100,7 +1100,7 @@ struct PlansSpecsSection: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
                     Text(title).font(.caption2.weight(.semibold))
                     Spacer(minLength: 0)

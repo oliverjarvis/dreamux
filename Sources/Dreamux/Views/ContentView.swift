@@ -225,13 +225,13 @@ struct ContentView: View {
                         )
                     )
                 Text(String(name.prefix(1)).uppercased())
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
                     .foregroundStyle(.white)
             }
             .frame(width: 20, height: 20)
 
             Text(name)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
@@ -252,7 +252,7 @@ struct ContentView: View {
     private var contextHeaderRow: some View {
         HStack(spacing: 6) {
             Text(activeContextTitle ?? " ")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)

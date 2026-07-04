@@ -54,7 +54,7 @@ final class TabSession: Identifiable {
 
         let theme = TerminalTheme(
             light: TerminalConfiguration { builder in
-                builder.withFontSize(13)
+                builder.withFontSize(14)
                 builder.withCursorStyle(.bar)
                 builder.withCursorStyleBlink(true)
                 builder.withWindowPaddingX(8)
@@ -62,7 +62,7 @@ final class TabSession: Identifiable {
                 releaseGhosttyShortcuts(&builder)
             },
             dark: TerminalConfiguration { builder in
-                builder.withFontSize(13)
+                builder.withFontSize(14)
                 builder.withCursorStyle(.bar)
                 builder.withCursorStyleBlink(true)
                 builder.withWindowPaddingX(8)

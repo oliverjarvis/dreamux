@@ -50,7 +50,7 @@ struct ProjectsRail: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
                 Text("Projects")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }

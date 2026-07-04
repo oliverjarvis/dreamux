@@ -38,7 +38,7 @@ struct FileTreePanel: View {
     private var header: some View {
         HStack {
             Text(store.activeWorkspace?.name ?? "Files")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .kerning(0.6)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
@@ -46,7 +46,7 @@ struct FileTreePanel: View {
             Spacer()
             Button { reloadToken = UUID() } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)

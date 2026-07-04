@@ -30,7 +30,7 @@ struct WorkspaceRunControls: View {
                     }
                 } label: {
                     Image(systemName: "safari")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 22, height: 22)
                         .background(Circle().fill(Color.primary.opacity(0.10)))
@@ -47,7 +47,7 @@ struct WorkspaceRunControls: View {
                 Button("Run Settings…") { configure() }
             } label: {
                 Image(systemName: isRunning ? "stop.fill" : "play.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 22, height: 22)
                     .background(Circle().fill(Color.green))

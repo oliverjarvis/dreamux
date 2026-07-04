@@ -22,6 +22,10 @@ struct DreamuxApp: App {
     var body: some Scene {
         WindowGroup("Project", id: "project", for: UUID.self) { $projectID in
             ProjectRootView(projectID: $projectID, projects: projects)
+                // Central type bump: every semantic font (.body/.callout/
+                // .caption…) in the window scales up one Dynamic Type
+                // notch — fixed-size fonts were swept up separately.
+                .dynamicTypeSize(.xLarge)
         }
         // One THIN toolbar spanning the whole window (traffic lights
         // inline, sidebar toggles beside them, no title text) — every

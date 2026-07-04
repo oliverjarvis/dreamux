@@ -262,7 +262,7 @@ struct WorkspaceSidebar: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                 Text("Add repository")
                     .font(.callout)
                 Spacer(minLength: 0)
@@ -285,11 +285,11 @@ struct WorkspaceSidebar: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(layout.filesExpanded ? 90 : 0))
                     Text("Orchestration Files")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .kerning(0.6)
                         .textCase(.uppercase)
                         .foregroundStyle(.secondary)
@@ -326,7 +326,7 @@ struct WorkspaceSidebar: View {
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .rotationEffect(.degrees(collapsed ? 0 : 90))
                 Image(systemName: "folder")
@@ -414,7 +414,7 @@ struct WorkspaceSidebar: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: tile.symbol)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(selected ? Color.accentColor : Color.primary)
                     .frame(width: 20)
                 Text(tile.label)
@@ -512,7 +512,7 @@ struct WorkspaceSidebar: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(tint.opacity(0.16))
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(tint)
         }
         .frame(width: 26, height: 26)
@@ -675,14 +675,14 @@ struct WorkspaceSidebar: View {
     private var repositoriesHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text("Repositories")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .kerning(0.6)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             if isWorking {
                 Image(systemName: "hourglass")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .help("Working…")
             }
@@ -959,7 +959,7 @@ struct WorkspaceSidebar: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "arrow.triangle.swap")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.orange)
                 Text("Switched \(notice.runnerName) off \(notice.fromBranches.joined(separator: ", ")) — it has one fixed port.")
                     .font(.caption2)
@@ -970,7 +970,7 @@ struct WorkspaceSidebar: View {
                     withAnimation(.snappy(duration: 0.18)) { switchNotice = nil }
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
@@ -1079,7 +1079,7 @@ private struct RepoRow: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.12))
                 Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             .frame(width: 26, height: 26)
@@ -1173,7 +1173,7 @@ private struct CustomizeWorkspaceSheet: View {
                             onPickSymbol(symbol)
                         } label: {
                             Image(systemName: symbol)
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: 16, weight: .semibold))
                                 .frame(width: 36, height: 36)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
