@@ -14,10 +14,10 @@
 
 ### Task 1: Fix-task writer
 
-- [ ] **Step 1:** New `Sources/Dreamux/Shell/CourseCorrection.swift`: pure functions that, given a parsed `PlanDoc`, an anchor (task line / phase / nil → current phase), a summary, and body text, produce the insertion — `### Task <next dotted number in phase>: Fix — <summary> *(course correction, <date>)*` plus `- [ ] **Step 1: …**` — and the byte-range/line where it goes (end of the anchor phase's task block, before the next `## `). Date injected by caller (no Date.now in pure code paths); dotted-number derivation covers both `Task N` and `Task N.M` schemes.
-- [ ] **Step 2:** A `@MainActor` applier that reads the file, applies the insertion, writes atomically, and lets the existing DocStore watcher pick up the change (no manual refresh).
-- [ ] **Step 3:** Tests: insertion-point table (mid-phase anchor, last phase, unsectioned plan, plan-level anchor resolving to current phase); numbering (`Task 1.10` after `Task 1.9`, `Task 8: Fix` in integer plans); round-trip (apply → `PlanDoc.parse` shows the new task, counts grow by 1, phase correct).
-- [ ] **Step 4: `swift test` green.**
+- [x] **Step 1:** New `Sources/Dreamux/Shell/CourseCorrection.swift`: pure functions that, given a parsed `PlanDoc`, an anchor (task line / phase / nil → current phase), a summary, and body text, produce the insertion — `### Task <next dotted number in phase>: Fix — <summary> *(course correction, <date>)*` plus `- [ ] **Step 1: …**` — and the byte-range/line where it goes (end of the anchor phase's task block, before the next `## `). Date injected by caller (no Date.now in pure code paths); dotted-number derivation covers both `Task N` and `Task N.M` schemes.
+- [x] **Step 2:** A `@MainActor` applier that reads the file, applies the insertion, writes atomically, and lets the existing DocStore watcher pick up the change (no manual refresh).
+- [x] **Step 3:** Tests: insertion-point table (mid-phase anchor, last phase, unsectioned plan, plan-level anchor resolving to current phase); numbering (`Task 1.10` after `Task 1.9`, `Task 8: Fix` in integer plans); round-trip (apply → `PlanDoc.parse` shows the new task, counts grow by 1, phase correct).
+- [x] **Step 4: `swift test` green.**
 
 ### Task 2: Nudge delivery engine
 
