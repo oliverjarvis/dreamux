@@ -27,11 +27,12 @@ struct DreamuxApp: App {
                 // notch — fixed-size fonts were swept up separately.
                 .dynamicTypeSize(.xLarge)
         }
-        // One THIN toolbar spanning the whole window (traffic lights
-        // inline, sidebar toggles beside them, no title text) — every
-        // column starts below it instead of a full-height sidebar
-        // swallowing the titlebar.
-        .windowToolbarStyle(.unifiedCompact(showsTitle: false))
+        // Custom chrome: no system titlebar/toolbar — ContentView draws
+        // its own thin top bar (the traffic lights overlay it at their
+        // standard spot). The system toolbar's safe-area machinery kept
+        // fighting the inset-card layout (edge-extension heuristics,
+        // swallowed gutters); owning the bar makes layout deterministic.
+        .windowStyle(.hiddenTitleBar)
         .commands {
             ProjectCommands()
             FileExplorerCommands()

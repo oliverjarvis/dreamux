@@ -20,6 +20,10 @@ struct ContentView: View {
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
     @State private var showProjectsRail = true
+    /// Work-items column width, dragged via the custom split handle.
+    /// Session-only, like the old HSplitView divider position.
+    @State private var workItemsWidth: CGFloat = 250
+    @State private var splitDragBaseWidth: CGFloat?
 
     private var store: WorkspaceStore { session.store }
     private var repoStore: RepoStore { session.repoStore }
@@ -42,6 +46,13 @@ struct ContentView: View {
         // starts below it. No NavigationSplitView: its macOS shape is a
         // full-height sidebar that swallows the titlebar, exactly what
         // this layout retires.
+        VStack(spacing: 0) {
+        // Our own thin top bar — the system titlebar is hidden
+        // (.hiddenTitleBar) because the window toolbar's safe-area
+        // machinery kept breaking the inset-card layout. The traffic
+        // lights overlay this bar at their standard spot; the leading
+        // padding clears them.
+        chromeBar
         HStack(spacing: 0) {
             if showProjectsRail {
                 ProjectsRail(
@@ -51,7 +62,11 @@ struct ContentView: View {
                 )
                 .frame(width: 210)
             }
-            HSplitView {
+            // Custom split, NOT HSplitView: the NSSplitView behind it
+            // restores its own pane sizes and OVERFLOWS whatever width
+            // SwiftUI proposes (it ate the card's trailing gutter and
+            // rounded corners; proven with a red-backdrop probe).
+            HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     // The project identity heads its own column: the rail
                     // picks a project, this column shows that project's
@@ -77,59 +92,34 @@ struct ContentView: View {
                         autoRunFailure: { session.autoRunFailures[$0] }
                     )
                 }
-                .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
+                .frame(width: workItemsWidth)
+
+                splitHandle
 
                 VStack(spacing: 0) {
                     contextHeaderRow
                     mainPane
                 }
-                // maxHeight keeps the HSplitView vertically greedy in every
-                // mode — without a height-flexible child the split collapses
-                // under the header row.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             // ONE card holding the work-items column AND the content/tabs
-            // together (connected, no gutter between them) — genuinely
-            // full height: flush with the toolbar above and the window
-            // edge below, inset only on the sides.
+            // together (connected, no gutter between them) — full height
+            // under the chrome bar, flush with the window bottom, inset
+            // only on the sides.
             .panelCard()
-            .padding(.leading, showProjectsRail ? 2 : 8)
-            .padding(.trailing, 8)
-            // 1pt, NOT 0: a card exactly flush with the safe-area top
-            // triggers SwiftUI's edge-extension heuristic and the whole
-            // layout slides up under the toolbar, clipping the headers
-            // and tab bar (verified empirically both ways).
-            .padding(.top, 1)
+            .padding(.leading, showProjectsRail ? 6 : 10)
+            .padding(.trailing, 10)
         }
-        // Behind-window vibrancy: the rail sits on real glass (desktop
-        // blur), like the reference chrome.
-        .background(VisualEffectBackground().ignoresSafeArea())
-        // The window title is the thin toolbar itself; no text title.
-        .navigationTitle("")
-        // Both sidebar toggles live in the toolbar, Cursor-style. Neither
-        // carries a `.keyboardShortcut` on purpose: a shortcut on a toolbar
-        // item isn't dispatched while the Ghostty terminal NSView is first
-        // responder (it just rings the bell) — ⌥⌘E lives in
-        // `FileExplorerCommands` instead (see `focusedSceneValue` below).
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    withAnimation(.snappy(duration: 0.18)) { showProjectsRail.toggle() }
-                } label: {
-                    Image(systemName: "sidebar.left")
-                        .foregroundStyle(showProjectsRail ? Color.accentColor : Color.secondary)
-                }
-                .help("Toggle projects sidebar")
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showFileTree.toggle()
-                } label: {
-                    Image(systemName: "sidebar.right")
-                        .foregroundStyle(showFileTree ? Color.accentColor : Color.secondary)
-                }
-                .help("Toggle file explorer (⌥⌘E)")
-            }
+        }
+        // Behind-window vibrancy with a dark scrim: the rail and chrome
+        // bar sit on real glass (desktop blur), and the scrim keeps the
+        // backdrop reliably darker than the card on any wallpaper — an
+        // unscrimmed glass gutter next to a dark card reads as nothing
+        // (the "missing" inset the red-backdrop probe disproved).
+        .background {
+            VisualEffectBackground()
+                .overlay(Color.black.opacity(0.28))
+                .ignoresSafeArea()
         }
         .inspector(isPresented: $showFileTree) {
             FileTreePanel(
@@ -212,6 +202,73 @@ struct ContentView: View {
         case .signals:
             SignalsView(signals: signals, runners: runners)
         }
+    }
+
+    /// The draggable seam between the work-items column and the content
+    /// pane — a 1pt hairline with a 9pt invisible grab area, clamped to
+    /// the column's old HSplitView bounds (220–380).
+    private var splitHandle: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let base = splitDragBaseWidth ?? workItemsWidth
+                                splitDragBaseWidth = base
+                                workItemsWidth = min(380, max(220, base + value.translation.width))
+                            }
+                            .onEnded { _ in splitDragBaseWidth = nil }
+                    )
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() }
+                        else { NSCursor.pop() }
+                    }
+            }
+    }
+
+    /// Our own titlebar replacement: traffic-light clearance, the two
+    /// sidebar toggles, glass background (from the root backdrop). The
+    /// toggles carry no `.keyboardShortcut` on purpose — a shortcut here
+    /// isn't dispatched while the Ghostty NSView is first responder (it
+    /// just rings the bell); ⌥⌘E lives in `FileExplorerCommands`.
+    private var chromeBar: some View {
+        HStack(spacing: 10) {
+            // Traffic lights render over this leading region.
+            Spacer().frame(width: 78)
+            Button {
+                withAnimation(.snappy(duration: 0.18)) { showProjectsRail.toggle() }
+            } label: {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(showProjectsRail ? Color.accentColor : Color.secondary)
+                    .frame(width: 26, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Toggle projects sidebar")
+
+            Spacer(minLength: 0)
+
+            Button {
+                showFileTree.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(showFileTree ? Color.accentColor : Color.secondary)
+                    .frame(width: 26, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Toggle file explorer (⌥⌘E)")
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 38)
+        .contentShape(Rectangle())
     }
 
     /// Compact project identity — a small accent-gradient glyph and the
@@ -345,14 +402,16 @@ extension View {
     func panelCard() -> some View {
         // ignoresSafeAreaEdges: [] keeps the fill inside the card's own
         // bounds (the default .all lets an edge-touching background bleed
-        // into safe areas). The layout-level guard against under-toolbar
-        // extension is the 1pt top inset at the call site.
+        // into safe areas). Stroke + shadow carry the "floating card"
+        // read on dark themes, where fill-vs-backdrop contrast alone is
+        // too subtle.
         background(Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
             )
+            .shadow(color: .black.opacity(0.35), radius: 14, y: 2)
     }
 }
 
