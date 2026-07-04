@@ -2,8 +2,9 @@ import XCTest
 @testable import Dreamux
 
 /// The → workspace affordance's visibility rule is the one piece of that
-/// row feature worth isolating from the view: it composes a status gate,
-/// name resolution, and feature existence. Table-tested directly, mirroring
+/// row feature worth isolating from the view: it composes name resolution
+/// and feature existence (deliberately status-independent — see the
+/// resolver's doc comment). Table-tested directly, mirroring
 /// `InitiativeProgressTests`.
 final class PlanWorkspacePresenceTests: XCTestCase {
     func testRunningRowWithLiveFeatureOpensIt() {
@@ -22,14 +23,18 @@ final class PlanWorkspacePresenceTests: XCTestCase {
             "gameboy")
     }
 
-    func testReadyAndInProgressAndMergedNeverShowAffordance() {
-        // Only in-flight rows carry a workspace to open; a not-yet-run,
-        // detached, or torn-down plan has none.
-        for status in [PlanStatus.ready, .inProgress, .merged, .specOnly] {
-            XCTAssertNil(
+    func testEveryStatusShowsAffordanceWhileWorkspaceExists() {
+        // With the Features list retired, this affordance is the only
+        // path to a plan-backed workspace's terminals — so it must show
+        // wherever Merge/Close/run-controls do (workspace exists),
+        // including the `.ready`-with-live-worktree record-loss window.
+        for status in [PlanStatus.ready, .inProgress, .running,
+                       .awaitingReview, .merged, .specOnly] {
+            XCTAssertEqual(
                 PlanWorkspacePresence.workspaceToOpen(
                     status: status, featureName: "gameboy", featureExists: { _ in true }),
-                "\(status) should not show the affordance")
+                "gameboy",
+                "\(status) with a live workspace must keep the affordance")
         }
     }
 

@@ -2,9 +2,12 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Collapsible "Plans & Specs" sidebar section (rendered above the
-/// Features list). Plans carry derived status + checkbox progress;
-/// unpaired specs surface as "needs plan"; everything else sits behind
-/// a Docs disclosure. Rows open in the workspace's editor tabs.
+/// Ad hoc group). Plans are the main item — grouped into initiatives,
+/// carrying derived status + checkbox progress, and, once a worktree
+/// exists, the workspace's controls (activate, run, merge, close);
+/// unpaired specs surface as "needs plan"; genuinely loose docs sit
+/// behind a Docs disclosure. Rows open docs in the workspace's editor
+/// tabs.
 struct PlansSpecsSection: View {
     @Bindable var docStore: DocStore
     @Bindable var layout: SidebarLayoutStore

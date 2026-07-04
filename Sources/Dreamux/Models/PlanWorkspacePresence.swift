@@ -6,18 +6,22 @@ import Foundation
 enum PlanWorkspacePresence {
     /// The feature to open from a plan row's → workspace affordance (the
     /// hover button and its *Open workspace* menu item), or nil when the
-    /// affordance shouldn't appear. It shows only for an in-flight plan
-    /// (`.running` or `.awaitingReview`) whose feature name resolves AND
-    /// currently exists in the sidebar — a `.ready`/`.merged` plan, an
-    /// unresolved name, or a torn-down feature all yield nil.
+    /// affordance shouldn't appear. It shows whenever the plan's feature
+    /// name resolves AND that workspace currently exists — NOT
+    /// status-gated: with the Features list retired this affordance is
+    /// the only path to a plan-backed workspace's terminals, so wherever
+    /// Merge/Close/run-controls appear (workspace exists), activation
+    /// must too. That deliberately covers the `.ready`-with-live-worktree
+    /// window (ledger record-loss, name collisions) where status alone
+    /// would hide it. An unresolved name or torn-down feature yields nil.
+    /// `status` stays in the signature so future status-scoped styling
+    /// has the seam, and so tests document the status-independence.
     static func workspaceToOpen(
         status: PlanStatus,
         featureName: String?,
         featureExists: (String) -> Bool
     ) -> String? {
-        guard status == .running || status == .awaitingReview,
-              let name = featureName, featureExists(name)
-        else { return nil }
+        guard let name = featureName, featureExists(name) else { return nil }
         return name
     }
 }
