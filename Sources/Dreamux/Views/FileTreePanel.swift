@@ -58,7 +58,9 @@ struct FileTreePanel: View {
             .help("Refresh")
         }
         .padding(.horizontal, 12)
-        .frame(height: 26)
+        // Bonsplit's TabBarMetrics.barHeight — the FILES strip sits next
+        // to the tab bar and their bottom hairlines must align.
+        .frame(height: 33)
     }
 
     @ViewBuilder
