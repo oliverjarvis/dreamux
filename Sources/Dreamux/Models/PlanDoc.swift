@@ -62,6 +62,13 @@ struct PlanDoc: Identifiable, Equatable {
     /// leave this nil; an unresolvable path degrades visibly downstream
     /// rather than here.
     let runsAfter: String?
+    /// Whether the plan states the parallel disposition explicitly with a
+    /// `**Runs:** parallel` header. The parser folds `parallel` into
+    /// `runsAfter == nil`, which is indistinguishable from no header at
+    /// all — but the auto-run toggle must fire ONLY on an explicit parallel
+    /// header, so this flag preserves the distinction (fence-guarded, same
+    /// header line as `runsAfter`).
+    let declaresParallel: Bool
     let checkedSteps: Int
     let totalSteps: Int
     /// Tasks in document order (`### Task N:` headings), each carrying
@@ -77,6 +84,7 @@ struct PlanDoc: Identifiable, Equatable {
         goal: String?,
         specReference: String?,
         runsAfter: String? = nil,
+        declaresParallel: Bool = false,
         checkedSteps: Int,
         totalSteps: Int,
         tasks: [PlanTask]
@@ -88,6 +96,7 @@ struct PlanDoc: Identifiable, Equatable {
         self.goal = goal
         self.specReference = specReference
         self.runsAfter = runsAfter
+        self.declaresParallel = declaresParallel
         self.checkedSteps = checkedSteps
         self.totalSteps = totalSteps
         self.tasks = tasks
@@ -100,6 +109,7 @@ struct PlanDoc: Identifiable, Equatable {
         var goal: String?
         var specReference: String?
         var runsAfter: String?
+        var declaresParallel = false
         var hasTaskHeading = false
         var checked = 0, total = 0
 
@@ -146,8 +156,9 @@ struct PlanDoc: Identifiable, Equatable {
             if specReference == nil, let value = headerValue(line, field: "Spec") {
                 specReference = specPathToken(value)
             }
-            if runsAfter == nil, let value = headerValue(line, field: "Runs") {
-                runsAfter = runsAfterPath(value)
+            if let runsValue = headerValue(line, field: "Runs") {
+                if runsAfter == nil { runsAfter = runsAfterPath(runsValue) }
+                if !declaresParallel { declaresParallel = declaresParallelValue(runsValue) }
             }
 
             if line.hasPrefix("### ") {
@@ -205,6 +216,7 @@ struct PlanDoc: Identifiable, Equatable {
             goal: goal,
             specReference: specReference,
             runsAfter: runsAfter,
+            declaresParallel: declaresParallel,
             checkedSteps: checked,
             totalSteps: total,
             tasks: tasks.map {
@@ -299,6 +311,15 @@ struct PlanDoc: Identifiable, Equatable {
         else { return nil }
         let token = specPathToken(String(value[keyword.upperBound...]))
         return token.hasSuffix(".md") ? token : nil
+    }
+
+    /// Whether a `**Runs:**` value states the `parallel` disposition. Only a
+    /// leading `parallel` whole word counts — the same word discipline
+    /// `runsAfterPath` applies to `after`, so `parallelism` is not it and a
+    /// trailing note (`parallel — own worktree`) is tolerated. `after …`,
+    /// absent, and malformed values all read false.
+    private static func declaresParallelValue(_ value: String) -> Bool {
+        value.range(of: #"^parallel\b"#, options: .regularExpression) != nil
     }
 
     /// Strip surrounding backticks and any ` — trailing prose`.

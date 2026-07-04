@@ -43,6 +43,12 @@ final class ProjectSession {
 
     @ObservationIgnored private var didBootstrap = false
 
+    /// Plans this session has already auto-run under the parallel toggle, by
+    /// relative path. Auto-run is edge-triggered off this set (the twin of
+    /// `PlanQueueController.enactedBlockers`): each plan fires at most once,
+    /// and one that was auto-run then reset to `.ready` is never relaunched.
+    @ObservationIgnored private var autoRunEnacted: Set<String> = []
+
     init(project: Project) {
         self.project = project
 
@@ -120,23 +126,6 @@ final class ProjectSession {
             )
         }
 
-        // Intake enactment: every docs rescan auto-enqueues any freshly
-        // discovered `**Runs:** after <blocker>` plan behind its blocker.
-        // Weak captures — the queue and stores are owned by this bundle.
-        docStore.onRefresh = { [weak docStore, weak store, weak planQueue] in
-            guard let docStore, let store, let planQueue else { return }
-            IntakeEnactment.enact(
-                docs: docStore.docs,
-                queue: planQueue,
-                relativePath: { docStore.relativePath(of: $0) },
-                resolveReference: { docStore.resolvedURL(forReference: $0) },
-                status: { doc in
-                    docStore.status(for: doc) { name in
-                        store.workspaces.contains { $0.name == name }
-                    }
-                })
-        }
-
         self.store = store
         self.repoStore = repoStore
         self.layout = layout
@@ -162,6 +151,48 @@ final class ProjectSession {
             // When e2e is inactive the bridge is nil — park on the
             // bundle-local channel the sidebar also observes.
             self.pendingGateMergeWorkspaceID = workspace.id
+        }
+
+        // Intake enactment: every docs rescan (1) auto-enqueues any freshly
+        // discovered `**Runs:** after <blocker>` plan behind its blocker, and
+        // (2) auto-runs an explicit `**Runs:** parallel` plan when the
+        // per-project toggle is on — both edge-triggered so each fires at
+        // most once. Weak self breaks the docStore → closure → bundle cycle;
+        // wired here (not with the other stores) because it captures self.
+        docStore.onRefresh = { [weak self] in
+            guard let self else { return }
+            let statusOf: (PlanDoc) -> PlanStatus = { doc in
+                self.docStore.status(for: doc) { name in
+                    self.store.workspaces.contains { $0.name == name }
+                }
+            }
+            IntakeEnactment.enact(
+                docs: self.docStore.docs,
+                queue: self.planQueue,
+                relativePath: { self.docStore.relativePath(of: $0) },
+                resolveReference: { self.docStore.resolvedURL(forReference: $0) },
+                status: statusOf)
+            IntakeEnactment.enactAutoRun(
+                docs: self.docStore.docs,
+                toggleOn: self.layout.autoRunParallel,
+                relativePath: { self.docStore.relativePath(of: $0) },
+                status: statusOf,
+                enacted: &self.autoRunEnacted,
+                launch: { self.autoRunPlan($0) })
+        }
+    }
+
+    /// Launch a plan under the auto-run toggle: the same worktree+terminal
+    /// path the queue's `runPlan` closure and the Run Plan sheet use, with the
+    /// filename-derived branch and every linked repo. Fire-and-forget — a
+    /// launch failure leaves the plan `.ready` (the enacted record already
+    /// stuck, so it won't retry) and the user can Run it by hand.
+    private func autoRunPlan(_ doc: PlanDoc) {
+        Task {
+            try? await planRunner.runPlan(
+                doc,
+                branchName: PlanDoc.branchName(forFileName: doc.fileURL.lastPathComponent),
+                repoNames: repoStore.repositories.map(\.name))
         }
     }
 

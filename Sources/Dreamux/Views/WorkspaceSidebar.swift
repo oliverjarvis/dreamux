@@ -115,6 +115,7 @@ struct WorkspaceSidebar: View {
         }
         .sheet(isPresented: $showNewPlan) {
             NewPlanSheet(
+                autoRunParallel: $layout.autoRunParallel,
                 onSubmit: { idea in
                     showNewPlan = false
                     openPlanningSession { digest in

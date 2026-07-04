@@ -13,6 +13,12 @@ final class SidebarLayoutStore {
     var plansExpanded: Bool {
         didSet { if plansExpanded != oldValue { save() } }
     }
+    /// Auto-run parallel plans on discovery (spec: Decisions §1). Default
+    /// OFF — a `**Runs:** parallel` plan lands `ready` for an explicit Run
+    /// click until the user opts into zero-friction launching.
+    var autoRunParallel: Bool {
+        didSet { if autoRunParallel != oldValue { save() } }
+    }
 
     @ObservationIgnored private let configURL: URL
 
@@ -24,6 +30,7 @@ final class SidebarLayoutStore {
         tiles = Self.reconcile(loaded?.tiles ?? SidebarTile.allCases)
         featureOrder = loaded?.features ?? []
         plansExpanded = loaded?.plansExpanded ?? true
+        autoRunParallel = loaded?.autoRunParallel ?? false
     }
 
     /// Order discovered features by the saved list: known names first in
@@ -59,6 +66,7 @@ final class SidebarLayoutStore {
         var tiles: [SidebarTile]
         var features: [String]
         var plansExpanded: Bool?
+        var autoRunParallel: Bool?
     }
 
     /// Keep saved tile order but guarantee every built-in tile is present
@@ -77,7 +85,8 @@ final class SidebarLayoutStore {
     }
 
     private func save() {
-        let payload = Payload(tiles: tiles, features: featureOrder, plansExpanded: plansExpanded)
+        let payload = Payload(tiles: tiles, features: featureOrder,
+                              plansExpanded: plansExpanded, autoRunParallel: autoRunParallel)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(payload) else { return }

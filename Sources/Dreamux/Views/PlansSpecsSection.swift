@@ -525,6 +525,13 @@ struct PlansSpecsSection: View {
         // affordance and, like feature rows, stay visible while running.
         let workspace = name.flatMap(workspaceForFeature)
         let runnerRunning = workspace.map { !runners.runningRunners(onBranch: $0.name).isEmpty } ?? false
+        // A `**Runs:** after <blocker>` plan carries the blocker's title in
+        // its caption (resolved via DocStore; `<filename> (missing)` when the
+        // path doesn't resolve — never a silent drop).
+        let afterCaption = IntakeEnactment.afterCaption(runsAfter: plan.runsAfter) { reference in
+            let target = docStore.resolvedURL(forReference: reference)
+            return docStore.docs.first { $0.fileURL.standardizedFileURL == target }?.title
+        }
         // The disclosure chevron overlays the row's leading gap rather than
         // nesting inside its open-doc button — the same on-top idiom the
         // feature rows use for their hover controls, so a click on the
@@ -604,6 +611,11 @@ struct PlansSpecsSection: View {
                             }
                             if let blockedBy {
                                 Text("· blocked by \(blockedBy)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            if let afterCaption {
+                                Text("· \(afterCaption)")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
                             }
@@ -1127,6 +1139,11 @@ struct RunPlanSheet: View {
 /// Collects the idea, then the caller opens the planning terminal with
 /// a brainstorming kickoff carrying it.
 struct NewPlanSheet: View {
+    /// Per-project auto-run toggle (spec: Decisions §1). Bound to
+    /// `SidebarLayoutStore.autoRunParallel` so a change persists immediately;
+    /// default OFF. When ON, a discovered `**Runs:** parallel` plan launches
+    /// itself instead of waiting for an explicit Run click.
+    @Binding var autoRunParallel: Bool
     let onSubmit: (_ idea: String) -> Void
     let onCancel: () -> Void
 
@@ -1146,6 +1163,9 @@ struct NewPlanSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(Color.primary.opacity(0.12)))
             HStack {
+                Toggle("Run parallel plans automatically", isOn: $autoRunParallel)
+                    .toggleStyle(.checkbox)
+                    .font(.caption)
                 Spacer()
                 Button("Cancel", action: onCancel)
                 Button("Start Planning") {

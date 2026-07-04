@@ -78,4 +78,13 @@ final class SidebarLayoutStoreTests: XCTestCase {
         let reloaded = SidebarLayoutStore(project: project)
         XCTAssertFalse(reloaded.plansExpanded)
     }
+
+    @MainActor
+    func testAutoRunParallelPersists() throws {
+        let store = SidebarLayoutStore(project: project)
+        XCTAssertFalse(store.autoRunParallel, "auto-run is off by default")
+        store.autoRunParallel = true
+        let reloaded = SidebarLayoutStore(project: project)
+        XCTAssertTrue(reloaded.autoRunParallel, "the toggle round-trips through the config file")
+    }
 }

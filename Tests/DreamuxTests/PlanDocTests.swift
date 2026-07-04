@@ -173,6 +173,85 @@ final class PlanDocTests: XCTestCase {
         XCTAssertNil(d.runsAfter)
     }
 
+    // MARK: - `**Runs:** parallel` disposition (declaresParallel)
+
+    /// `**Runs:** parallel` sets `declaresParallel` (and leaves `runsAfter`
+    /// nil) — the explicit header the auto-run toggle keys off, distinct from
+    /// no header at all.
+    func testDeclaresParallelOnExplicitHeader() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+        **Runs:** parallel
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertTrue(d.declaresParallel)
+        XCTAssertNil(d.runsAfter)
+    }
+
+    /// A trailing note after `parallel` is tolerated (same word discipline as
+    /// `after`); `parallelism` is NOT the disposition.
+    func testDeclaresParallelWordDiscipline() {
+        let note = doc("2026-07-04-a.md", """
+        # A Implementation Plan
+        **Runs:** parallel — own worktree, ready now
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertTrue(note.declaresParallel)
+
+        let ism = doc("2026-07-04-b.md", """
+        # B Implementation Plan
+        **Runs:** parallelism study
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertFalse(ism.declaresParallel)
+    }
+
+    /// An `after` header, an absent header, and a malformed value all leave
+    /// `declaresParallel` false — only the explicit `parallel` word sets it.
+    func testDeclaresParallelFalseForAfterAbsentAndMalformed() {
+        let after = doc("2026-07-04-a.md", """
+        # A Implementation Plan
+        **Runs:** after docs/plans/queue.md
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertFalse(after.declaresParallel)
+
+        let absent = doc("2026-07-04-b.md", """
+        # B Implementation Plan
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertFalse(absent.declaresParallel)
+
+        let malformed = doc("2026-07-04-c.md", """
+        # C Implementation Plan
+        **Runs:** whenever
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertFalse(malformed.declaresParallel)
+    }
+
+    /// The fence guard hides a `**Runs:** parallel` line inside a code fence
+    /// — a documented example is not a live header (mirrors `runsAfter`).
+    func testDeclaresParallelInsideCodeFenceIsIgnored() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+
+        ```md
+        **Runs:** parallel
+        ```
+
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertFalse(d.declaresParallel)
+    }
+
     func testPlanByTaskAndCheckboxShape() {
         let d = doc("notes.md", """
         # Some work

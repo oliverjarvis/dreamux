@@ -51,4 +51,68 @@ enum IntakeEnactment {
             queue.ensureQueued(relativePath(plan), after: relativePath(blocker))
         }
     }
+
+    /// Whether a freshly discovered plan should auto-launch under the
+    /// per-project auto-run toggle (spec: Decisions §1 — default OFF, and an
+    /// explicit `**Runs:** parallel` header is required; absence stays
+    /// manual). True only when the toggle is on, the doc is a runnable PLAN
+    /// still in `.ready`, it states `parallel` explicitly
+    /// (`declaresParallel`), and it names no blocker (`runsAfter == nil` —
+    /// the spec's "a fresh plan with no runsAfter and a stated-parallel
+    /// disposition"). A toggle-off, a spec/doc kind, an already-run plan, or
+    /// the absence of the explicit header all read false.
+    ///
+    /// Pure over its inputs so the decision table is unit-testable without a
+    /// live session; the edge-trigger (fire at most once per plan) lives in
+    /// `enactAutoRun`, not here.
+    static func shouldAutoRun(doc: PlanDoc, status: PlanStatus, toggleOn: Bool) -> Bool {
+        toggleOn
+            && doc.kind == .plan
+            && doc.declaresParallel
+            && doc.runsAfter == nil
+            && status == .ready
+    }
+
+    /// Auto-run enactment (spec: "Enactment (app side)"). For every plan that
+    /// `shouldAutoRun` and hasn't already been auto-run, invoke `launch` and
+    /// record its `relativePath` in `enacted`.
+    ///
+    /// Edge-triggered off `enacted`, mirroring the queue's `enactedBlockers`
+    /// discipline: a plan fires at most once, and a plan that was auto-run and
+    /// later reset to `.ready` (its worktree closed, ledger record lost) is
+    /// never relaunched — the record, not the live status, is the trigger.
+    /// The path is recorded before `launch` runs, so a failed launch does not
+    /// re-fire on the next refresh (no provisioning loop); the user can still
+    /// Run it by hand.
+    @MainActor
+    static func enactAutoRun(
+        docs: [PlanDoc],
+        toggleOn: Bool,
+        relativePath: (PlanDoc) -> String,
+        status: (PlanDoc) -> PlanStatus,
+        enacted: inout Set<String>,
+        launch: (PlanDoc) -> Void
+    ) {
+        guard toggleOn else { return }
+        for plan in docs where plan.kind == .plan {
+            let path = relativePath(plan)
+            guard !enacted.contains(path) else { continue }
+            guard shouldAutoRun(doc: plan, status: status(plan), toggleOn: toggleOn) else { continue }
+            enacted.insert(path)
+            launch(plan)
+        }
+    }
+
+    /// The `after <blocker>` caption a waiting plan carries beside its status
+    /// (spec: "Enactment (app side)" — the sidebar treatment). `nil` for a
+    /// plan with no `runsAfter`; `after <title>` when the blocker resolves to
+    /// a known doc via `resolveTitle`; `after <filename> (missing)` when it
+    /// doesn't — an unresolvable blocker degrades visibly rather than
+    /// vanishing (spec: Decisions §3). Pure over `resolveTitle` so the view
+    /// can inject DocStore resolution and the formatting stays unit-testable.
+    static func afterCaption(runsAfter: String?, resolveTitle: (String) -> String?) -> String? {
+        guard let runsAfter else { return nil }
+        if let title = resolveTitle(runsAfter) { return "after \(title)" }
+        return "after \((runsAfter as NSString).lastPathComponent) (missing)"
+    }
 }
