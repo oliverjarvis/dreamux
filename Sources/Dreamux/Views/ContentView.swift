@@ -111,6 +111,12 @@ struct ContentView: View {
             .padding(.leading, showProjectsRail ? 6 : 10)
             .padding([.top, .bottom, .trailing], 10)
         }
+        // The hidden titlebar still RESERVES a ~33pt top safe area, which
+        // pushed the whole layout (and the card) down as a phantom
+        // header band. Claim it explicitly: the layout starts at the
+        // window's physical top edge — the rail's 38pt top zone provides
+        // the traffic-light clearance instead.
+        .ignoresSafeArea(edges: .top)
         // Behind-window vibrancy with a dark scrim: the rail and chrome
         // bar sit on real glass (desktop blur), and the scrim keeps the
         // backdrop reliably darker than the card on any wallpaper — an
