@@ -415,11 +415,11 @@ struct WorkspaceSidebar: View {
             HStack(spacing: 10) {
                 Image(systemName: tile.symbol)
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    .foregroundStyle(selected ? Color.accentColor : Color.primary)
                     .frame(width: 20)
                 Text(tile.label)
                     .font(.callout)
-                    .foregroundStyle(selected ? .primary : .secondary)
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
