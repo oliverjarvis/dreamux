@@ -29,6 +29,9 @@ struct ContentView: View {
     @State private var splitDragBaseWidth: CGFloat?
     /// New Project sheet fired from the collapsed rail stub.
     @State private var showCreateProject = false
+    /// Appearance knobs (Settings window) — applied live.
+    @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
+    @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
 
     private var store: WorkspaceStore { session.store }
     private var repoStore: RepoStore { session.repoStore }
@@ -118,9 +121,9 @@ struct ContentView: View {
             // together (connected, no gutter between them) — full height
             // under the chrome bar, flush with the window bottom, inset
             // only on the sides.
-            .panelCard()
-            .padding(.leading, 6)
-            .padding([.top, .bottom, .trailing], 10)
+            .panelCard(shadow: cardShadow)
+            .padding(.leading, edgeInsets ? 6 : 0)
+            .padding([.top, .bottom, .trailing], edgeInsets ? 10 : 0)
         }
         // The hidden titlebar still RESERVES a ~33pt top safe area, which
         // pushed the whole layout (and the card) down as a phantom
@@ -383,7 +386,9 @@ struct ContentView: View {
             .help("Toggle file explorer (⌥⌘E)")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        // Same height as projectHeaderRow — the two header strips form
+        // one continuous band across the card.
+        .frame(height: 36)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
     }
@@ -500,19 +505,19 @@ extension View {
     /// The floating-panel treatment (Codex/Linear-style): the view becomes
     /// a rounded card on the window's darker backdrop, separated from its
     /// neighbors by gutters instead of hairlines.
-    func panelCard() -> some View {
+    func panelCard(shadow: Bool = true) -> some View {
         // ignoresSafeAreaEdges: [] keeps the fill inside the card's own
         // bounds (the default .all lets an edge-touching background bleed
         // into safe areas). Stroke + shadow carry the "floating card"
         // read on dark themes, where fill-vs-backdrop contrast alone is
-        // too subtle.
+        // too subtle; the shadow is a Settings appearance knob.
         background(Color(nsColor: .windowBackgroundColor), ignoresSafeAreaEdges: [])
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.35), radius: 14, y: 2)
+            .shadow(color: .black.opacity(shadow ? 0.35 : 0), radius: 14, y: 2)
     }
 }
 

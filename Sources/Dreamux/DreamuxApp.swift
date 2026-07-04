@@ -39,6 +39,11 @@ struct DreamuxApp: App {
             IntegrationCommands()
             NotificationCommands()
         }
+
+        // ⌘, / app-menu "Settings…" — appearance knobs for the chrome.
+        Settings {
+            SettingsView()
+        }
     }
 }
 

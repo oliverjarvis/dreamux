@@ -62,11 +62,14 @@ struct ProjectsRail: View {
         .scrollContentBackground(.hidden)
         // Top zone: the traffic lights float over the leading edge (the
         // rail runs to the very top of the window); the collapse toggle
-        // sits at the trailing edge, then the Projects label leads the
-        // list below.
+        // sits at the far right of the Projects header row.
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
+                Color.clear.frame(height: 30)
                 HStack {
+                    Text("Projects")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Button(action: onToggleRail) {
                         Image(systemName: "sidebar.left")
@@ -78,15 +81,8 @@ struct ProjectsRail: View {
                     .buttonStyle(.plain)
                     .help("Toggle projects sidebar")
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 38)
-                HStack {
-                    Text("Projects")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 12)
+                .padding(.leading, 12)
+                .padding(.trailing, 10)
                 .padding(.bottom, 6)
             }
         }
