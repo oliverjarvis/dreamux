@@ -57,6 +57,13 @@ private struct ProjectWindowContents: View {
             // this window's live stores and switch action.
             session.registerWithE2E()
             E2ERegistry.shared.registerProjectSwitcher(onSwitchProject)
+            // App-context only (UNUserNotificationCenter is unavailable
+            // to SPM test processes): auto-run failures notify — the
+            // launch is unattended by nature.
+            session.onAutoRunFailure = { title, message in
+                NotificationManager.shared.notify(
+                    title: "Couldn't auto-run \(title)", body: message)
+            }
         }
         .onDisappear {
             // e2e bookkeeping (handles are weak; the bundle lives on in

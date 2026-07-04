@@ -65,7 +65,8 @@ struct ContentView: View {
                     onCourseCorrectionNudge: { plan, summary, priority in
                         session.enqueueCourseCorrectionNudge(
                             plan: plan, summary: summary, priority: priority)
-                    }
+                    },
+                    autoRunFailure: { session.autoRunFailures[$0] }
                 )
                 .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 

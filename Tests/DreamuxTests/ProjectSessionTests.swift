@@ -165,4 +165,42 @@ final class ProjectSessionTests: XCTestCase {
                       "remounts must reattach the same NSView, not build a fresh surface")
         XCTAssertTrue(first.controller === tab.viewState.controller)
     }
+
+    // MARK: - Auto-run failure surfacing
+
+    /// A fizzled unattended launch must never be silent: the error lands
+    /// in `autoRunFailures` (row caption) and fires the notification
+    /// hook. Zero repositories makes the launch deterministically fail
+    /// at provisioning.
+    func testAutoRunFailureIsRecordedAndNotified() async throws {
+        let project = try sandbox.makeProject(named: "alpha")
+        let planURL = project.rootPath
+            .appendingPathComponent("docs/plans/2026-07-04-solo.md")
+        try FileManager.default.createDirectory(
+            at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        # Solo Implementation Plan
+
+        **Runs:** parallel
+
+        ### Task 1: work
+        - [ ] **Step 1: do it**
+        """.write(to: planURL, atomically: true, encoding: .utf8)
+
+        let session = ProjectSession(project: project)
+        session.layout.autoRunParallel = true
+        var notified: (title: String, message: String)?
+        session.onAutoRunFailure = { notified = ($0, $1) }
+
+        session.docStore.refresh()
+
+        let path = "docs/plans/2026-07-04-solo.md"
+        for _ in 0..<200 {
+            if session.autoRunFailures[path] != nil { break }
+            await Task.yield()
+        }
+        XCTAssertNotNil(session.autoRunFailures[path],
+                        "the failed launch must be visible, not silent")
+        XCTAssertEqual(notified?.title, "Solo Implementation Plan")
+    }
 }

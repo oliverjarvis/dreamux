@@ -42,6 +42,21 @@ final class ProjectSession {
     /// the close-side twin of `pendingGateMergeWorkspaceID`.
     var pendingCloseWorkspaceID: UUID?
 
+    /// Auto-run launches that failed, keyed by plan relative path — the
+    /// visible record of an unattended launch going wrong (name collision
+    /// with an existing feature, no repositories, …). The fired-once mark
+    /// deliberately sticks on failure (no retry-spam loop), so without
+    /// this the plan would just sit `ready` with no explanation. Cleared
+    /// only by a later successful auto-run of the same path; manual Run
+    /// always works regardless.
+    var autoRunFailures: [String: String] = [:]
+
+    /// App-context hook for surfacing an auto-run failure outside the
+    /// sidebar (a user notification). Wired by `ProjectWindowContents`
+    /// — NOT in `init` — because `UNUserNotificationCenter` cannot be
+    /// touched from SPM test processes. `(planTitle, message)`.
+    @ObservationIgnored var onAutoRunFailure: ((String, String) -> Void)?
+
     @ObservationIgnored private var didBootstrap = false
 
     init(project: Project) {
@@ -259,15 +274,26 @@ final class ProjectSession {
 
     /// Launch a plan under the auto-run toggle: the same worktree+terminal
     /// path the queue's `runPlan` closure and the Run Plan sheet use, with the
-    /// filename-derived branch and every linked repo. Fire-and-forget — a
-    /// launch failure leaves the plan `.ready` (the enacted record already
-    /// stuck, so it won't retry) and the user can Run it by hand.
+    /// filename-derived branch and every linked repo. A launch failure
+    /// leaves the plan `.ready` (the enacted record already stuck, so it
+    /// won't retry) — but never silently: the error lands in
+    /// `autoRunFailures` (rendered as a row caption) and fires
+    /// `onAutoRunFailure` (a user notification in app context), because
+    /// auto-run is by nature unattended.
     private func autoRunPlan(_ doc: PlanDoc) {
+        let path = docStore.relativePath(of: doc)
         Task {
-            try? await planRunner.runPlan(
-                doc,
-                branchName: PlanDoc.branchName(forFileName: doc.fileURL.lastPathComponent),
-                repoNames: repoStore.repositories.map(\.name))
+            do {
+                try await planRunner.runPlan(
+                    doc,
+                    branchName: PlanDoc.branchName(forFileName: doc.fileURL.lastPathComponent),
+                    repoNames: repoStore.repositories.map(\.name))
+                autoRunFailures[path] = nil
+            } catch {
+                let message = error.localizedDescription
+                autoRunFailures[path] = message
+                onAutoRunFailure?(doc.title, message)
+            }
         }
     }
 

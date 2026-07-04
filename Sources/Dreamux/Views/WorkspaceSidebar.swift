@@ -32,6 +32,9 @@ struct WorkspaceSidebar: View {
     /// (owned by the `ProjectSession` bundle this view can't see) — forwarded
     /// straight into `PlansSpecsSection`.
     let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
+    /// Auto-run failure lookup (`ProjectSession.autoRunFailures`) —
+    /// forwarded straight into `PlansSpecsSection`.
+    let autoRunFailure: (String) -> String?
 
     @State private var showAddFeature = false
     @State private var showAddRepo = false
@@ -224,7 +227,8 @@ struct WorkspaceSidebar: View {
                 makeRunControls: { runControls(for: $0) },
                 gateMergeWorkspaceID: $gateMergeWorkspaceID,
                 gateCloseWorkspaceID: $gateCloseWorkspaceID,
-                onCourseCorrectionNudge: onCourseCorrectionNudge
+                onCourseCorrectionNudge: onCourseCorrectionNudge,
+                autoRunFailure: autoRunFailure
             )
 
             switchNoticeIfAny

@@ -49,6 +49,9 @@ struct PlansSpecsSection: View {
     /// only after the fix-task is written and only when the plan is running —
     /// idle plans get the tracked task and no nudge.
     let onCourseCorrectionNudge: (PlanDoc, _ summary: String, CorrectionPriority) -> Void
+    /// The failure message of a fizzled auto-run launch for a plan
+    /// relative path, if any — rendered as an orange row caption.
+    let autoRunFailure: (String) -> String?
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
@@ -673,6 +676,16 @@ struct PlansSpecsSection: View {
                                 Text("· \(afterCaption)")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
+                            }
+                            if let failure = autoRunFailure(docStore.relativePath(of: plan)) {
+                                // An unattended launch failed (name
+                                // collision, no repos, …) — the mark
+                                // sticks so it won't retry; say so
+                                // instead of an unexplained `ready`.
+                                Text("· auto-run failed")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                                    .help(failure)
                             }
                         }
                     }

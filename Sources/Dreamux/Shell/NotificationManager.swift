@@ -90,6 +90,25 @@ final class NotificationManager: NSObject {
         }
     }
 
+    /// One-shot generic notification (no per-tab debounce) — used for
+    /// unattended failures the user isn't watching for, like an auto-run
+    /// launch that couldn't provision its worktree.
+    func notify(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        let request = UNNotificationRequest(
+            identifier: "dreamux.event.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { Self.log("post failed for \(title): \(error)") }
+        }
+    }
+
     private static let logger = Logger(
         subsystem: "com.dreamux.Dreamux",
         category: "Notifications"
