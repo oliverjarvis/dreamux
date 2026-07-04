@@ -1,12 +1,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Work Items column of a project window (the `content` column of the
-/// window's NavigationSplitView). Top: an Arc-style `PinnedTileGrid` of
-/// pinned tiles (Signals + Web Browser), drag-reorderable. Below: the
-/// Plans & Specs section (plan-backed work reachable from its plan rows),
-/// then an `Ad hoc` list of plan-less work items as flat, drag-reorderable
-/// rows led by a soft tinted badge, then the Repositories card.
+/// The Work Items column of a project window. Top to bottom: icon+label
+/// rows for Signals and Browser, the collapsible Orchestration Files
+/// list, the Plans & Specs section (plan-backed work reachable from its
+/// plan rows), and the always-visible Repositories card with its Add
+/// repository row.
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
@@ -38,6 +37,7 @@ struct WorkspaceSidebar: View {
 
     /// Collapsed subfolders inside Orchestration Files (absent = open).
     @State private var collapsedFolders: Set<String> = []
+    @State private var hoveredTile: SidebarTile?
     @State private var hoveredOrchestrationURL: URL?
     @State private var showAddFeature = false
     @State private var showAddRepo = false
@@ -185,13 +185,13 @@ struct WorkspaceSidebar: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PinnedTileGrid(
-                tiles: $layout.tiles,
-                isSelected: { $0 == .signals && sidebarMode == .signals },
-                isEnabled: { _ in true },
-                onTap: handleTileTap,
-                onReorder: { layout.persistTiles() }
-            )
+            // Simple icon+label rows (Raycast/Linear style) — the Arc
+            // tile grid was outsized for two entries.
+            VStack(spacing: 2) {
+                ForEach(layout.tiles) { tile in
+                    tileRow(tile)
+                }
+            }
 
             filesSection
 
@@ -403,6 +403,42 @@ struct WorkspaceSidebar: View {
                 docs: $0.value.sorted {
                     $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent
                 }) }
+    }
+
+    /// One icon+label row per pinned destination — monochrome outline
+    /// icon, callout label, hover highlight, tinted while selected.
+    private func tileRow(_ tile: SidebarTile) -> some View {
+        let selected = tile == .signals && sidebarMode == .signals
+        return Button {
+            handleTileTap(tile)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: tile.symbol)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    .frame(width: 20)
+                Text(tile.label)
+                    .font(.callout)
+                    .foregroundStyle(selected ? .primary : .secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if selected || hoveredTile == tile {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(selected ? Color.accentColor.opacity(0.14)
+                                   : Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
+            }
+        }
+        .onHover { hovering in
+            if hovering { hoveredTile = tile }
+            else if hoveredTile == tile { hoveredTile = nil }
+        }
     }
 
     private static let browserHomepage = URL(string: "https://www.google.com")!
