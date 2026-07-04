@@ -38,25 +38,27 @@ struct FileTreePanel: View {
         }
     }
 
+    /// Compact — the card's context header above already names the
+    /// worktree/commit this tree belongs to; this strip just labels the
+    /// column and hosts refresh.
     private var header: some View {
         HStack {
-            Text(store.activeWorkspace?.name ?? "Files")
-                .font(.system(size: 12, weight: .semibold))
+            Text("Files")
+                .font(.system(size: 11, weight: .semibold))
                 .kerning(0.6)
                 .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .foregroundStyle(.tertiary)
             Spacer()
             Button { reloadToken = UUID() } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .help("Refresh")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .frame(height: 26)
     }
 
     @ViewBuilder
