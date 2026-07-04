@@ -52,34 +52,53 @@ enum ClaudePromptDriver {
         deliver(line + "\n", into: session)
     }
 
-    /// The shared echo-verified delivery loop. A still-booting zle silently
+    /// Per-session delivery chain. Two independent typers now target the
+    /// same agent tab (queue/coordinator prompts and `PlanNudgeCenter`
+    /// nudges), and each delivery loop awaits across suspension points
+    /// where both could observe quiescence and interleave bytes into one
+    /// REPL line. Chaining per session makes the mutual exclusion
+    /// structural instead of an emergent property of today's call sites.
+    /// Entries are never removed: awaiting a finished tail is instant,
+    /// and the map is bounded by the handful of sessions ever typed into.
+    private static var deliveryTail: [ObjectIdentifier: Task<Void, Never>] = [:]
+
+    /// The shared echo-verified delivery entry point — serialized per
+    /// session (see `deliveryTail`), then delegated to the loop below.
+    private static func deliver(_ command: String, into session: TabSession) {
+        let key = ObjectIdentifier(session)
+        let prior = deliveryTail[key]
+        deliveryTail[key] = Task {
+            await prior?.value
+            await deliverNow(command, into: session)
+        }
+    }
+
+    /// The echo-verified delivery loop. A still-booting zle silently
     /// DISCARDS typed input (its terminal setup runs tcsetattr with
     /// TCSAFLUSH) and no timing heuristic is safe, so delivery is verified
     /// by echo: wait for the shell to fall quiet, send, then watch for ANY
     /// output newer than the send — silence means the bytes were flushed,
     /// so wait and send again; the first send that lands ends the loop.
-    private static func deliver(_ command: String, into session: TabSession) {
-        Task {
-            let deadline = Date().addingTimeInterval(45)
-            // Don't even attempt before the shell has said anything —
-            // the very first burst (title escape, profile output) is
-            // the earliest moment input could plausibly survive.
-            while !session.isShellQuiescent(for: 0.4) && Date() < deadline {
+    private static func deliverNow(_ command: String, into session: TabSession) async {
+        let deadline = Date().addingTimeInterval(45)
+        // Don't even attempt before the shell has said anything —
+        // the very first burst (title escape, profile output) is
+        // the earliest moment input could plausibly survive.
+        while !session.isShellQuiescent(for: 0.4) && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        while Date() < deadline {
+            let sentAt = Date()
+            session.send(command)
+            // Echo check: any output newer than the send proves
+            // the shell received (and echoed) it. Silence means a
+            // still-initializing zle flushed the input queue —
+            // wait and type again; the first send that lands ends
+            // the loop.
+            let echoDeadline = Date().addingTimeInterval(2.0)
+            while Date() < echoDeadline {
+                if let last = session.lastShellOutputAt, last > sentAt { return }
                 try? await Task.sleep(nanoseconds: 100_000_000)
-            }
-            while Date() < deadline {
-                let sentAt = Date()
-                session.send(command)
-                // Echo check: any output newer than the send proves
-                // the shell received (and echoed) it. Silence means a
-                // still-initializing zle flushed the input queue —
-                // wait and type again; the first send that lands ends
-                // the loop.
-                let echoDeadline = Date().addingTimeInterval(2.0)
-                while Date() < echoDeadline {
-                    if let last = session.lastShellOutputAt, last > sentAt { return }
-                    try? await Task.sleep(nanoseconds: 100_000_000)
-                }
             }
         }
     }
