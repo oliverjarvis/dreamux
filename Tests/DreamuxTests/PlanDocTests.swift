@@ -66,6 +66,113 @@ final class PlanDocTests: XCTestCase {
         XCTAssertEqual(section.specReference, "docs/specs/y-design.md")
     }
 
+    // MARK: - `**Runs:**` header parse
+
+    /// `after <path>` carries the blocker's raw relative path; trailing
+    /// prose/qualifiers are stripped by the same `.md` token discipline as
+    /// `**Spec:**`, so the path token survives.
+    func testRunsAfterExtractsPathThroughTrailingProse() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+        **Runs:** after docs/superpowers/plans/2026-07-02-queue.md — blocks on the queue rework
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertEqual(d.runsAfter, "docs/superpowers/plans/2026-07-02-queue.md")
+    }
+
+    /// A parenthetical qualifier after the path is dropped the same way
+    /// `**Spec:**` handles `(§6 Queue)`.
+    func testRunsAfterDropsParentheticalQualifier() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+        **Runs:** after docs/plans/queue.md (§6 Queue)
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertEqual(d.runsAfter, "docs/plans/queue.md")
+    }
+
+    /// A backticked path is unwrapped, mirroring `**Spec:**`.
+    func testRunsAfterStripsBackticksAroundPath() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+        **Runs:** after `docs/plans/queue.md`
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertEqual(d.runsAfter, "docs/plans/queue.md")
+    }
+
+    /// `**Runs:** parallel` is an explicit disposition, not a blocker — nil.
+    func testRunsAfterParallelIsNil() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+        **Runs:** parallel
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertNil(d.runsAfter)
+    }
+
+    /// No `**Runs:**` header at all → nil (today's plans).
+    func testRunsAfterAbsentIsNil() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+        **Spec:** docs/specs/x-design.md
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertNil(d.runsAfter)
+    }
+
+    /// A value that neither leads with `after` nor names a path is
+    /// malformed and yields nil, never a crash.
+    func testRunsAfterMalformedValuesAreNil() {
+        let whenever = doc("2026-07-04-a.md", """
+        # A Implementation Plan
+        **Runs:** whenever
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertNil(whenever.runsAfter)
+
+        // `after` with no path is not a blocker reference.
+        let bare = doc("2026-07-04-b.md", """
+        # B Implementation Plan
+        **Runs:** after
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertNil(bare.runsAfter)
+
+        // The `after` prefix must be a whole word — `afternoon` is not it.
+        let afternoon = doc("2026-07-04-c.md", """
+        # C Implementation Plan
+        **Runs:** afternoon docs/plans/queue.md
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertNil(afternoon.runsAfter)
+    }
+
+    /// The fence guard that hides heading/checkbox lines must also hide a
+    /// `**Runs:**` line inside a code fence — a documented example is not
+    /// a live header.
+    func testRunsAfterInsideCodeFenceIsIgnored() {
+        let d = doc("2026-07-04-x.md", """
+        # X Implementation Plan
+
+        ```md
+        **Runs:** after docs/plans/queue.md
+        ```
+
+        ### Task 1: a
+        - [ ] **Step 1: t**
+        """)
+        XCTAssertNil(d.runsAfter)
+    }
+
     func testPlanByTaskAndCheckboxShape() {
         let d = doc("notes.md", """
         # Some work

@@ -56,6 +56,12 @@ struct PlanDoc: Identifiable, Equatable {
     /// The raw path from the plan header's `**Spec:**` line (backticks
     /// and trailing prose stripped), unresolved.
     let specReference: String?
+    /// The blocker's raw relative path from a `**Runs:** after <path>`
+    /// header line (same token discipline as `specReference`), unresolved.
+    /// `**Runs:** parallel`, an absent header, and malformed values all
+    /// leave this nil; an unresolvable path degrades visibly downstream
+    /// rather than here.
+    let runsAfter: String?
     let checkedSteps: Int
     let totalSteps: Int
     /// Tasks in document order (`### Task N:` headings), each carrying
@@ -63,12 +69,37 @@ struct PlanDoc: Identifiable, Equatable {
     /// authoritative totals — they are exactly the sums over these steps.
     let tasks: [PlanTask]
 
+    init(
+        fileURL: URL,
+        kind: Kind,
+        title: String,
+        date: String?,
+        goal: String?,
+        specReference: String?,
+        runsAfter: String? = nil,
+        checkedSteps: Int,
+        totalSteps: Int,
+        tasks: [PlanTask]
+    ) {
+        self.fileURL = fileURL
+        self.kind = kind
+        self.title = title
+        self.date = date
+        self.goal = goal
+        self.specReference = specReference
+        self.runsAfter = runsAfter
+        self.checkedSteps = checkedSteps
+        self.totalSteps = totalSteps
+        self.tasks = tasks
+    }
+
     static func parse(fileURL: URL, contents: String) -> PlanDoc {
         let lines = contents.components(separatedBy: .newlines)
 
         var firstH1: String?
         var goal: String?
         var specReference: String?
+        var runsAfter: String?
         var hasTaskHeading = false
         var checked = 0, total = 0
 
@@ -114,6 +145,9 @@ struct PlanDoc: Identifiable, Equatable {
             }
             if specReference == nil, let value = headerValue(line, field: "Spec") {
                 specReference = specPathToken(value)
+            }
+            if runsAfter == nil, let value = headerValue(line, field: "Runs") {
+                runsAfter = runsAfterPath(value)
             }
 
             if line.hasPrefix("### ") {
@@ -170,6 +204,7 @@ struct PlanDoc: Identifiable, Equatable {
             date: date,
             goal: goal,
             specReference: specReference,
+            runsAfter: runsAfter,
             checkedSteps: checked,
             totalSteps: total,
             tasks: tasks.map {
@@ -250,6 +285,20 @@ struct PlanDoc: Identifiable, Equatable {
             return String(stripped[range])
         }
         return stripped
+    }
+
+    /// A `**Runs:**` value the app can enact: `after <plan path>`. Only
+    /// the `after` disposition names a blocker, so the value must lead
+    /// with `after` as a whole word (`parallel`, `whenever`, `afternoon …`
+    /// → nil) and then carry a markdown path, extracted with the same
+    /// `.md` token discipline as `specPathToken`. A blocker is always a
+    /// plan file, so a value with no `.md` token (bare `after`, a non-path
+    /// qualifier) degrades to nil rather than a bogus reference.
+    private static func runsAfterPath(_ value: String) -> String? {
+        guard let keyword = value.range(of: #"^after\b"#, options: .regularExpression)
+        else { return nil }
+        let token = specPathToken(String(value[keyword.upperBound...]))
+        return token.hasSuffix(".md") ? token : nil
     }
 
     /// Strip surrounding backticks and any ` — trailing prose`.

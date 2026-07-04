@@ -81,7 +81,7 @@ final class DocStore {
             if doc.kind == .doc, referencedSpecs.contains(doc.fileURL.standardizedFileURL) {
                 return PlanDoc(
                     fileURL: doc.fileURL, kind: .spec, title: doc.title, date: doc.date,
-                    goal: doc.goal, specReference: doc.specReference,
+                    goal: doc.goal, specReference: doc.specReference, runsAfter: doc.runsAfter,
                     checkedSteps: doc.checkedSteps, totalSteps: doc.totalSteps, tasks: doc.tasks)
             }
             return doc
