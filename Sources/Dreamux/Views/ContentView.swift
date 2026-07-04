@@ -27,6 +27,9 @@ struct ContentView: View {
     /// Session-only, like the old HSplitView divider position.
     @State private var workItemsWidth: CGFloat = 250
     @State private var splitDragBaseWidth: CGFloat?
+    /// File-tree column width (third card column), same drag treatment.
+    @State private var fileTreeWidth: CGFloat = 280
+    @State private var fileTreeDragBaseWidth: CGFloat?
     /// New Project sheet fired from the collapsed rail stub.
     @State private var showCreateProject = false
     /// The active workspace's git HEAD summary (header chip) — polled.
@@ -133,6 +136,20 @@ struct ContentView: View {
                     mainPane
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // The file tree is a third column INSIDE the card — the
+                // native .inspector brought its own material and backdrop
+                // and squared off the card's trailing corner at the seam.
+                if showFileTree {
+                    fileTreeHandle
+                    FileTreePanel(
+                        store: store,
+                        repoStore: repoStore,
+                        tree: fileTree,
+                        onOpenFile: openFile
+                    )
+                    .frame(width: fileTreeWidth)
+                }
             }
             // ONE card holding the work-items column AND the content/tabs
             // together (connected, no gutter between them) — full height
@@ -155,18 +172,6 @@ struct ContentView: View {
             VisualEffectBackground()
                 .overlay(backdropTint.opacity(1 - backdropTransparency))
                 .ignoresSafeArea()
-        }
-        .inspector(isPresented: $showFileTree) {
-            FileTreePanel(
-                store: store,
-                repoStore: repoStore,
-                tree: fileTree,
-                onOpenFile: openFile
-            )
-            .panelCard(radius: cornerRadius, shadow: cardShadow, fill: cardFill)
-            .padding(8)
-            .background(Color(nsColor: .underPageBackgroundColor).ignoresSafeArea())
-            .inspectorColumnWidth(min: 220, ideal: 280, max: 480)
         }
         // The file explorer is toggled from the View menu (⌥⌘E, see
         // `FileExplorerCommands`) rather than a toolbar-item shortcut: a
@@ -340,6 +345,32 @@ struct ContentView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
             }
         }
+    }
+
+    /// Drag seam for the file-tree column — mirror of `splitHandle`
+    /// (dragging left widens the tree).
+    private var fileTreeHandle: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let base = fileTreeDragBaseWidth ?? fileTreeWidth
+                                fileTreeDragBaseWidth = base
+                                fileTreeWidth = min(480, max(220, base - value.translation.width))
+                            }
+                            .onEnded { _ in fileTreeDragBaseWidth = nil }
+                    )
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() }
+                        else { NSCursor.pop() }
+                    }
+            }
     }
 
     /// Sidebar-left toggle — lives at the trailing edge of the rail's top
