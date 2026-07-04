@@ -318,8 +318,7 @@ final class PlanQueueController {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(payload) else { return }
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        DreamuxStateDir.ensure(containing: fileURL)
         try? data.write(to: fileURL, options: .atomic)
     }
 }

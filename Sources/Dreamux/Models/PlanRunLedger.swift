@@ -68,9 +68,7 @@ final class PlanRunLedger {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(records) else { return }
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true)
+        DreamuxStateDir.ensure(containing: fileURL)
         try? data.write(to: fileURL, options: .atomic)
     }
 }

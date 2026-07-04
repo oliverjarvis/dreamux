@@ -90,10 +90,7 @@ final class SidebarLayoutStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(payload) else { return }
-        try? FileManager.default.createDirectory(
-            at: configURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        DreamuxStateDir.ensure(containing: configURL)
         try? data.write(to: configURL, options: .atomic)
     }
 }
