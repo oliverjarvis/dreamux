@@ -18,12 +18,17 @@ struct ProjectWindow: View {
 
     @Environment(ProjectStore.self) private var projectStore
     @State private var sessions = ProjectSessionRegistry()
+    /// Rail visibility lives HERE, not in ContentView: switching projects
+    /// rebuilds the id-keyed subtree below, and a collapsed rail must not
+    /// snap open just because the user clicked a project in the stub.
+    @State private var showProjectsRail = true
 
     var body: some View {
         ProjectWindowContents(
             session: sessions.session(for: project),
             projects: projectStore,
-            onSwitchProject: onSwitchProject
+            onSwitchProject: onSwitchProject,
+            showProjectsRail: $showProjectsRail
         )
         .id(project.id)
     }
@@ -37,12 +42,14 @@ private struct ProjectWindowContents: View {
     let session: ProjectSession
     let projects: ProjectStore
     let onSwitchProject: (UUID?) -> Void
+    @Binding var showProjectsRail: Bool
 
     var body: some View {
         ContentView(
             session: session,
             projects: projects,
-            onSwitchProject: onSwitchProject
+            onSwitchProject: onSwitchProject,
+            showProjectsRail: $showProjectsRail
         )
         .onAppear {
             // Remember where the user was so the next launch can land

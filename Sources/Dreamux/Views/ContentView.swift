@@ -19,7 +19,10 @@ struct ContentView: View {
 
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
-    @State private var showProjectsRail = true
+    /// Owned by `ProjectWindow` — it must survive the id-keyed subtree
+    /// rebuild a project switch triggers, or the collapsed rail snaps
+    /// open whenever a stub glyph is clicked.
+    @Binding var showProjectsRail: Bool
     /// Work-items column width, dragged via the custom split handle.
     /// Session-only, like the old HSplitView divider position.
     @State private var workItemsWidth: CGFloat = 250
