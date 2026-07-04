@@ -72,6 +72,21 @@ final class FileEditorTabSession: Identifiable {
         }
     }
 
+    /// Scroll the editor to a 1-based line (centered, cursor placed) —
+    /// the sidebar's phase/task rows open a plan at the clicked
+    /// section. Queued until Monaco reports ready when the tab is
+    /// freshly opened.
+    func reveal(line: Int) {
+        if editorDidLoad, let _webView {
+            _webView.evaluateJavaScript("window.__revealLine(\(line));")
+        } else {
+            pendingRevealLine = line
+        }
+    }
+
+    private var editorDidLoad = false
+    private var pendingRevealLine: Int?
+
     /// Pull the live Monaco buffer into `currentText` so a rendered
     /// view reflects unsaved edits. No-op when the editor was never
     /// opened (nothing can have changed).
@@ -129,6 +144,11 @@ final class FileEditorTabSession: Identifiable {
             + "\(Self.jsString(fileURL.pathExtension)), "
             + "\(Self.jsString(Self.currentTheme())));"
         _webView?.evaluateJavaScript(js)
+        editorDidLoad = true
+        if let line = pendingRevealLine {
+            pendingRevealLine = nil
+            _webView?.evaluateJavaScript("window.__revealLine(\(line));")
+        }
     }
 
     private func handleSave(text: String) {

@@ -26,6 +26,8 @@ struct WorkspaceSidebar: View {
     /// exactly like `gateMergeWorkspaceID`, driving the `pendingClose` alert.
     @Binding var gateCloseWorkspaceID: UUID?
     let onOpenDoc: (URL) -> Void
+    /// Open a doc jumped to a 1-based line (phase/task rows).
+    let onOpenDocAtLine: (URL, Int) -> Void
 
     @State private var showAddFeature = false
     @State private var showAddRepo = false
@@ -184,6 +186,7 @@ struct WorkspaceSidebar: View {
                 layout: layout,
                 featureExists: { name in store.workspaces.contains { $0.name == name } },
                 onOpenDoc: onOpenDoc,
+                onOpenDocAtLine: onOpenDocAtLine,
                 onRunPlan: { runningPlan = $0 },
                 onNewPlan: { showNewPlan = true },
                 onWritePlan: { spec in

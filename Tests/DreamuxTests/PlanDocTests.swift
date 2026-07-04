@@ -339,4 +339,22 @@ final class PlanDocTests: XCTestCase {
         """)
         XCTAssertEqual(d.tasks.map(\.phase), [nil])
     }
+
+    /// Heading lines are the jump-to-section targets — 1-based, pointing
+    /// at the `### Task` and `## Phase` lines respectively.
+    func testTasksRecordHeadingAndPhaseLines() {
+        let d = doc("2026-07-04-lines.md", """
+        # Lines Implementation Plan
+
+        ## Phase 0 — Real
+
+        ### Task 0.1: first
+        - [ ] **Step 1: a**
+
+        ### Task 0.2: second
+        - [ ] **Step 1: b**
+        """)
+        XCTAssertEqual(d.tasks.map(\.line), [5, 8])
+        XCTAssertEqual(d.tasks.map(\.phaseLine), [3, 3])
+    }
 }

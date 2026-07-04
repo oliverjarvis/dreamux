@@ -60,7 +60,8 @@ struct ContentView: View {
                     planQueue: planQueue,
                     gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
                     gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
-                    onOpenDoc: openFile
+                    onOpenDoc: openFile,
+                    onOpenDocAtLine: { openFile($0, atLine: $1) }
                 )
                 .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 
@@ -209,12 +210,17 @@ struct ContentView: View {
 
     /// Open a file (clicked in the tree) as a Monaco tab in the active
     /// feature's pane. Flips to the terminal/tab view so the new tab is
-    /// visible, mirroring `openBrowserTab`'s behavior.
+    /// visible, mirroring `openBrowserTab`'s behavior. `line` jumps the
+    /// editor to a section (sidebar phase/task rows).
     private func openFile(_ url: URL) {
+        openFile(url, atLine: nil)
+    }
+
+    private func openFile(_ url: URL, atLine line: Int?) {
         let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
         store.activate(workspace.id)
         sidebarMode = .workspace
-        store.session(for: workspace).openFileTab(at: url)
+        store.session(for: workspace).openFileTab(at: url, revealingLine: line)
     }
 
     /// Bridge for this project window. `nil` whenever the e2e harness is

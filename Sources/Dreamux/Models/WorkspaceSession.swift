@@ -325,16 +325,28 @@ final class WorkspaceSession {
     /// Open (or re-select) a Monaco editor tab for `fileURL`. Dedup is by
     /// resolved absolute path so the same file re-focuses its existing
     /// tab rather than stacking a duplicate (like `openWebTab`).
-    func openFileTab(at fileURL: URL) {
+    /// `revealingLine` jumps the editor to that 1-based line — and flips
+    /// a multi-mode tab (markdown) to source, since the rendered view
+    /// has no scroll anchors.
+    func openFileTab(at fileURL: URL, revealingLine: Int? = nil) {
         let resolved = fileURL.resolvingSymlinksInPath()
         if let existing = fileTabSessions.first(where: { $0.value.fileURL == resolved }) {
             controller.selectTab(existing.key)
+            if let line = revealingLine {
+                existing.value.viewMode = .source
+                existing.value.reveal(line: line)
+            }
             return
         }
         nextTabFileURL = resolved
         let kind = FileTabKind.kind(forPathExtension: resolved.pathExtension)
         controller.createTab(title: resolved.lastPathComponent, icon: kind.tabIcon)
         nextTabFileURL = nil
+        if let line = revealingLine,
+           let fresh = fileTabSessions.first(where: { $0.value.fileURL == resolved })?.value {
+            fresh.viewMode = .source
+            fresh.reveal(line: line)
+        }
     }
 
     /// Called by the store when this workspace becomes the visible one.

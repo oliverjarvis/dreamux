@@ -6,15 +6,28 @@ import Foundation
 /// empty title. `phase` is the `## ` section the task falls under
 /// (`Phase 1 — Core mechanic`), nil when the plan has no H2 sections —
 /// single-file phased plans group their expansion rows by it.
+/// `line`/`phaseLine` are 1-based document lines of the task's heading
+/// and its section's `## ` heading — the sidebar's jump-to-section
+/// targets. The synthetic bucket's `line` is its first checkbox's line.
 struct PlanTask: Equatable {
     let title: String
     let steps: [PlanStep]
     let phase: String?
+    let line: Int
+    let phaseLine: Int?
 
-    init(title: String, steps: [PlanStep], phase: String? = nil) {
+    init(
+        title: String,
+        steps: [PlanStep],
+        phase: String? = nil,
+        line: Int = 1,
+        phaseLine: Int? = nil
+    ) {
         self.title = title
         self.steps = steps
         self.phase = phase
+        self.line = line
+        self.phaseLine = phaseLine
     }
 }
 
@@ -62,15 +75,18 @@ struct PlanDoc: Identifiable, Equatable {
         // Tasks accumulate in the same pass. Each checkbox that bumps the
         // counters above also appends a step here, so the totals and the
         // per-task sums can never drift.
-        var tasks: [(title: String, phase: String?, steps: [PlanStep])] = []
+        var tasks: [(title: String, phase: String?, line: Int, phaseLine: Int?, steps: [PlanStep])] = []
         // The `## ` section the parser is currently inside — recorded on
-        // each task so single-file phased plans can group by it.
+        // each task so single-file phased plans can group by it, along
+        // with the heading's 1-based line for jump-to-section.
         var currentPhase: String?
-        func appendStep(_ step: PlanStep) {
+        var currentPhaseLine: Int?
+        func appendStep(_ step: PlanStep, at lineNumber: Int) {
             if tasks.isEmpty {
                 // Checkboxes before any heading go in a synthetic untitled
                 // bucket, created only when such steps actually exist.
-                tasks.append((title: "", phase: currentPhase, steps: [step]))
+                tasks.append((title: "", phase: currentPhase, line: lineNumber,
+                              phaseLine: currentPhaseLine, steps: [step]))
             } else {
                 tasks[tasks.count - 1].steps.append(step)
             }
@@ -82,7 +98,8 @@ struct PlanDoc: Identifiable, Equatable {
         // phases. Track the fence state and skip everything inside.
         var insideFence = false
 
-        for line in lines {
+        for (index, line) in lines.enumerated() {
+            let lineNumber = index + 1
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
                 insideFence.toggle()
                 continue
@@ -105,12 +122,14 @@ struct PlanDoc: Identifiable, Equatable {
                 // single-file plans produce — accept any depth.
                 if heading.range(of: #"^Task\s+\d+(?:\.\d+)*\s*[:—]"#, options: .regularExpression) != nil {
                     hasTaskHeading = true
-                    tasks.append((title: heading, phase: currentPhase, steps: []))
+                    tasks.append((title: heading, phase: currentPhase, line: lineNumber,
+                                  phaseLine: currentPhaseLine, steps: []))
                 } else if hasTaskHeading {
                     // A bare `### …` heading opens a task only once we're
                     // past the first Task heading (later phases sometimes
                     // drop the `Task N:` prefix).
-                    tasks.append((title: heading, phase: currentPhase, steps: []))
+                    tasks.append((title: heading, phase: currentPhase, line: lineNumber,
+                                  phaseLine: currentPhaseLine, steps: []))
                 }
                 continue
             }
@@ -120,6 +139,7 @@ struct PlanDoc: Identifiable, Equatable {
                 // under. Generic sections (Global Constraints, …) carry
                 // no tasks, so they never surface as phases.
                 currentPhase = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                currentPhaseLine = lineNumber
                 continue
             }
 
@@ -127,7 +147,8 @@ struct PlanDoc: Identifiable, Equatable {
             if let isChecked = checkboxState(trimmed) {
                 total += 1
                 if isChecked { checked += 1 }
-                appendStep(PlanStep(title: stepTitle(from: trimmed), checked: isChecked))
+                appendStep(PlanStep(title: stepTitle(from: trimmed), checked: isChecked),
+                           at: lineNumber)
             }
         }
 
@@ -151,7 +172,10 @@ struct PlanDoc: Identifiable, Equatable {
             specReference: specReference,
             checkedSteps: checked,
             totalSteps: total,
-            tasks: tasks.map { PlanTask(title: $0.title, steps: $0.steps, phase: $0.phase) }
+            tasks: tasks.map {
+                PlanTask(title: $0.title, steps: $0.steps, phase: $0.phase,
+                         line: $0.line, phaseLine: $0.phaseLine)
+            }
         )
     }
 

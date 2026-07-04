@@ -110,5 +110,13 @@ require(['vs/editor/editor.main'], function () {
   // buffer without waiting for a save.
   window.__getValue = function () { return editor.getValue(); };
 
+  // Swift → editor: jump to a 1-based line (sidebar phase/task rows
+  // open a plan at the clicked section).
+  window.__revealLine = function (line) {
+    editor.revealLineInCenter(line);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.focus();
+  };
+
   post({ type: 'ready' });
 });

@@ -13,6 +13,9 @@ struct PlansSpecsSection: View {
     @Bindable var layout: SidebarLayoutStore
     let featureExists: (String) -> Bool
     let onOpenDoc: (URL) -> Void
+    /// Open a doc jumped to a 1-based line — phase/task rows open the
+    /// plan at the clicked section.
+    let onOpenDocAtLine: (URL, Int) -> Void
     let onRunPlan: (PlanDoc) -> Void
     let onNewPlan: () -> Void
     let onWritePlan: (PlanDoc) -> Void
@@ -651,15 +654,15 @@ struct PlansSpecsSection: View {
                 phaseBlock(group, plan: plan, isCurrentGroup: index == currentGroup)
             }
         } else {
-            flatTaskRows(tasks, indent: 28)
+            flatTaskRows(tasks, plan: plan, indent: 28)
         }
     }
 
     @ViewBuilder
-    private func flatTaskRows(_ tasks: [PlanTask], indent: CGFloat) -> some View {
+    private func flatTaskRows(_ tasks: [PlanTask], plan: PlanDoc, indent: CGFloat) -> some View {
         let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
         ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
-            taskRow(task, isCurrent: index == currentIndex, indent: indent)
+            taskRow(task, plan: plan, isCurrent: index == currentIndex, indent: indent)
         }
     }
 
@@ -672,42 +675,62 @@ struct PlansSpecsSection: View {
         // The current phase starts open; a user toggle overrides.
         let key = "\(plan.fileURL.path)#\(group.phase ?? "")"
         let isExpanded = expandedPhaseOverrides[key] ?? isCurrentGroup
-        Button {
-            withAnimation(.snappy(duration: 0.18)) {
-                expandedPhaseOverrides[key] = !isExpanded
-            }
-        } label: {
-            HStack(spacing: 6) {
+        HStack(spacing: 0) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    expandedPhaseOverrides[key] = !isExpanded
+                }
+            } label: {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 7, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .frame(width: 14)
-                Text(group.phase ?? "Steps")
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1).truncationMode(.tail)
-                if isCurrentGroup {
-                    Text("← current")
-                        .font(.caption2)
+                    .frame(width: 16, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse phase" : "Expand phase")
+
+            // The row itself jumps the plan doc to the phase's `## `
+            // heading (and expands the phase — you clicked into it).
+            Button {
+                withAnimation(.snappy(duration: 0.18)) { expandedPhaseOverrides[key] = true }
+                if let line = group.tasks.first?.phaseLine ?? group.tasks.first?.line {
+                    onOpenDocAtLine(plan.fileURL, line)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(group.phase ?? "Steps")
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1).truncationMode(.tail)
+                    if isCurrentGroup {
+                        Text("← current")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Spacer(minLength: 0)
+                    Text("\(group.checkedSteps)/\(group.totalSteps)")
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.tertiary)
                 }
-                Spacer(minLength: 0)
-                Text("\(group.checkedSteps)/\(group.totalSteps)")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(.secondary)
-            .padding(.leading, 28)
-            .padding(.trailing, 12)
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .padding(.leading, 28)
+        .padding(.trailing, 12)
+        .padding(.vertical, 4)
         if isExpanded {
-            flatTaskRows(group.tasks, indent: 42)
+            flatTaskRows(group.tasks, plan: plan, indent: 46)
         }
     }
 
-    private func taskRow(_ task: PlanTask, isCurrent: Bool, indent: CGFloat) -> some View {
+    private func taskRow(
+        _ task: PlanTask,
+        plan: PlanDoc,
+        isCurrent: Bool,
+        indent: CGFloat
+    ) -> some View {
         let checked = task.steps.filter(\.checked).count
         let total = task.steps.count
         let allChecked = checked == total
@@ -715,28 +738,35 @@ struct PlansSpecsSection: View {
         let tint = isCurrent
             ? AnyShapeStyle(Color.accentColor)
             : AnyShapeStyle(allChecked ? .secondary : .tertiary)
-        return HStack(spacing: 8) {
-            Image(systemName: glyph)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 14)
-            Text(task.title.isEmpty ? "Steps" : task.title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.tail)
-            if isCurrent {
-                Text("← current")
-                    .font(.caption2)
+        // Clicking a task opens the plan doc at its heading.
+        return Button {
+            onOpenDocAtLine(plan.fileURL, task.line)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: glyph)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 16)
+                Text(task.title.isEmpty ? "Steps" : task.title)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+                if isCurrent {
+                    Text("← current")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+                Text("\(checked)/\(total)")
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
-            Spacer(minLength: 0)
-            Text("\(checked)/\(total)")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
+            .padding(.leading, indent)
+            .padding(.trailing, 12)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
         }
-        .padding(.leading, indent)
-        .padding(.trailing, 12)
-        .padding(.vertical, 2)
+        .buttonStyle(.plain)
     }
 
     /// Tasks worth a row: a heading with at least one checkbox step. A
@@ -1047,6 +1077,20 @@ struct RunPlanSheet: View {
                 Text("Repositories")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                if availableRepos.isEmpty {
+                    // Running provisions a worktree INSIDE a repo — with
+                    // none, Run can never enable. Say so instead of
+                    // presenting a silently dead button.
+                    Label {
+                        Text("This project has no repositories yet. Add one first — Repositories → ＋ in the sidebar (clone, import, or create a fresh one) — then run the plan into it.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                    }
+                }
                 ForEach(availableRepos, id: \.name) { repo in
                     Toggle(repo.name, isOn: Binding(
                         get: { selected.contains(repo.name) },
