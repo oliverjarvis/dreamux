@@ -15,6 +15,9 @@ struct ProjectsRail: View {
     let projects: ProjectStore
     let currentProjectID: UUID
     let onSelect: (UUID?) -> Void
+    /// Collapses the rail — the toggle sits in the rail's top zone, next
+    /// to the floating traffic lights (there is no window toolbar).
+    let onToggleRail: () -> Void
 
     @Environment(\.openWindow) private var openWindow
     @State private var showCreate = false
@@ -47,15 +50,35 @@ struct ProjectsRail: View {
         // The rail sits flat on the window's inset backdrop, like the
         // reference chrome — no material of its own, no hairlines.
         .scrollContentBackground(.hidden)
+        // Top zone: the traffic lights float over the leading edge (the
+        // rail runs to the very top of the window); the collapse toggle
+        // sits at the trailing edge, then the Projects label leads the
+        // list below.
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack {
-                Text("Projects")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button(action: onToggleRail) {
+                        Image(systemName: "sidebar.left")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: 26, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Toggle projects sidebar")
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 38)
+                HStack {
+                    Text("Projects")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
             }
-            .padding(.horizontal, 12)
-            .frame(height: 36)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             newProjectBar

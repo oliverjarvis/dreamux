@@ -46,19 +46,20 @@ struct ContentView: View {
         // starts below it. No NavigationSplitView: its macOS shape is a
         // full-height sidebar that swallows the titlebar, exactly what
         // this layout retires.
-        VStack(spacing: 0) {
-        // Our own thin top bar — the system titlebar is hidden
-        // (.hiddenTitleBar) because the window toolbar's safe-area
-        // machinery kept breaking the inset-card layout. The traffic
-        // lights overlay this bar at their standard spot; the leading
-        // padding clears them.
-        chromeBar
+        // No top band AT ALL (the reference chrome): the rail runs to the
+        // very top of the window with the traffic lights floating over
+        // it, and the card's own header row is the card's top edge. The
+        // system titlebar is hidden (.hiddenTitleBar); its safe-area
+        // machinery kept breaking this layout.
         HStack(spacing: 0) {
             if showProjectsRail {
                 ProjectsRail(
                     projects: projects,
                     currentProjectID: currentProjectID,
-                    onSelect: onSwitchProject
+                    onSelect: onSwitchProject,
+                    onToggleRail: {
+                        withAnimation(.snappy(duration: 0.18)) { showProjectsRail.toggle() }
+                    }
                 )
                 .frame(width: 210)
             }
@@ -108,8 +109,7 @@ struct ContentView: View {
             // only on the sides.
             .panelCard()
             .padding(.leading, showProjectsRail ? 6 : 10)
-            .padding(.trailing, 10)
-        }
+            .padding([.top, .bottom, .trailing], 10)
         }
         // Behind-window vibrancy with a dark scrim: the rail and chrome
         // bar sit on real glass (desktop blur), and the scrim keeps the
@@ -231,44 +231,22 @@ struct ContentView: View {
             }
     }
 
-    /// Our own titlebar replacement: traffic-light clearance, the two
-    /// sidebar toggles, glass background (from the root backdrop). The
-    /// toggles carry no `.keyboardShortcut` on purpose — a shortcut here
-    /// isn't dispatched while the Ghostty NSView is first responder (it
-    /// just rings the bell); ⌥⌘E lives in `FileExplorerCommands`.
-    private var chromeBar: some View {
-        HStack(spacing: 10) {
-            // Traffic lights render over this leading region.
-            Spacer().frame(width: 78)
-            Button {
-                withAnimation(.snappy(duration: 0.18)) { showProjectsRail.toggle() }
-            } label: {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(showProjectsRail ? Color.accentColor : Color.secondary)
-                    .frame(width: 26, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Toggle projects sidebar")
-
-            Spacer(minLength: 0)
-
-            Button {
-                showFileTree.toggle()
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(showFileTree ? Color.accentColor : Color.secondary)
-                    .frame(width: 26, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Toggle file explorer (⌥⌘E)")
+    /// Sidebar-left toggle — lives at the trailing edge of the rail's top
+    /// zone while the rail shows, and at the leading edge of the card's
+    /// project header when it's hidden. No `.keyboardShortcut` on purpose
+    /// (not dispatched while the Ghostty NSView is first responder).
+    private var railToggle: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.18)) { showProjectsRail.toggle() }
+        } label: {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(showProjectsRail ? Color.accentColor : Color.secondary)
+                .frame(width: 26, height: 22)
+                .contentShape(Rectangle())
         }
-        .padding(.horizontal, 10)
-        .frame(height: 38)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .help("Toggle projects sidebar")
     }
 
     /// Compact project identity — a small accent-gradient glyph and the
@@ -277,6 +255,12 @@ struct ContentView: View {
     private var projectHeaderRow: some View {
         let name = currentProject?.name ?? ""
         return HStack(spacing: 8) {
+            // Rail hidden → this header is the window's top-left: clear
+            // the floating traffic lights and host the rail toggle.
+            if !showProjectsRail {
+                Color.clear.frame(width: 66, height: 1)
+                railToggle
+            }
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(
@@ -318,6 +302,20 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
+            // The file-explorer toggle lives in the card's own header,
+            // reference-style — there is no window toolbar. ⌥⌘E is the
+            // shortcut path (FileExplorerCommands).
+            Button {
+                showFileTree.toggle()
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(showFileTree ? Color.accentColor : Color.secondary)
+                    .frame(width: 24, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Toggle file explorer (⌥⌘E)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
