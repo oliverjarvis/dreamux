@@ -50,13 +50,6 @@ struct ContentView: View {
                     onSelect: onSwitchProject
                 )
                 .frame(width: 210)
-                // Explicit full-height hairline for the column edge —
-                // a bare Divider() here got lost against the two
-                // differing background materials.
-                Rectangle()
-                    .fill(Color(nsColor: .separatorColor))
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)
             }
             HSplitView {
                 VStack(spacing: 0) {
@@ -94,6 +87,19 @@ struct ContentView: View {
                 // mode — without a height-flexible child the split collapses
                 // under the header row.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        // The rail's edge is ONE hairline drawn on top, spanning the full
+        // window height (up under the toolbar too) — segments assembled
+        // from siblings kept losing chunks to materials and safe areas.
+        .overlay(alignment: .topLeading) {
+            if showProjectsRail {
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor))
+                    .frame(width: 1)
+                    .frame(maxHeight: .infinity)
+                    .offset(x: 210)
+                    .ignoresSafeArea(edges: [.top, .bottom])
             }
         }
         // The window title is the thin toolbar itself; no text title.
