@@ -12,9 +12,9 @@
 
 ### Task 1: Run-control parity on plan rows
 
-- [ ] **Step 1:** `PlansSpecsSection` gains the run-control affordances for rows whose feature workspace exists: play/stop (start/stop runners on that branch), the open-services safari menu, and *Run Settings…* — reuse `WorkspaceSidebar.runControls`' logic by extracting it into a shared component (`Views/WorkspaceRunControls.swift`) parameterized by workspace + `RunnerManager`, used by both feature rows (until Task 4 deletes them) and plan rows.
-- [ ] **Step 2:** Wire the needed inputs through the section's init (runners reference or closures — follow the existing dependency style; prefer passing `RunnerManager` since the sidebar already holds it).
-- [ ] **Step 3: Build + tests green; hover a running plan row shows stop + safari controls.**
+- [x] **Step 1:** `PlansSpecsSection` gains the run-control affordances for rows whose feature workspace exists: play/stop (start/stop runners on that branch), the open-services safari menu, and *Run Settings…* — reuse `WorkspaceSidebar.runControls`' logic by extracting it into a shared component (`Views/WorkspaceRunControls.swift`) parameterized by workspace + `RunnerManager`, used by both feature rows (until Task 4 deletes them) and plan rows.
+- [x] **Step 2:** Wire the needed inputs through the section's init (runners reference or closures — follow the existing dependency style; prefer passing `RunnerManager` since the sidebar already holds it).
+- [x] **Step 3: Build + tests green; hover a running plan row shows stop + safari controls.**
 
 ### Task 2: Merge/Close parity on plan rows
 
@@ -24,20 +24,20 @@
 
 ### Task 3: Ad hoc group
 
-- [ ] **Step 1:** In `WorkspaceSidebar`, compute plan-backed feature names from `docStore.initiatives` (ledger featureName ?? branch-name derivation per plan). Workspaces NOT in that set are ad hoc.
-- [ ] **Step 2:** Render them under a small `Ad hoc` section label (same `sectionLabel` chrome as Features today), keeping today's row body: badge, name line + unread dot, repo subtitle, run controls, context menu (including *Customize…*, which stays exclusive to ad-hoc rows — tile symbol/tint has no meaning on plan rows). Reorder within the group keeps the existing `ReorderDropDelegate` wiring. Hidden entirely when no ad-hoc workspaces exist.
-- [ ] **Step 3: Build + tests green.**
+- [x] **Step 1:** In `WorkspaceSidebar`, compute plan-backed feature names from `docStore.initiatives` (ledger featureName ?? branch-name derivation per plan). Workspaces NOT in that set are ad hoc.
+- [x] **Step 2:** Render them under a small `Ad hoc` section label (same `sectionLabel` chrome as Features today), keeping today's row body: badge, name line + unread dot, repo subtitle, run controls, context menu (including *Customize…*, which stays exclusive to ad-hoc rows — tile symbol/tint has no meaning on plan rows). Reorder within the group keeps the existing `ReorderDropDelegate` wiring. Hidden entirely when no ad-hoc workspaces exist.
+- [x] **Step 3: Build + tests green.**
 
 ### Task 4: Remove the Features section
 
-- [ ] **Step 1:** Delete the Features list rendering (`sectionLabel("Features")`, feature `ForEach`, `emptyFeaturesText` path) — plan-backed workspaces now render nowhere except their plan rows; keep Add Feature/`hasNoFeaturesOrRepos` affordances by moving the add-feature entry point onto the Ad hoc section header (`+`) so ad-hoc creation survives.
-- [ ] **Step 2:** Sweep copy that references the Features section: `WorkspaceTerminalContainer.noWorkspacesState` ("Add a feature from the sidebar…"), onboarding/empty states, and any `.help` strings.
-- [ ] **Step 3:** e2e: `state`'s `workspaces` dump is store-level and stays; note the UI change in PROTOCOL.md's `createFeature`/targeting prose if it references the Features list; adjust any e2e scenario scripts that clicked/screenshotted the Features section.
-- [ ] **Step 4: Build + tests green.**
+- [x] **Step 1:** Delete the Features list rendering (`sectionLabel("Features")`, feature `ForEach`, `emptyFeaturesText` path) — plan-backed workspaces now render nowhere except their plan rows; keep Add Feature/`hasNoFeaturesOrRepos` affordances by moving the add-feature entry point onto the Ad hoc section header (`+`) so ad-hoc creation survives.
+- [x] **Step 2:** Sweep copy that references the Features section: `WorkspaceTerminalContainer.noWorkspacesState` ("Add a feature from the sidebar…"), onboarding/empty states, and any `.help` strings.
+- [x] **Step 3:** e2e: `state`'s `workspaces` dump is store-level and stays; note the UI change in PROTOCOL.md's `createFeature`/targeting prose if it references the Features list; adjust any e2e scenario scripts that clicked/screenshotted the Features section.
+- [x] **Step 4: Build + tests green.**
 
 ### Task 5: Parity sweep + whole-branch verification
 
-- [ ] **Step 1:** Parity checklist, each demonstrated via e2e/GUI on a plan-backed workspace from its plan row: activate (→ workspace pane), unread dot, start/stop runners, open services, Run Settings scoping, Merge… (sheet opens), Close (confirm + worktree removal), gate-card Merge & Continue still works end-to-end with the queue.
-- [ ] **Step 2:** Ad hoc checks: plan-less workspace appears in Ad hoc with full controls; group hidden when empty; Add Feature still creates one.
-- [ ] **Step 3:** Full `swift build` + `swift test`; screenshots of the final sidebar (no Features section; Ad hoc present/absent).
-- [ ] **Step 4:** Update the spec's rollout note once merged.
+- [x] **Step 1:** Parity checklist, each demonstrated via e2e/GUI on a plan-backed workspace from its plan row: activate (→ workspace pane), unread dot, start/stop runners, open services, Run Settings scoping, Merge… (sheet opens), Close (confirm + worktree removal), gate-card Merge & Continue still works end-to-end with the queue.
+- [x] **Step 2:** Ad hoc checks: plan-less workspace appears in Ad hoc with full controls; group hidden when empty; Add Feature still creates one.
+- [x] **Step 3:** Full `swift build` + `swift test`; screenshots of the final sidebar (no Features section; Ad hoc present/absent).
+- [x] **Step 4:** Update the spec's rollout note once merged.
