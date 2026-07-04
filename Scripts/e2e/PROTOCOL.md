@@ -651,8 +651,8 @@ under the usual quiescence + gate rail.
   fix, resume), `next` (finish the current task, then the fix), `queue`
   (pick the fix up in document order).
 - `task`? — anchor the fix-task under a specific task, matched by its
-  exact heading title or a **unique** substring. Ambiguous or unmatched
-  substrings error.
+  exact heading title or a **unique**, case-sensitive substring.
+  Ambiguous or unmatched substrings error.
 - `phase`? — anchor under a `## ` phase by name. Ignored when `task` is
   given (a task is the more specific anchor).
 - Neither `task` nor `phase` → the fix-task lands in the plan's current

@@ -231,6 +231,8 @@ final class ProjectSession {
     /// priority-worded nudge in. The gate rail (park at a merge gate) and
     /// the quiescence discipline live in the center's delivery path, not
     /// here. No ledger record → no live agent to type into → a no-op.
+    /// The e2e `courseCorrect` command mirrors this block inline over the
+    /// registered center (E2ECommands) — keep the two in lockstep.
     func enqueueCourseCorrectionNudge(
         plan: PlanDoc, summary: String, priority: CorrectionPriority
     ) {

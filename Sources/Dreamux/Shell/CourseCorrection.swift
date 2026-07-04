@@ -106,6 +106,21 @@ enum CourseCorrection {
         try lines.joined(separator: "\n").write(to: fileURL, atomically: true, encoding: .utf8)
     }
 
+    /// `yyyy-MM-dd` for the `*(course correction, <date>)*` marker — the
+    /// ONE clock both the sheet and the e2e `courseCorrect` command use,
+    /// so their writes stay byte-identical. The pure writer itself stays
+    /// date-injected for tests.
+    static func markerDate(now: Date = Date()) -> String {
+        markerDateFormatter.string(from: now)
+    }
+
+    private static let markerDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     // MARK: - Anchor resolution
 
     /// The anchor phase's `## ` heading line (nil for an unsectioned plan

@@ -598,10 +598,14 @@ enum E2ECommands {
         let summary = CourseCorrection.summaryLine(from: resolved.text)
         try CourseCorrection.apply(
             to: resolved.doc.fileURL, anchor: resolved.anchor,
-            summary: summary, body: resolved.text, date: correctionDate())
+            summary: summary, body: resolved.text, date: CourseCorrection.markerDate())
 
         let path = docStore.relativePath(of: resolved.doc)
         var nudged = false
+        // Mirrors the sheet's submit path (PlansSpecsSection.submitCorrection
+        // + ProjectSession.enqueueCourseCorrectionNudge) over the registered
+        // center — the E2E handle deliberately exposes only PlanNudgeCenter,
+        // so there is no shared seam to call. Keep the two in lockstep.
         if let center = handles.nudgeCenter,
            let status = center.status(path),
            status == .running || status == .awaitingReview,
@@ -616,21 +620,6 @@ enum E2ECommands {
             nudged = true
         }
         return ["ok": true, "path": path, "nudged": nudged]
-    }
-
-    /// `yyyy-MM-dd` for the fix-task's `*(course correction, <date>)*`
-    /// marker — the real clock, matching `PlansSpecsSection`'s formatter, so
-    /// the written task is byte-identical to a sheet submission on the same
-    /// day.
-    private static let correctionDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    private static func correctionDate() -> String {
-        correctionDateFormatter.string(from: Date())
     }
 
     /// Shared plumbing for `enqueuePlan`/`startQueue`/`stopQueue`: resolve

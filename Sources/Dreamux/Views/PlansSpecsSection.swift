@@ -83,16 +83,6 @@ struct PlansSpecsSection: View {
         let description: String
     }
 
-    /// `yyyy-MM-dd` for the fix-task's `*(course correction, <date>)*`
-    /// marker — the real clock at the call site, so `CourseCorrection`'s
-    /// pure writer stays date-injected.
-    private static let correctionDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
@@ -127,7 +117,7 @@ struct PlansSpecsSection: View {
     ) {
         correcting = nil
         let summary = CourseCorrection.summaryLine(from: text)
-        let date = Self.correctionDateFormatter.string(from: Date())
+        let date = CourseCorrection.markerDate()
         try? CourseCorrection.apply(
             to: target.plan.fileURL, anchor: target.anchor,
             summary: summary, body: text, date: date)

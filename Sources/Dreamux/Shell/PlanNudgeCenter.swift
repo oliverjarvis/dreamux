@@ -42,9 +42,6 @@ final class PlanNudgeCenter {
     /// instruction wins).
     private(set) var pending: [String: Nudge] = [:]
 
-    /// Pending nudge count, for the e2e state dump (Task 4).
-    var pendingCount: Int { pending.count }
-
     // MARK: - Injected effects (wired in ProjectSession; fakes in tests)
 
     /// The plan's derived status, for the gate rail. `nil` (unresolvable
