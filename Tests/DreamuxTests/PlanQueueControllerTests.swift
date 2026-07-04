@@ -107,6 +107,20 @@ final class PlanQueueControllerTests: XCTestCase {
                        ["docs/plans/blocker.md", "docs/plans/new.md"])
     }
 
+    func testEnactedPairsPersistAndEdgeTriggerAfterReload() {
+        controller.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        // The enacted map round-trips, and a reloaded controller treats the
+        // same pair as already-enacted: removing the waiter then re-enacting
+        // it (the watcher tick) is a no-op — removal sticks across relaunch.
+        let reloaded = PlanQueueController(project: project)
+        XCTAssertEqual(reloaded.enactedBlockers,
+                       ["docs/plans/new.md": "docs/plans/blocker.md"])
+        reloaded.remove("docs/plans/new.md")
+        reloaded.ensureQueued("docs/plans/new.md", after: "docs/plans/blocker.md")
+        XCTAssertTrue(reloaded.entries.isEmpty,
+                      "an already-enacted pair does not re-add after a reload")
+    }
+
     func testStartRunsFirstEntry() async {
         controller.enqueue("docs/plans/a.md")
         controller.enqueue("docs/plans/b.md")

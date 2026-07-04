@@ -136,6 +136,15 @@ final class DocStore {
             of: projectRoot.standardizedFileURL.path + "/", with: "")
     }
 
+    /// Resolve a header reference (a `**Runs:**`/`**Spec:**` path) to an
+    /// absolute, standardized URL — the same `resolve` + `standardizedFileURL`
+    /// discipline `doc(matchingReference:)` uses for the **Spec:** back-link.
+    /// Exposed so intake enactment matches a blocker path symmetrically: a
+    /// `./docs/…` or otherwise non-canonical form resolves to the same doc.
+    func resolvedURL(forReference reference: String) -> URL {
+        resolve(reference).standardizedFileURL
+    }
+
     func status(for doc: PlanDoc, featureExists: (String) -> Bool) -> PlanStatus {
         guard doc.kind == .plan else { return .specOnly }
         let record = ledger.recordForPlan(relativePath(of: doc))

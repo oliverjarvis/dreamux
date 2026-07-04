@@ -129,6 +129,7 @@ final class ProjectSession {
                 docs: docStore.docs,
                 queue: planQueue,
                 relativePath: { docStore.relativePath(of: $0) },
+                resolveReference: { docStore.resolvedURL(forReference: $0) },
                 status: { doc in
                     docStore.status(for: doc) { name in
                         store.workspaces.contains { $0.name == name }

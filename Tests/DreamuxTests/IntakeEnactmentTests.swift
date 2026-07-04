@@ -31,6 +31,7 @@ final class IntakeEnactmentTests: XCTestCase {
                 docs: docStore.docs,
                 queue: queue,
                 relativePath: { docStore.relativePath(of: $0) },
+                resolveReference: { docStore.resolvedURL(forReference: $0) },
                 status: { doc in
                     self.statusOverrides[docStore.relativePath(of: doc)] ?? .ready
                 })
@@ -116,5 +117,55 @@ final class IntakeEnactmentTests: XCTestCase {
 
         XCTAssertTrue(queue.entries.isEmpty,
                       "a waiter that has already run is left alone")
+    }
+
+    func testRemovedWaiterStaysOutAcrossRefresh() throws {
+        try write("docs/plans/2026-07-04-blocker.md", plan(title: "Blocker"))
+        try write("docs/plans/2026-07-04-waiter.md",
+                  plan(title: "Waiter", runsAfter: "docs/plans/2026-07-04-blocker.md"))
+
+        docStore.refresh()
+        XCTAssertEqual(queue.entries, ["docs/plans/2026-07-04-waiter.md"])
+
+        // The user pulls the auto-enqueued waiter back out. Enactment is
+        // edge-triggered, so a later scan (the 3s tick) must NOT re-add it.
+        queue.remove("docs/plans/2026-07-04-waiter.md")
+        docStore.refresh()
+
+        XCTAssertTrue(queue.entries.isEmpty, "removal sticks; the pair enacts once")
+    }
+
+    func testChangedBlockerReEnacts() throws {
+        try write("docs/plans/2026-07-04-blocker-a.md", plan(title: "Blocker A"))
+        try write("docs/plans/2026-07-04-blocker-b.md", plan(title: "Blocker B"))
+        try write("docs/plans/2026-07-04-waiter.md",
+                  plan(title: "Waiter", runsAfter: "docs/plans/2026-07-04-blocker-a.md"))
+
+        docStore.refresh()
+        XCTAssertEqual(queue.entries, ["docs/plans/2026-07-04-waiter.md"])
+        queue.remove("docs/plans/2026-07-04-waiter.md")
+
+        // Rewriting the `**Runs:**` header to a different blocker is a fresh
+        // edge — the waiter enacts again despite the earlier removal.
+        try write("docs/plans/2026-07-04-waiter.md",
+                  plan(title: "Waiter", runsAfter: "docs/plans/2026-07-04-blocker-b.md"))
+        docStore.refresh()
+
+        XCTAssertEqual(queue.entries, ["docs/plans/2026-07-04-waiter.md"],
+                       "a changed blocker re-enacts")
+    }
+
+    func testDottedBlockerPathResolvesToSameDoc() throws {
+        try write("docs/plans/2026-07-04-blocker.md", plan(title: "Blocker"))
+        // A non-canonical `./docs/…` blocker path must resolve to the same
+        // doc as its canonical form (the **Spec:** resolution discipline),
+        // not fail a raw string match.
+        try write("docs/plans/2026-07-04-waiter.md",
+                  plan(title: "Waiter", runsAfter: "./docs/plans/2026-07-04-blocker.md"))
+
+        docStore.refresh()
+
+        XCTAssertEqual(queue.entries, ["docs/plans/2026-07-04-waiter.md"],
+                       "a dotted blocker path resolves symmetrically")
     }
 }

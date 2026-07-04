@@ -30,6 +30,15 @@ final class PlanQueueController {
     private(set) var currentPlanPath: String?
     private(set) var lastError: String?
 
+    /// Plans this controller has already auto-enqueued behind a blocker,
+    /// keyed planPath → blockerPath. Intake enactment is edge-triggered off
+    /// this map (not the live `entries`): a given (plan, blocker) pair
+    /// enacts exactly once, so a waiter the user later removes is NOT
+    /// re-added on the next watcher tick, while a plan whose `**Runs:**`
+    /// header changes to a *different* blocker is a fresh edge and enacts
+    /// again. Persisted next to `entries` in the same save file.
+    @ObservationIgnored private(set) var enactedBlockers: [String: String] = [:]
+
     /// How long an unchanged, quiescent session may sit before the
     /// queue asks for attention.
     static let stallThreshold: TimeInterval = 120
@@ -47,6 +56,7 @@ final class PlanQueueController {
         entries = loaded?.entries ?? []
         state = loaded?.state ?? .idle
         currentPlanPath = loaded?.currentPlanPath
+        enactedBlockers = loaded?.enactedBlockers ?? [:]
     }
 
     // MARK: - Mutations
@@ -60,23 +70,40 @@ final class PlanQueueController {
 
     /// Intake enactment (spec: "Enactment (app side)"): place `path` in the
     /// queue *behind* its blocker without ever enqueuing the blocker itself.
-    /// No-op when `path` is already queued or is the running plan. When the
-    /// blocker holds a queue slot, `path` slots immediately after it (so a
-    /// running blocker — still in `entries` — gets its waiter right behind
-    /// it); when the blocker is running but no longer holds a slot, `path`
-    /// goes to the front so it runs next; otherwise the blocker is neither
-    /// queued nor running and `path` appends, the row caption carrying the
-    /// "after" relationship. Additive: persists like `enqueue`, and the
-    /// state machine, gates, and persistence format are untouched.
+    ///
+    /// Edge-triggered: the (`path`, `blockerPath`) pair enacts once. A repeat
+    /// call with the same pair is a no-op even if the user has since removed
+    /// `path` from the queue — the record in `enactedBlockers`, not the live
+    /// `entries`, is the trigger, so a manual remove sticks across watcher
+    /// ticks. A call naming a *different* blocker for `path` is a fresh edge
+    /// and re-enacts. The pair is recorded whether or not it is actually
+    /// inserted, so enacting a plan the user had already queued still makes a
+    /// later removal stick.
+    ///
+    /// Placement (when this edge does insert): no-op when `path` is already
+    /// queued or is the running plan; otherwise the blocker holding a queue
+    /// slot puts `path` immediately after it (a running blocker — still in
+    /// `entries` — gets its waiter right behind it); a blocker running but no
+    /// longer in `entries` puts `path` at the front; and a blocker neither
+    /// queued nor running appends `path`, the row caption carrying the "after"
+    /// relationship. Several plans naming the same blocker each insert right
+    /// after it, so they land in reverse discovery order (the last enacted
+    /// sits closest to the blocker) — deterministic and accepted.
+    ///
+    /// Additive: persists like `enqueue`; the state machine and gates are
+    /// untouched, and the save format only grows the `enactedBlockers` map.
     func ensureQueued(_ path: String, after blockerPath: String) {
         guard !path.isEmpty else { return }
-        guard !entries.contains(path), currentPlanPath != path else { return }
-        if let index = entries.firstIndex(of: blockerPath) {
-            entries.insert(path, at: index + 1)
-        } else if currentPlanPath == blockerPath {
-            entries.insert(path, at: 0)
-        } else {
-            entries.append(path)
+        guard enactedBlockers[path] != blockerPath else { return }
+        enactedBlockers[path] = blockerPath
+        if !entries.contains(path), currentPlanPath != path {
+            if let index = entries.firstIndex(of: blockerPath) {
+                entries.insert(path, at: index + 1)
+            } else if currentPlanPath == blockerPath {
+                entries.insert(path, at: 0)
+            } else {
+                entries.append(path)
+            }
         }
         save()
     }
@@ -244,6 +271,10 @@ final class PlanQueueController {
         var entries: [String]
         var state: PlanQueueState
         var currentPlanPath: String?
+        // Optional so save files written before edge-triggered enactment
+        // still decode (missing → no pairs enacted yet), never resetting a
+        // resumed queue on upgrade.
+        var enactedBlockers: [String: String]?
     }
 
     private static func load(from url: URL) -> Payload? {
@@ -252,7 +283,8 @@ final class PlanQueueController {
     }
 
     private func save() {
-        let payload = Payload(entries: entries, state: state, currentPlanPath: currentPlanPath)
+        let payload = Payload(entries: entries, state: state, currentPlanPath: currentPlanPath,
+                              enactedBlockers: enactedBlockers)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(payload) else { return }
