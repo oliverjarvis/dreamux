@@ -88,13 +88,13 @@ struct ContentView: View {
                 // under the header row.
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            // ONE full-height card holding the work-items column AND the
-            // content/tabs together (connected, no gutter between them),
-            // floating on the glass backdrop next to the rail.
+            // ONE card holding the work-items column AND the content/tabs
+            // together (connected, no gutter between them) — genuinely
+            // full height: flush with the toolbar above and the window
+            // edge below, inset only on the sides.
             .panelCard()
             .padding(.leading, showProjectsRail ? 2 : 8)
             .padding(.trailing, 8)
-            .padding(.vertical, 8)
         }
         // Behind-window vibrancy: the rail sits on real glass (desktop
         // blur), like the reference chrome.
