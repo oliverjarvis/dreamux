@@ -40,8 +40,11 @@ assembles at send time:
 - Every non-merged plan: title, relative path, status, feature/branch
   name, remaining task titles (from the parse — cheap and already in
   memory).
-- For running plans: the worktree's touched territory —
-  `git diff --stat` top-level paths per repo, truncated.
+- For running plans: the worktree's touched territory — top-level
+  paths from `git diff --name-only` against the **merge-base with the
+  repo's default branch** (amended 2026-07-04: a bare `git diff` only
+  shows uncommitted work, and agents commit per task — territory must
+  cover everything the branch has done), truncated.
 - The queue's current order.
 
 …plus instructions: *decide the disposition; for `parallel`/`wait`

@@ -401,18 +401,33 @@ enum GitOperations {
             .map(String.init)
     }
 
-    /// The top-level paths a worktree currently touches vs its checkout —
-    /// the "territory" a running plan occupies, for the intake digest.
-    /// Uses `diff --name-only` (the parseable form of `git diff --stat`),
-    /// maps each changed path to its first segment, and returns the deduped
-    /// set in stable order. Tolerant by contract: a missing worktree or any
-    /// git failure yields an empty list, so intake treats "can't tell" the
-    /// same as "nothing to report" rather than failing the whole digest.
-    static func diffStatTopLevelPaths(in worktreeURL: URL) async -> [String] {
-        guard let output = try? await runGit(
-            ["diff", "--name-only"],
+    /// The top-level paths a worktree's branch touches vs where it forked
+    /// from `baseBranch` — the "territory" a running plan occupies, for the
+    /// intake digest. Diffs against the merge-base (`git merge-base
+    /// <baseBranch> HEAD`, then `git diff --name-only <mergeBase>`) so the
+    /// territory spans committed, staged, and unstaged work in one shot: a
+    /// bare `git diff` would show only uncommitted changes, and agents
+    /// commit per task, so the branch's real footprint lives in its
+    /// commits. Each changed path is mapped to its first segment and the
+    /// deduped set returned in stable (sorted) order. Tolerant by contract:
+    /// a missing worktree, an unresolvable merge-base (unrelated histories,
+    /// missing base branch), or any git failure yields an empty list, so
+    /// intake treats "can't tell" as "nothing to report" rather than
+    /// failing the whole digest.
+    static func changedTopLevelPaths(
+        in worktreeURL: URL,
+        baseBranch: String
+    ) async -> [String] {
+        guard let rawBase = try? await runGit(
+            ["merge-base", baseBranch, "HEAD"],
             in: worktreeURL
         ) else { return [] }
+        let mergeBase = rawBase.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !mergeBase.isEmpty,
+              let output = try? await runGit(
+                ["diff", "--name-only", mergeBase],
+                in: worktreeURL
+              ) else { return [] }
 
         var seen: Set<String> = []
         var topLevel: [String] = []
@@ -421,7 +436,7 @@ enum GitOperations {
                 ?? String(line)
             if seen.insert(head).inserted { topLevel.append(head) }
         }
-        return topLevel
+        return topLevel.sorted()
     }
 
     /// Abort an in-progress merge so the worktree returns to a clean

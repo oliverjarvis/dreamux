@@ -361,6 +361,47 @@ final class GitOperationsTests: XCTestCase {
         ), "gitignored file must survive on disk")
     }
 
+    // MARK: - Territory (intake digest)
+
+    func testChangedTopLevelPathsSpanCommittedAndUncommittedVsMergeBase() async throws {
+        let repo = try await GitFixtures.makeBareLayoutRepo(
+            in: project.rootPath, name: "demo",
+            files: ["README.md": "root\n", "docs/keep.md": "keep\n"]
+        )
+        try await GitOperations.addWorktree(in: repo.rootURL, branch: "feature-t")
+        let worktree = repo.rootURL.appendingPathComponent("feature-t", isDirectory: true)
+
+        // A COMMITTED change on the feature branch — the crux of diffing
+        // against the merge-base rather than the working tree: agents commit
+        // per task, so a bare `git diff` would miss this entirely.
+        try FileManager.default.createDirectory(
+            at: worktree.appendingPathComponent("Sources"), withIntermediateDirectories: true)
+        try write("fn\n", to: "Sources/app.swift", in: worktree)
+        try await commit("Add source", in: worktree)
+        // An UNCOMMITTED change to a tracked file (modification, unstaged).
+        try write("root edited\n", to: "README.md", in: worktree)
+
+        // Baseline contrast: a bare working-tree diff sees only the
+        // uncommitted edit, never the committed new file.
+        let bareDiff = try await git(["diff", "--name-only"], in: worktree)
+        XCTAssertFalse(bareDiff.contains("Sources/app.swift"),
+                       "a bare diff must miss committed work (that's why we use merge-base)")
+
+        let paths = await GitOperations.changedTopLevelPaths(in: worktree, baseBranch: "main")
+
+        XCTAssertTrue(paths.contains("Sources"), "committed change's top-level path must appear")
+        XCTAssertTrue(paths.contains("README.md"), "uncommitted change's top-level path must appear")
+        XCTAssertFalse(paths.contains("docs"), "an unchanged base path must not appear")
+    }
+
+    func testChangedTopLevelPathsMissingWorktreeIsEmpty() async throws {
+        // Tolerant contract: a path with no repo/worktree yields [] rather
+        // than throwing, so one absent worktree never fails the digest.
+        let ghost = project.rootPath.appendingPathComponent("repos/ghost/feature", isDirectory: true)
+        let paths = await GitOperations.changedTopLevelPaths(in: ghost, baseBranch: "main")
+        XCTAssertEqual(paths, [])
+    }
+
     // MARK: - deriveName
 
     func testDeriveNameFromCloneURLs() {

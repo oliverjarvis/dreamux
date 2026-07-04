@@ -79,44 +79,53 @@ enum IntakeDigest {
     /// Join `lines` with newlines, stopping before the running total
     /// would exceed `maxBytes`. On overflow, whole trailing lines are
     /// dropped and a marker naming the number of dropped lines is
-    /// appended so the truncation is never silent. The result is always
-    /// ≤ `maxBytes`.
+    /// appended so the truncation is never silent. The dropped-count is
+    /// recomputed as lines fall away — including any shed to make room for
+    /// the marker itself — so it reflects EVERY dropped line. The result
+    /// is always ≤ `maxBytes`.
     private static func capped(_ lines: [String]) -> String {
         var out = ""
-        for (i, line) in lines.enumerated() {
+        var kept = 0
+        for line in lines {
             let candidate = out.isEmpty ? line : out + "\n" + line
-            guard candidate.utf8.count > maxBytes else { out = candidate; continue }
-
-            let marker = "… [truncated — \(lines.count - i) more line(s)]"
-            var kept = out
-            while !kept.isEmpty,
-                  kept.utf8.count + 1 + marker.utf8.count > maxBytes {
-                if let nl = kept.lastIndex(of: "\n") {
-                    kept = String(kept[..<nl])
-                } else {
-                    kept = ""
-                }
+            if candidate.utf8.count <= maxBytes {
+                out = candidate
+                kept += 1
+                continue
             }
-            return kept.isEmpty ? marker : kept + "\n" + marker
+            // Read `kept` live so the count stays true as the fit loop
+            // below sheds further lines.
+            func marker() -> String { "… [truncated — \(lines.count - kept) more line(s)]" }
+            while !out.isEmpty, out.utf8.count + 1 + marker().utf8.count > maxBytes {
+                if let nl = out.lastIndex(of: "\n") {
+                    out = String(out[..<nl])
+                } else {
+                    out = ""
+                }
+                kept -= 1
+            }
+            return out.isEmpty ? marker() : out + "\n" + marker()
         }
         return out
     }
 
     /// Assemble the digest from live app state. Reads the in-memory
     /// `DocStore` inventory (plans, statuses, remaining tasks) and, for
-    /// running plans, the touched territory: `<repoRoot>/<feature>` is the
-    /// worktree per repo, and `diffstat` returns its top-level paths.
-    /// Merged plans are dropped — they are noise for a disposition. The
-    /// diffstat closure is injected (defaulting to real git) so tests
-    /// never spawn a process.
+    /// running plans, the touched territory: `<repo.rootURL>/<feature>` is
+    /// the worktree per repo, and `diffstat` returns its top-level paths
+    /// diffed against the repo's default branch (so committed work counts,
+    /// not just uncommitted). Merged plans are dropped — they are noise for
+    /// a disposition. The diffstat closure is injected (defaulting to real
+    /// git, keyed on the worktree URL and base branch) so tests never spawn
+    /// a process.
     @MainActor
     static func build(
         docStore: DocStore,
-        repoRoots: [URL],
+        repos: [Repository],
         queue: [String],
         featureExists: (String) -> Bool,
-        diffstat: @Sendable (URL) async -> [String] = {
-            await GitOperations.diffStatTopLevelPaths(in: $0)
+        diffstat: @Sendable (URL, String) async -> [String] = {
+            await GitOperations.changedTopLevelPaths(in: $0, baseBranch: $1)
         }
     ) async -> String {
         var entries: [Entry] = []
@@ -138,9 +147,9 @@ enum IntakeDigest {
 
             if status == .running, let feature {
                 var touched: [String] = []
-                for repoRoot in repoRoots {
-                    let worktree = repoRoot.appendingPathComponent(feature, isDirectory: true)
-                    touched.append(contentsOf: await diffstat(worktree))
+                for repo in repos {
+                    let worktree = repo.rootURL.appendingPathComponent(feature, isDirectory: true)
+                    touched.append(contentsOf: await diffstat(worktree, repo.defaultBranch))
                 }
                 // Dedupe across repos and order deterministically — the
                 // per-repo git output order is not something to depend on.

@@ -112,8 +112,10 @@ final class IntakeDigestTests: XCTestCase {
         XCTAssertTrue(firstIdx < secondIdx && secondIdx < thirdIdx)
     }
 
-    func testTruncationHonoursHardByteCap() {
+    func testTruncationHonoursHardByteCap() throws {
         // Enough plans, each with prose, to blow well past the 2 KB cap.
+        // No feature, no territory, no queue → each plan is exactly a header
+        // line plus its two remaining-task lines: 3 lines apiece.
         let plans = (0..<200).map { i in
             (title: "Plan number \(i) with a deliberately long descriptive title",
              path: "docs/plans/2026-07-04-plan-\(i)-with-a-long-file-name.md",
@@ -126,6 +128,19 @@ final class IntakeDigestTests: XCTestCase {
         XCTAssertLessThanOrEqual(digest.utf8.count, IntakeDigest.maxBytes)
         XCTAssertTrue(digest.lowercased().contains("truncated"),
                       "an over-cap digest must carry an explicit truncation marker")
+
+        // The marker must account for EVERY dropped line — including lines
+        // shed to make room for the marker itself, not just those past the
+        // overflow index. Kept content lines + the marker's stated count
+        // must reconstruct the full 600-line render.
+        let renderedLines = digest.split(separator: "\n", omittingEmptySubsequences: false)
+        let markerLine = String(renderedLines.last!)
+        // Pull the integer out of "… [truncated — N more line(s)]".
+        let dropped = try XCTUnwrap(
+            markerLine.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }.first)
+        let keptContentLines = renderedLines.count - 1  // exclude the marker line
+        XCTAssertEqual(keptContentLines + dropped, 600,
+                       "dropped-count must reflect all shed lines")
     }
 
     // MARK: - Assembly (async, injected diffstat)
@@ -152,12 +167,14 @@ final class IntakeDigestTests: XCTestCase {
         let repoRoot = project.rootPath.appendingPathComponent("repos/app", isDirectory: true)
         let digest = await IntakeDigest.build(
             docStore: store,
-            repoRoots: [repoRoot],
+            repos: [Repository(rootURL: repoRoot, defaultBranch: "trunk")],
             queue: ["docs/plans/2026-07-04-widget.md"],
             featureExists: { $0 == "widget" },
-            diffstat: { url in
-                // Proves build derives `<repoRoot>/<feature>` as the worktree.
-                url.lastPathComponent == "widget" ? ["Sources", "Tests"] : []
+            diffstat: { url, baseBranch in
+                // Proves build derives `<repoRoot>/<feature>` as the worktree
+                // AND threads the repo's default branch through as the base.
+                (url.lastPathComponent == "widget" && baseBranch == "trunk")
+                    ? ["Sources", "Tests"] : []
             }
         )
 
@@ -199,10 +216,10 @@ final class IntakeDigestTests: XCTestCase {
 
         let digest = await IntakeDigest.build(
             docStore: store,
-            repoRoots: [],
+            repos: [],
             queue: [],
             featureExists: { _ in false },
-            diffstat: { _ in ["should-not-appear"] }
+            diffstat: { _, _ in ["should-not-appear"] }
         )
 
         XCTAssertFalse(digest.contains("Done Implementation Plan"),
@@ -223,7 +240,7 @@ final class IntakeDigestTests: XCTestCase {
 
         let digest = await IntakeDigest.build(
             docStore: store,
-            repoRoots: [],
+            repos: [],
             queue: [],
             featureExists: { _ in false }
         )

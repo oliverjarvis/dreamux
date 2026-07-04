@@ -689,7 +689,8 @@ struct WorkspaceSidebar: View {
     /// project has no non-merged plans (the prompt then reproduces its
     /// pre-intake form). Reads the live `DocStore` inventory and, for
     /// running plans, worktree territory via `IntakeDigest.build`
-    /// (`<repoRoot>/<feature>` per repo).
+    /// (`<repoRoot>/<feature>` per repo, diffed against each repo's
+    /// default branch).
     private func intakeDigest() async -> String? {
         let featureExists: (String) -> Bool = { name in
             store.workspaces.contains { $0.name == name }
@@ -699,7 +700,7 @@ struct WorkspaceSidebar: View {
         }) else { return nil }
         return await IntakeDigest.build(
             docStore: docStore,
-            repoRoots: repoStore.repositories.map(\.rootURL),
+            repos: repoStore.repositories,
             queue: planQueue.entries,
             featureExists: featureExists)
     }
