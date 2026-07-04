@@ -117,7 +117,9 @@ struct WorkspaceSidebar: View {
             NewPlanSheet(
                 onSubmit: { idea in
                     showNewPlan = false
-                    openPlanningSession(prompt: PlanPrompts.brainstormKickoff(idea: idea))
+                    openPlanningSession { digest in
+                        PlanPrompts.brainstormKickoff(idea: idea, intakeDigest: digest)
+                    }
                 },
                 onCancel: { showNewPlan = false }
             )
@@ -190,9 +192,11 @@ struct WorkspaceSidebar: View {
                 onRunPlan: { runningPlan = $0 },
                 onNewPlan: { showNewPlan = true },
                 onWritePlan: { spec in
-                    openPlanningSession(
-                        prompt: PlanPrompts.writePlanKickoff(
-                            specRelativePath: docStore.relativePath(of: spec)))
+                    openPlanningSession { digest in
+                        PlanPrompts.writePlanKickoff(
+                            specRelativePath: docStore.relativePath(of: spec),
+                            intakeDigest: digest)
+                    }
                 },
                 queue: planQueue,
                 onOpenFeature: { name in
@@ -659,18 +663,45 @@ struct WorkspaceSidebar: View {
     /// Reuses the existing tab when it's still open (tracked on the
     /// session — see `planningTabID` below); the kickoff prompt is typed
     /// via the shared driver either way.
-    private func openPlanningSession(prompt: String) {
+    ///
+    /// `buildPrompt` receives the intake digest (nil on a project with no
+    /// plans in flight) and returns the kickoff text. The digest is
+    /// assembled *after* the `docStore.refresh()` below so it reflects the
+    /// freshest inventory at send time; the driver's own quiescence gate
+    /// (`ClaudePromptDriver.send`) is left entirely untouched.
+    private func openPlanningSession(buildPrompt: @escaping (String?) -> String) {
         let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
         store.activate(workspace.id)
         sidebarMode = .workspace
         let session = store.session(for: workspace)
         DocStore.ensureDocsHome(at: repoStore.project.rootPath)
         docStore.refresh()
-        if let tab = session.reuseOrOpenPlanningTab(
-            at: repoStore.project.rootPath.path) {
-            tab.startIfNeeded()
+        guard let tab = session.reuseOrOpenPlanningTab(
+            at: repoStore.project.rootPath.path) else { return }
+        tab.startIfNeeded()
+        Task {
+            let prompt = buildPrompt(await intakeDigest())
             ClaudePromptDriver.send(prompt, into: tab)
         }
+    }
+
+    /// Assemble the intake digest for a kickoff prompt, or nil when the
+    /// project has no non-merged plans (the prompt then reproduces its
+    /// pre-intake form). Reads the live `DocStore` inventory and, for
+    /// running plans, worktree territory via `IntakeDigest.build`
+    /// (`<repoRoot>/<feature>` per repo).
+    private func intakeDigest() async -> String? {
+        let featureExists: (String) -> Bool = { name in
+            store.workspaces.contains { $0.name == name }
+        }
+        guard docStore.plans.contains(where: {
+            docStore.status(for: $0, featureExists: featureExists) != .merged
+        }) else { return nil }
+        return await IntakeDigest.build(
+            docStore: docStore,
+            repoRoots: repoStore.repositories.map(\.rootURL),
+            queue: planQueue.entries,
+            featureExists: featureExists)
     }
 
     private func handleCreateFeature(name: String, repoIDs: [String]) {
