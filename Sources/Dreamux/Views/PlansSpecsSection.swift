@@ -44,6 +44,11 @@ struct PlansSpecsSection: View {
     /// channel. (The section never imports `ProjectSession`.)
     @Binding var gateMergeWorkspaceID: UUID?
     @Binding var gateCloseWorkspaceID: UUID?
+    /// Enqueue the priority-worded course-correction nudge on the project's
+    /// `PlanNudgeCenter` (the section never imports `ProjectSession`). Called
+    /// only after the fix-task is written and only when the plan is running —
+    /// idle plans get the tracked task and no nudge.
+    let onCourseCorrectionNudge: (PlanDoc, _ summary: String, CorrectionPriority) -> Void
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
@@ -65,6 +70,28 @@ struct PlansSpecsSection: View {
     @State private var hoveredInitiativeID: String?
     /// Queue row currently being dragged for reorder — see `queueSection`.
     @State private var draggingQueueItem: QueueItem?
+    /// The row a *Course correct…* was fired from, driving the sheet. One
+    /// sheet behind all three entry points; the case carries the anchor.
+    @State private var correcting: CorrectionTarget?
+
+    /// The plan + anchor + header a course correction is being filed against.
+    /// Built at the clicked row (task / phase / plan), consumed on submit.
+    private struct CorrectionTarget: Identifiable {
+        let id = UUID()
+        let plan: PlanDoc
+        let anchor: CourseCorrection.Anchor
+        let description: String
+    }
+
+    /// `yyyy-MM-dd` for the fix-task's `*(course correction, <date>)*`
+    /// marker — the real clock at the call site, so `CourseCorrection`'s
+    /// pure writer stays date-injected.
+    private static let correctionDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -79,6 +106,37 @@ struct PlansSpecsSection: View {
             }
         }
         .onAppear { docStore.startWatching() }
+        .sheet(item: $correcting) { target in
+            CourseCorrectSheet(
+                anchorDescription: target.description,
+                onSubmit: { text, priority in
+                    submitCorrection(target, text: text, priority: priority)
+                },
+                onCancel: { correcting = nil }
+            )
+        }
+    }
+
+    /// Write the fix-task at the target's anchor, then — only for a plan with
+    /// a live agent — enqueue the priority-worded nudge. The write happens
+    /// immediately so the sidebar shows the new task; the clobber window
+    /// against the running agent's own saves is documented and accepted on
+    /// `CourseCorrection.apply`.
+    private func submitCorrection(
+        _ target: CorrectionTarget, text: String, priority: CorrectionPriority
+    ) {
+        correcting = nil
+        let summary = CourseCorrection.summaryLine(from: text)
+        let date = Self.correctionDateFormatter.string(from: Date())
+        try? CourseCorrection.apply(
+            to: target.plan.fileURL, anchor: target.anchor,
+            summary: summary, body: text, date: date)
+        // Nudge only a running plan (its agent is live to receive it); idle
+        // plans just get the tracked fix-task the write above added.
+        let status = docStore.status(for: target.plan, featureExists: featureExists)
+        if status == .running || status == .awaitingReview {
+            onCourseCorrectionNudge(target.plan, summary, priority)
+        }
     }
 
     // MARK: - Pieces
@@ -559,6 +617,13 @@ struct PlansSpecsSection: View {
                     }
                 },
                 menu: {
+                    // Plan-level correction: no natural anchor, so it lands
+                    // in the phase holding the current task (spec).
+                    Button("Course correct…") {
+                        correcting = CorrectionTarget(
+                            plan: plan, anchor: .currentPhase, description: plan.title)
+                    }
+                    Divider()
                     if let feature = openableFeature {
                         Button("Open workspace") { onOpenFeature(feature) }
                     }
@@ -732,6 +797,14 @@ struct PlansSpecsSection: View {
         .padding(.leading, 28)
         .padding(.trailing, 12)
         .padding(.vertical, 4)
+        .contextMenu {
+            Button("Course correct…") {
+                correcting = CorrectionTarget(
+                    plan: plan,
+                    anchor: .phase(name: group.phase ?? ""),
+                    description: group.phase ?? "Steps")
+            }
+        }
         if isExpanded {
             flatTaskRows(group.tasks, plan: plan, indent: 46)
         }
@@ -779,6 +852,14 @@ struct PlansSpecsSection: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Course correct…") {
+                correcting = CorrectionTarget(
+                    plan: plan,
+                    anchor: .task(line: task.line),
+                    description: task.title.isEmpty ? "this task" : task.title)
+            }
+        }
     }
 
     /// Tasks worth a row: a heading with at least one checkbox step. A
@@ -1174,6 +1255,67 @@ struct NewPlanSheet: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(idea.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
+    }
+}
+
+// MARK: - Course-correct sheet
+
+/// Files a course correction against a plan (spec: "Phase 2 — course
+/// correction"). One sheet behind all three entry points — task row, phase
+/// row, plan row — with the clicked row's `anchorDescription` in the header.
+/// The typed observation becomes a tracked fix-task under the anchor phase
+/// (its first line the heading, the whole text the step body), and the
+/// picked priority words the nudge a running plan's agent receives.
+struct CourseCorrectSheet: View {
+    /// Human description of the anchor the fix-task attaches to — a task
+    /// title, a phase name, or the plan title (rendered under the header).
+    let anchorDescription: String
+    /// Submit with the raw typed text and the chosen delivery priority; the
+    /// caller derives the summary, writes the fix-task, and nudges.
+    let onSubmit: (_ text: String, _ priority: CorrectionPriority) -> Void
+    let onCancel: () -> Void
+
+    @State private var text = ""
+    // Default Fix next: finish the current task cleanly, then the fix.
+    @State private var priority: CorrectionPriority = .next
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Course correct")
+                .font(.title3.weight(.semibold))
+            Text(anchorDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Text("Describe what's wrong or what to change. It becomes a tracked fix-task in the plan; if the plan is running, its agent is nudged with the priority you pick.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextEditor(text: $text)
+                .font(.body)
+                .frame(height: 90)
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.primary.opacity(0.12)))
+            Picker("Delivery", selection: $priority) {
+                ForEach(CorrectionPriority.allCases, id: \.self) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                // Submit is disabled on empty/whitespace input: the fix-task
+                // writer builds a malformed heading from a blank summary.
+                Button("Send") { onSubmit(text, priority) }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)

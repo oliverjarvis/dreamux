@@ -28,6 +28,10 @@ struct WorkspaceSidebar: View {
     let onOpenDoc: (URL) -> Void
     /// Open a doc jumped to a 1-based line (phase/task rows).
     let onOpenDocAtLine: (URL, Int) -> Void
+    /// Enqueue a course-correction nudge on the project's `PlanNudgeCenter`
+    /// (owned by the `ProjectSession` bundle this view can't see) — forwarded
+    /// straight into `PlansSpecsSection`.
+    let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
 
     @State private var showAddFeature = false
     @State private var showAddRepo = false
@@ -219,7 +223,8 @@ struct WorkspaceSidebar: View {
                 },
                 makeRunControls: { runControls(for: $0) },
                 gateMergeWorkspaceID: $gateMergeWorkspaceID,
-                gateCloseWorkspaceID: $gateCloseWorkspaceID
+                gateCloseWorkspaceID: $gateCloseWorkspaceID,
+                onCourseCorrectionNudge: onCourseCorrectionNudge
             )
 
             switchNoticeIfAny

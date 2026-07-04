@@ -223,6 +223,28 @@ final class ProjectSession {
         }
     }
 
+    /// Park a course-correction nudge for a running plan and attempt
+    /// immediate delivery — the way `PlansSpecsSection` reaches the nudge
+    /// center without importing this bundle (a narrow closure threaded
+    /// through `WorkspaceSidebar`). The sheet has already written the
+    /// fix-task and confirmed the plan is running; this only wires the
+    /// priority-worded nudge in. The gate rail (park at a merge gate) and
+    /// the quiescence discipline live in the center's delivery path, not
+    /// here. No ledger record → no live agent to type into → a no-op.
+    func enqueueCourseCorrectionNudge(
+        plan: PlanDoc, summary: String, priority: CorrectionPriority
+    ) {
+        let path = docStore.relativePath(of: plan)
+        guard let feature = docStore.ledger.recordForPlan(path)?.featureName else { return }
+        nudgeCenter.enqueue(
+            planPath: path,
+            featureName: feature,
+            prompt: PlanPrompts.courseCorrection(
+                taskTitle: summary, priority: priority, planRelativePath: path),
+            createdAt: Date())
+        nudgeCenter.deliverPending()
+    }
+
     /// The live plan-execution agent terminal for a plan path, via the
     /// ledger's feature name and that feature's workspace session — the
     /// tab the nudge center probes for quiescence and types into.

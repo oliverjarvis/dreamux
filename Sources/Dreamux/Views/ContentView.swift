@@ -61,7 +61,11 @@ struct ContentView: View {
                     gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
                     gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
                     onOpenDoc: openFile,
-                    onOpenDocAtLine: { openFile($0, atLine: $1) }
+                    onOpenDocAtLine: { openFile($0, atLine: $1) },
+                    onCourseCorrectionNudge: { plan, summary, priority in
+                        session.enqueueCourseCorrectionNudge(
+                            plan: plan, summary: summary, priority: priority)
+                    }
                 )
                 .frame(minWidth: 220, idealWidth: 250, maxWidth: 380)
 

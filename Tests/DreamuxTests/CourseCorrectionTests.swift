@@ -261,4 +261,53 @@ final class CourseCorrectionTests: XCTestCase {
         let fix = try XCTUnwrap(after.tasks.first { $0.title.contains("Fix — s") })
         XCTAssertEqual(fix.phase, "Phase 0 — Real")
     }
+
+    // MARK: - Summary derivation (sheet input → fix-task heading)
+
+    /// The heading summary is the first line of the typed observation; the
+    /// rest of the text is the step body, not the title.
+    func testSummaryTakesFirstLineOnly() {
+        XCTAssertEqual(
+            CourseCorrection.summaryLine(from: "Rope isn't severed\nmore detail here"),
+            "Rope isn't severed")
+    }
+
+    /// Runs of whitespace (spaces, tabs) inside the first line collapse to a
+    /// single space so the heading round-trips as one clean line.
+    func testSummaryCollapsesWhitespace() {
+        XCTAssertEqual(
+            CourseCorrection.summaryLine(from: "Rope   isn't\t\tsevered"),
+            "Rope isn't severed")
+    }
+
+    /// Leading blank / whitespace-only lines are skipped — the summary is
+    /// the first line with actual content.
+    func testSummarySkipsLeadingBlankLines() {
+        XCTAssertEqual(
+            CourseCorrection.summaryLine(from: "\n\n   \nActual observation"),
+            "Actual observation")
+    }
+
+    /// Leading and trailing whitespace on the chosen line is trimmed.
+    func testSummaryTrimsSurroundingWhitespace() {
+        XCTAssertEqual(
+            CourseCorrection.summaryLine(from: "   Fix this   \nnext line"),
+            "Fix this")
+    }
+
+    /// A first line at or under the cap is returned intact — no ellipsis.
+    func testSummaryKeepsShortLineIntact() {
+        let sixty = String(repeating: "a", count: 60)
+        XCTAssertEqual(CourseCorrection.summaryLine(from: sixty), sixty)
+    }
+
+    /// A first line past the cap is truncated to `maxLength` characters with
+    /// a trailing ellipsis marking the clip.
+    func testSummaryTruncatesLongLine() {
+        let seventy = String(repeating: "a", count: 70)
+        let out = CourseCorrection.summaryLine(from: seventy)
+        XCTAssertEqual(out.count, 61) // 60 chars + "…"
+        XCTAssertTrue(out.hasSuffix("…"))
+        XCTAssertTrue(out.hasPrefix(String(repeating: "a", count: 60)))
+    }
 }

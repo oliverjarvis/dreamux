@@ -241,6 +241,26 @@ enum CourseCorrection {
         return max(lastContent + 1, windowStart)
     }
 
+    // MARK: - Summary derivation
+
+    /// Derive the fix-task's one-line heading summary from the user's typed
+    /// observation: the first line with actual content, whitespace-collapsed
+    /// and, if longer than `maxLength`, clipped with a trailing ellipsis. The
+    /// full observation becomes the step body; this line becomes the
+    /// `### Task N.k: Fix — <summary>` heading, so it must stay short and
+    /// single-line. Skipping leading blank lines keeps a stray newline before
+    /// the real text from yielding an empty heading (the sheet already
+    /// disables submit on all-whitespace input, but this stays total).
+    static func summaryLine(from observation: String, maxLength: Int = 60) -> String {
+        let firstContentLine = observation
+            .split(whereSeparator: \.isNewline)
+            .lazy
+            .map { collapse(String($0)) }
+            .first { !$0.isEmpty } ?? ""
+        guard firstContentLine.count > maxLength else { return firstContentLine }
+        return firstContentLine.prefix(maxLength).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
     // MARK: - Helpers
 
     /// The 1-based lines of real `## ` headings (with their names), scanned
