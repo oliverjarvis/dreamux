@@ -1,7 +1,7 @@
 # Plan Intake — Parallel / Wait / Integrate — Design
 
 **Date:** 2026-07-04
-**Status:** Approved 2026-07-04 (open questions resolved in chat — see Decisions)
+**Status:** Shipped — Phase 1 merged 82ea63a, Phase 2 merged c97ba07 (2026-07-04)
 
 ## Problem
 
