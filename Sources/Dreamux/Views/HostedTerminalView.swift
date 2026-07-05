@@ -11,9 +11,14 @@ struct HostedTerminalView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let session: TabSession
+    /// Whether this tab is the selected tab of its pane. Threaded down
+    /// from `TabContentView`, which reads it fresh on every body
+    /// evaluation — see `TerminalDropContainer` for why AppKit-level
+    /// visibility can't be the gate here.
+    var dropTargetEnabled: Bool = true
 
     var body: some View {
-        HostedTerminalRepresentable(session: session)
+        HostedTerminalRepresentable(session: session, dropTargetEnabled: dropTargetEnabled)
             .background(.clear)
             // Same light/dark adoption `TerminalSurfaceView` performs.
             .onChange(of: colorScheme, initial: true) {
@@ -24,11 +29,13 @@ struct HostedTerminalView: View {
 
 private struct HostedTerminalRepresentable: NSViewRepresentable {
     let session: TabSession
+    let dropTargetEnabled: Bool
 
     func makeNSView(context: Context) -> TerminalDropContainer {
         let container = TerminalDropContainer()
         container.session = session
         container.attach(session.terminalView)
+        container.dropTargetEnabled = dropTargetEnabled
         return container
     }
 
@@ -38,6 +45,7 @@ private struct HostedTerminalRepresentable: NSViewRepresentable {
         // pane/tab rearrangement — reclaim it if another container has it.
         nsView.attach(session.terminalView)
         session.resyncTerminalViewIfNeeded()
+        nsView.dropTargetEnabled = dropTargetEnabled
     }
 }
 
@@ -52,9 +60,36 @@ private struct HostedTerminalRepresentable: NSViewRepresentable {
 /// The only reliable drop target is a view OUTSIDE that subtree, so the
 /// container keeps a transparent, click-through sibling of the window's
 /// hosting view frame-synced over itself.
+///
+/// The overlay exists only for the pane's SELECTED tab. Dreamux's
+/// `WorkspaceSession` uses bonsplit's `contentViewLifecycle:
+/// .keepAllAlive`, which keeps every tab's content view mounted in a
+/// `ZStack` with `.opacity(selected ? 1 : 0)` (`PaneContainerView
+/// .contentArea`) — background tabs never get hidden via `NSView
+/// .isHidden`, their frame never changes, and they never leave the
+/// window. That means `viewDidHide`/`viewDidUnhide`/`layout()` fire
+/// only for pane-level hiding (e.g. a whole split collapsing), never
+/// for a same-pane tab switch — so AppKit visibility alone would leave
+/// every background tab's overlay live and stacked at the same window
+/// rect as the foreground tab, letting a drop route to the wrong shell.
+/// `dropTargetEnabled` (driven by `BonsplitController.isTabSelected`,
+/// re-read reactively in `TabContentView.body`) is the actual gate;
+/// the window/hidden checks below remain because pane-level hiding
+/// still uses `isHidden` via `SplitContainerView`, and unparenting
+/// still matters when a tab closes or moves.
 final class TerminalDropContainer: NSView {
     weak var session: TabSession?
     private var overlay: TerminalDropOverlay?
+
+    /// Whether this tab is the selected tab of its pane. `false` for
+    /// every offstage tab kept alive by `.keepAllAlive` — those never
+    /// get an overlay, even though they're mounted and full-frame.
+    var dropTargetEnabled: Bool = true {
+        didSet {
+            guard oldValue != dropTargetEnabled else { return }
+            syncOverlay()
+        }
+    }
 
     func attach(_ view: NSView) {
         guard view.superview !== self else { return }
@@ -83,12 +118,13 @@ final class TerminalDropContainer: NSView {
         syncOverlay()
     }
 
-    /// Create/position the overlay while this terminal is visible in a
-    /// window; tear it down when hidden (keepAllAlive keeps offstage
-    /// tabs mounted — a stale overlay would misroute drops meant for
-    /// the tab actually on screen) or unparented (tab closed/moved).
+    /// Create/position the overlay while this terminal is the selected
+    /// tab and visible in a window; tear it down when deselected,
+    /// hidden (keepAllAlive keeps offstage tabs mounted — a stale
+    /// overlay would misroute drops meant for the tab actually on
+    /// screen), or unparented (tab closed/moved).
     private func syncOverlay() {
-        guard let window, let host = window.contentView,
+        guard dropTargetEnabled, let window, let host = window.contentView,
               !isHiddenOrHasHiddenAncestor else {
             overlay?.removeFromSuperview()
             overlay = nil

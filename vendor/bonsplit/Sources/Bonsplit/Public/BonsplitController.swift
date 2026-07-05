@@ -321,6 +321,25 @@ public final class BonsplitController {
         return Tab(from: selected)
     }
 
+    /// Whether `tabId` is the currently-selected tab of the pane that
+    /// contains it. Reads through `PaneState.selectedTabId` -- the same
+    /// `@Observable` property `TabBarView` reads to highlight the active
+    /// tab chip -- so calling this from inside a SwiftUI `body` (not,
+    /// say, a completion handler) makes that view's body a dependent of
+    /// selection changes and re-render on tab switches.
+    ///
+    /// Hosts with `contentViewLifecycle: .keepAllAlive` keep every tab's
+    /// content view mounted at all times (see `PaneContainerView
+    /// .contentArea`'s `keepAllAlive` branch), so AppKit-level visibility
+    /// callbacks like `viewDidHide` never fire on a tab switch -- this is
+    /// the one reliable signal for "is this tab the one actually on
+    /// screen."
+    /// - Returns: `false` if `tabId` isn't a known tab.
+    public func isTabSelected(_ tabId: TabID) -> Bool {
+        guard let (pane, _) = findTabInternal(tabId) else { return false }
+        return pane.selectedTabId == tabId.id
+    }
+
     // MARK: - Geometry Query API
 
     /// Get current layout snapshot with pixel coordinates

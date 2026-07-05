@@ -81,7 +81,15 @@ private struct TabContentView: View {
 
     var body: some View {
         if let tabSession = session.tabSession(for: tabId) {
-            HostedTerminalView(session: tabSession)
+            // Read inside `body` (not cached in `onAppear`/`onChange`) so
+            // this view depends on `PaneState.selectedTabId` -- the same
+            // `@Observable` property `TabBarView` reads -- and re-renders
+            // on every tab switch. `.keepAllAlive` keeps every tab's
+            // content mounted, so this is what gates the terminal's file-
+            // drop overlay to the one tab actually on screen; see
+            // `TerminalDropContainer`.
+            let isSelectedTab = session.controller.isTabSelected(tabId)
+            HostedTerminalView(session: tabSession, dropTargetEnabled: isSelectedTab)
                 .onAppear { tabSession.startIfNeeded() }
         } else if let fileTab = session.fileTabSession(for: tabId) {
             FileEditorView(session: fileTab)
