@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The right-side file explorer — the card's third column. Presents
 /// the active feature's linked-repo worktrees as one tree — each repo a

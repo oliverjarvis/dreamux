@@ -43,6 +43,11 @@ final class FileTreeOperationsTests: XCTestCase {
             "not under root → absolute fallback, never a wrong relative guess")
     }
 
+    func testRelativePathOfRootItselfIsDot() {
+        let root = URL(fileURLWithPath: "/repo/web/main")
+        XCTAssertEqual(FileTreeOperations.relativePath(of: root, under: root), ".")
+    }
+
     // MARK: - create / rename / trash
 
     func testCreateFileAndFolderWithCollisionAndValidation() throws {
@@ -63,6 +68,30 @@ final class FileTreeOperationsTests: XCTestCase {
         }
     }
 
+    /// A vanished/nonexistent directory must throw, not hand back a URL
+    /// for a file that was never actually written — the old
+    /// FileManager.createFile(atPath:) call ignored its Bool return
+    /// and fabricated success in exactly this case.
+    func testCreateFileIntoNonexistentDirectoryThrows() {
+        let ghost = dir.appendingPathComponent("does-not-exist")
+        XCTAssertThrowsError(try FileTreeOperations.createFile(named: "notes.md", in: ghost))
+    }
+
+    /// A read-only directory can't accept a new file; the write must
+    /// surface as a real thrown error rather than a phantom "created"
+    /// URL. Permissions are restored in a defer so cleanup (which
+    /// deletes `dir`) still works.
+    func testCreateFileIntoReadOnlyDirectoryThrows() throws {
+        let locked = dir.appendingPathComponent("locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: locked.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: locked.path)
+        }
+        XCTAssertThrowsError(try FileTreeOperations.createFile(named: "notes.md", in: locked))
+    }
+
     func testRenameMovesWithinDirectoryAndGuards() throws {
         let file = try FileTreeOperations.createFile(named: "old.txt", in: dir)
         let renamed = try FileTreeOperations.rename(file, to: "new.txt")
@@ -74,6 +103,27 @@ final class FileTreeOperationsTests: XCTestCase {
         XCTAssertThrowsError(try FileTreeOperations.rename(renamed, to: "taken.txt")) {
             XCTAssertEqual($0 as? FileTreeOperationError, .alreadyExists("taken.txt"))
         }
+    }
+
+    /// On the default case-insensitive APFS, fileExists("README.md")
+    /// is true while renaming readme.md → README.md because it IS this
+    /// file. rename must not mistake that for a collision, and the
+    /// resulting directory listing must show the new casing.
+    func testCaseOnlyRenameSucceedsWithNewCasing() throws {
+        let file = try FileTreeOperations.createFile(named: "readme.md", in: dir)
+        let renamed = try FileTreeOperations.rename(file, to: "README.md")
+        XCTAssertEqual(renamed.lastPathComponent, "README.md")
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertTrue(names.contains("README.md"), "directory listing should show new casing")
+    }
+
+    /// Renaming to the exact current name is a no-op, not an opaque
+    /// "already exists" for the name the file already has.
+    func testSameNameRenameIsNoOp() throws {
+        let file = try FileTreeOperations.createFile(named: "same.txt", in: dir)
+        let result = try FileTreeOperations.rename(file, to: "same.txt")
+        XCTAssertEqual(result, file)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
     }
 
     /// trashItem is recoverable-by-design; the test only asserts the
