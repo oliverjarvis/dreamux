@@ -640,6 +640,99 @@ final class RunnerLifecycleTests: XCTestCase {
         XCTAssertEqual(info.port, 4641)
     }
 
+    // MARK: - 11. startPinned shares fixed-port switch semantics
+
+    /// Regression test for the header popover's per-row Start (and
+    /// RunSetupView's scoped Start): `startPinned` must displace a
+    /// fixed-port runner's live instance on another worktree rather
+    /// than trip the bind probe's "port in use" failure — the same
+    /// switch semantics `executeStart`/`startPlan` already gave the
+    /// capsule and sidebar.
+    @MainActor
+    func testStartPinnedDisplacesFixedPortRunnerAcrossBranches() async throws {
+        try skipUnlessPython3Works()
+        let project = try sandbox.makeProject(named: "start-pinned-fixed")
+        try installWorktree(app: "fixedport-server", branch: "main", project: project)
+        try installWorktree(app: "fixedport-server", branch: "feat-b", project: project)
+
+        // The fixture's HTTP port (4700) is hardcoded in server.py — see
+        // Tests/Fixtures/sample-apps/fixedport-server/server.py — so the
+        // `port` here only drives RunnerManager's own bind-probe/config
+        // bookkeeping, not the real listener. Match it so the fetches
+        // below hit the actual server.
+        let toml = runnerBlock(
+            name: "fixedport-server",
+            cwd: "repos/fixedport-server/main",
+            start: "python3 server.py",
+            port: 4700
+        )
+        let manager = makeManager(project: project, toml: toml)
+        let runner = try XCTUnwrap(manager.runners.first)
+        let mainKey = RunnerInstanceKey(runnerName: "fixedport-server", branch: "main")
+        let featKey = RunnerInstanceKey(runnerName: "fixedport-server", branch: "feat-b")
+
+        await manager.startPinned(runner, to: "main")
+        let info = try await fetchServerInfo(port: 4700)
+        XCTAssertTrue(info.cwd.hasSuffix("repos/fixedport-server/main"), "got cwd \(info.cwd)")
+        let oldMainPid = try XCTUnwrap(runningPID(of: manager, runner: "fixedport-server", branch: "main"))
+
+        // Switching to feat-b while main is still live must displace
+        // main's instance instead of failing with "port in use".
+        await manager.startPinned(runner, to: "feat-b")
+
+        try await waitUntil("main's instance to be displaced") {
+            kill(oldMainPid, 0) != 0
+        }
+        XCTAssertNotEqual(
+            manager.statusByInstance[mainKey]?.isRunning, true,
+            "main's instance must no longer be running after the switch"
+        )
+        try await waitUntil("feat-b's instance to come up") {
+            manager.statusByInstance[featKey]?.isRunning == true
+        }
+        let featInfo = try await fetchServerInfo(port: 4700)
+        XCTAssertTrue(
+            featInfo.cwd.hasSuffix("repos/fixedport-server/feat-b"),
+            "feat-b should now be serving the fixed port, got cwd \(featInfo.cwd)"
+        )
+    }
+
+    /// The concurrent-safe (`port_env`) side of the same contract:
+    /// switching `startPinned` to another branch must leave an existing
+    /// instance alone rather than restart-displacing it — only
+    /// fixed-port runners get the switch behaviour.
+    @MainActor
+    func testStartPinnedLeavesConcurrentRunnerAloneAcrossBranches() async throws {
+        try skipUnlessPython3Works()
+        let project = try sandbox.makeProject(named: "start-pinned-concurrent")
+        try installWorktree(app: "portenv-server", branch: "main", project: project)
+        try installWorktree(app: "portenv-server", branch: "feat-b", project: project)
+
+        let manager = makeManager(project: project, toml: portenvTOML(basePort: 4712))
+        let runner = try XCTUnwrap(manager.runners.first)
+        let mainKey = RunnerInstanceKey(runnerName: "portenv-server", branch: "main")
+        let featKey = RunnerInstanceKey(runnerName: "portenv-server", branch: "feat-b")
+
+        await manager.startPinned(runner, to: "main")
+        _ = try await fetchServerInfo(port: 4712)
+        let mainPid = try XCTUnwrap(runningPID(of: manager, runner: "portenv-server", branch: "main"))
+
+        await manager.startPinned(runner, to: "feat-b")
+        try await waitUntil("feat-b's instance to come up") {
+            manager.statusByInstance[featKey]?.isRunning == true
+        }
+
+        XCTAssertEqual(
+            kill(mainPid, 0), 0,
+            "main's instance must survive a startPinned switch for a port_env runner"
+        )
+        XCTAssertEqual(manager.statusByInstance[mainKey]?.isRunning, true)
+        let featInfo = try await fetchServerInfo(port: 4713)
+        XCTAssertTrue(
+            featInfo.cwd.hasSuffix("repos/portenv-server/feat-b"), "got cwd \(featInfo.cwd)"
+        )
+    }
+
     /// Bind + listen on a port the way a foreign server would, so the
     /// tests above have something real to collide with. Returns the fd;
     /// callers close it to release the port.

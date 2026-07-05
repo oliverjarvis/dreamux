@@ -179,20 +179,19 @@ struct RunSetupView: View {
     }
 
     /// When the user clicks Start in a scoped pane AND this runner's
-    /// repo is actually linked to the workspace, point the runner at
-    /// that workspace's worktree. Otherwise fall back to the runner's
-    /// existing branch — better to launch from `main` than to fail
-    /// because the workspace's worktree doesn't exist.
-    ///
-    /// If the runner can't run side-by-side (no `port_env` set on a
-    /// service that has a fixed port), restart so any other-branch
-    /// instance gets killed first; otherwise just start a new instance
-    /// for this branch.
+    /// repo is actually linked to the workspace, delegate to
+    /// `RunnerManager.startPinned` — pin the runner to that workspace's
+    /// worktree and apply the shared fixed-port switch semantics
+    /// (restart displaces any other-branch instance; concurrent-safe
+    /// runners just start). Otherwise fall back to a plain start on the
+    /// runner's existing branch — better to launch from `main` than to
+    /// fail because the workspace's worktree doesn't exist.
     private func startRunner(_ runner: ParsedRunner) {
         if let scope,
            let repo = runners.repoName(for: runner),
            scope.linkedRepoIDs.contains(repo) {
-            runners.setActiveBranch(scope.name, for: runner)
+            Task { @MainActor in await runners.startPinned(runner, to: scope.name) }
+            return
         }
         if runners.canRunConcurrently(runner) {
             runners.start(runner)

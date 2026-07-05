@@ -511,6 +511,20 @@ final class RunnerManager {
         }
     }
 
+    /// Start `runner` pinned to `branch`, with the same fixed-port
+    /// semantics every start surface shares: concurrent-safe runners
+    /// just start; fixed-port runners restart so a live instance on
+    /// another worktree is displaced instead of tripping the bind
+    /// probe's "port in use" failure.
+    func startPinned(_ runner: ParsedRunner, to branch: String) async {
+        setActiveBranch(branch, for: runner)
+        if canRunConcurrently(runner) {
+            start(runner)
+        } else {
+            await restart(runner)
+        }
+    }
+
     /// Runners associated with a workspace: those anchored in one of
     /// its linked repos, or — when the workspace links nothing that has
     /// a runner — every runner in run.toml. Pure (no branch targeting),

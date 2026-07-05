@@ -153,7 +153,7 @@ struct HeaderRunControls: View {
             }
 
             if let port = row.port {
-                Text(":\(String(port))")
+                Text(":\(port)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
@@ -202,11 +202,12 @@ struct HeaderRunControls: View {
                 }
             } else if inScope {
                 iconButton("play.fill", help: "Start") {
-                    // Pin the runner to this workspace's worktree first —
-                    // a single-row start must not launch on whatever
-                    // branch a previous session left active.
-                    runners.setActiveBranch(workspace.name, for: row.runner)
-                    runners.start(row.runner)
+                    // Pin to this workspace's worktree and apply the
+                    // shared fixed-port switch semantics — a single-row
+                    // start must not launch on whatever branch a
+                    // previous session left active, nor trip the bind
+                    // probe when a fixed-port instance is live elsewhere.
+                    Task { await runners.startPinned(row.runner, to: workspace.name) }
                 }
             }
         }

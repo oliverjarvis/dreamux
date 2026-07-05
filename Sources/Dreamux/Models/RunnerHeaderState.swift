@@ -23,9 +23,8 @@ struct HeaderServiceRow: Identifiable, Equatable {
 }
 
 /// Header aggregation lives in static functions so the exact logic the
-/// capsule renders is unit-testable with fabricated dictionaries — the
-/// same decision/execution split `startPlan(for:)` uses. The instance
-/// conveniences feed them live state.
+/// capsule renders is unit-testable with fabricated dictionaries. The
+/// instance conveniences feed them live state.
 extension RunnerManager {
 
     // MARK: - Pure aggregation
