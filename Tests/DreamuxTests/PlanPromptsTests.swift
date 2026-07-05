@@ -200,4 +200,27 @@ final class PlanPromptsTests: XCTestCase {
         XCTAssertTrue(p.lowercased().contains("appended"))
         XCTAssertFalse(p.contains("\n"))
     }
+
+    // MARK: - Auto-commit contract bullet (Task 2)
+
+    /// The auto-commit contract bullet: present by default, absent
+    /// when the Workflow toggle is off — the agent must not be told
+    /// to commit when the user disabled per-task commits.
+    func testRunPlanAutoCommitBulletFollowsFlag() {
+        let on = PlanPrompts.runPlan(planRelativePath: "docs/p.md", docsLinkName: "docs")
+        XCTAssertTrue(on.contains("commit the work"),
+                      "default (true) includes the per-task commit bullet")
+        XCTAssertTrue(on.contains("full heading text"))
+        let off = PlanPrompts.runPlan(
+            planRelativePath: "docs/p.md", docsLinkName: "docs", autoCommit: false)
+        XCTAssertFalse(off.contains("full heading text"))
+    }
+
+    func testResumePlanAutoCommitBulletFollowsFlag() {
+        let on = PlanPrompts.resumePlan(planRelativePath: "docs/p.md", docsLinkName: "docs")
+        XCTAssertTrue(on.contains("full heading text"))
+        let off = PlanPrompts.resumePlan(
+            planRelativePath: "docs/p.md", docsLinkName: "docs", autoCommit: false)
+        XCTAssertFalse(off.contains("full heading text"))
+    }
 }

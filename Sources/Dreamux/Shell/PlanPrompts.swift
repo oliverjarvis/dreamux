@@ -22,9 +22,20 @@ enum CorrectionPriority: String, CaseIterable, Sendable {
 /// checkbox-ticking instruction present) without a PTY.
 enum PlanPrompts {
     /// Kick off execution of a plan inside a freshly provisioned
-    /// feature aggregation directory.
-    static func runPlan(planRelativePath: String, docsLinkName: String) -> String {
-        """
+    /// feature aggregation directory. `autoCommit` mirrors the Settings
+    /// "Commit after each task" toggle (`WorkflowSettings.autoCommitEnabled`)
+    /// — when false, the agent is left to the plan's own commit
+    /// instructions instead of being told to commit every task.
+    static func runPlan(
+        planRelativePath: String, docsLinkName: String, autoCommit: Bool = true
+    ) -> String {
+        let autoCommitBullet = autoCommit
+            ? "\n- After finishing each task — all its checkboxes ticked — commit the work "
+            + "in every repo subfolder you touched: `git add -A && git commit` with the "
+            + "commit message set to the task's full heading text (e.g. \"Task 2: Wire the "
+            + "store\"). One commit per task per repo."
+            : ""
+        return """
         You're in a Dreamux feature directory (see DREAMUX.md — each \
         subfolder is a git worktree for one repo; `\(docsLinkName)/` is the \
         shared project docs home).
@@ -37,7 +48,7 @@ enum PlanPrompts {
         checkbox (`- [ ]` → `- [x]`) and save — the app tracks live \
         progress from that file.
         - Commit exactly as the plan's steps direct, inside the relevant \
-        repo subfolder.
+        repo subfolder.\(autoCommitBullet)
         - The `dreamux-signals` MCP is available: `signals_query` / \
         `signals_recent` read this project's live service logs (useful \
         when a dev server misbehaves), and `signals_emit` records \
@@ -49,8 +60,17 @@ enum PlanPrompts {
     }
 
     /// Re-enter a partially executed plan in its existing worktree.
-    static func resumePlan(planRelativePath: String, docsLinkName: String) -> String {
-        """
+    /// `autoCommit` — see `runPlan`.
+    static func resumePlan(
+        planRelativePath: String, docsLinkName: String, autoCommit: Bool = true
+    ) -> String {
+        let autoCommitBullet = autoCommit
+            ? "\n- After finishing each task — all its checkboxes ticked — commit the work "
+            + "in every repo subfolder you touched: `git add -A && git commit` with the "
+            + "commit message set to the task's full heading text (e.g. \"Task 2: Wire the "
+            + "store\"). One commit per task per repo."
+            : ""
+        return """
         You're back in a Dreamux feature directory (see DREAMUX.md; \
         `\(docsLinkName)/` is the shared project docs home). The plan at \
         \(planRelativePath) is partially done — checked boxes (`- [x]`) are \
@@ -58,7 +78,7 @@ enum PlanPrompts {
         step's commit exists, then continue from the first unchecked step, \
         ticking checkboxes in the plan file as you go and committing as \
         the plan directs.
-
+        \(autoCommitBullet)
         - The `dreamux-signals` MCP is available: `signals_query` / \
         `signals_recent` read this project's live service logs (useful \
         when a dev server misbehaves), and `signals_emit` records \

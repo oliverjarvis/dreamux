@@ -69,9 +69,14 @@ final class PlanRunCoordinator {
             ? planPath
             : planPath.replacingOccurrences(of: "docs/", with: "\(docsLink)/",
                                             options: .anchored)
+        let autoCommit = WorkflowSettings.autoCommitEnabled
         let prompt = isResume
-            ? PlanPrompts.resumePlan(planRelativePath: pathInFeature, docsLinkName: docsLink)
-            : PlanPrompts.runPlan(planRelativePath: pathInFeature, docsLinkName: docsLink)
+            ? PlanPrompts.resumePlan(
+                planRelativePath: pathInFeature, docsLinkName: docsLink,
+                autoCommit: autoCommit)
+            : PlanPrompts.runPlan(
+                planRelativePath: pathInFeature, docsLinkName: docsLink,
+                autoCommit: autoCommit)
 
         let session = workspaceStore.session(for: workspace)
         // Install where the agent runs (the feature dir — Claude Code

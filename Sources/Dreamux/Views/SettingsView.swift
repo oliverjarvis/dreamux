@@ -37,6 +37,21 @@ enum AppearanceSettings {
     }
 }
 
+/// Workflow behavior knobs — how plan runs behave, as opposed to how
+/// the window looks. Same raw-key pattern as AppearanceSettings.
+enum WorkflowSettings {
+    static let autoCommitKey = "workflowAutoCommitPerTask"
+
+    /// Default-ON when unset. UserDefaults.bool(forKey:) returns false
+    /// for absent keys, which would silently ship the feature off —
+    /// every non-SwiftUI read goes through here.
+    static var autoCommitEnabled: Bool {
+        UserDefaults.standard.object(forKey: autoCommitKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: autoCommitKey)
+    }
+}
+
 struct SettingsView: View {
     @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
     @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
@@ -46,6 +61,7 @@ struct SettingsView: View {
     @AppStorage(AppearanceSettings.backdropTintKey) private var backdropTintHex = ""
     @AppStorage(AppearanceSettings.cardColorKey) private var cardColorHex = ""
     @AppStorage(AppearanceSettings.cardOpacityKey) private var cardOpacity = 1.0
+    @AppStorage(WorkflowSettings.autoCommitKey) private var autoCommitPerTask = true
 
     /// ColorPicker bindings bridged onto the persisted hex strings.
     private func colorBinding(_ hex: Binding<String>, fallback: Color) -> Binding<Color> {
@@ -121,6 +137,15 @@ struct SettingsView: View {
             } footer: {
                 Text("Backdrop transparency runs from solid color (0%) to raw desktop glass (100%). Card transparency lets the backdrop show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
                     .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Commit after each task", isOn: $autoCommitPerTask)
+                Text("Plan agents commit each finished task; the app commits any leftovers when it sees a task complete. Off means plans only commit when the agent chooses to. Takes effect from the next task boundary.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Workflow")
             }
         }
         .formStyle(.grouped)
