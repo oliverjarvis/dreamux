@@ -54,6 +54,72 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertTrue(LibraryScanner.parseFrontmatter("# Just markdown").isEmpty)
     }
 
+    /// Verbatim shape of every cached stripe skill: `description: >-`
+    /// folds its indented continuation into one space-joined line, and
+    /// a nested `metadata:` map's indented children (even ones with
+    /// their own colon) must NOT surface as top-level keys.
+    func testParseFrontmatterFoldedScalarAndNestedMap() {
+        let text = """
+        ---
+        name: stripe-directory
+        description: >-
+          Use when the user wants to find businesses, software, service providers, or
+          partners for a specific industry, workflow, pain point, capability, or job to
+          be done. Also use when the agent needs to programmatically purchase or consume
+          a service. Use Stripe Directory to build a short relevant shortlist, even if
+          the user does not mention Stripe Directory explicitly.
+        metadata:
+          short-description: Find (and optionally purchase from) vendors or partners
+        allowed-tools:
+          - Bash(stripe directory *)
+
+        ---
+        """
+        let fm = LibraryScanner.parseFrontmatter(text)
+        XCTAssertEqual(fm["name"], "stripe-directory")
+        XCTAssertEqual(fm["description"], """
+        Use when the user wants to find businesses, software, service providers, or \
+        partners for a specific industry, workflow, pain point, capability, or job to \
+        be done. Also use when the agent needs to programmatically purchase or consume \
+        a service. Use Stripe Directory to build a short relevant shortlist, even if \
+        the user does not mention Stripe Directory explicitly.
+        """)
+        XCTAssertNil(fm["short-description"], "nested metadata children must not become top-level keys")
+    }
+
+    /// A folded scalar (`>-`) whose continuation includes a line with
+    /// its own colon — that colon must not be mistaken for a new key,
+    /// and the line must still be folded into the value.
+    func testParseFrontmatterFoldedScalarContinuationWithColon() {
+        let text = """
+        ---
+        name: sample
+        description: >-
+          First line of the description.
+          Second line has a colon: like this in it.
+        ---
+        """
+        let fm = LibraryScanner.parseFrontmatter(text)
+        XCTAssertEqual(fm["description"],
+                       "First line of the description. Second line has a colon: like this in it.")
+        XCTAssertNil(fm["colon"], "a colon inside a folded continuation line must not create a key")
+    }
+
+    /// A literal block (`|`) joins its continuation lines with newlines
+    /// instead of folding them into one line.
+    func testParseFrontmatterLiteralBlock() {
+        let text = """
+        ---
+        name: sample
+        notes: |
+          line one
+          line two
+        ---
+        """
+        let fm = LibraryScanner.parseFrontmatter(text)
+        XCTAssertEqual(fm["notes"], "line one\nline two")
+    }
+
     // MARK: - scanSkills
 
     /// Project, global, and plugin skills all surface with the right
@@ -66,13 +132,15 @@ final class LibraryScannerTests: XCTestCase {
                       name: "proj-skill", description: "project one")
         try makeSkill(at: home.appendingPathComponent(".claude/skills"),
                       name: "global-skill", description: "global one")
+        let pluginInstallPath = home.appendingPathComponent(".claude/plugins/cache/mkt/superpowers/1.0.0")
         try makeSkill(
-            at: home.appendingPathComponent(".claude/plugins/cache/mkt/superpowers/1.0.0/skills"),
+            at: pluginInstallPath.appendingPathComponent("skills"),
             name: "plugin-skill", description: "plugin one")
 
         let items = LibraryScanner.scanSkills(
             projectRoot: project, home: home,
-            accessiblePlugins: ["superpowers"])
+            plugins: [PluginInstall(name: "superpowers", installPath: pluginInstallPath,
+                                     version: "1.0.0", accessible: true, accessReason: "reachable")])
 
         XCTAssertEqual(items.count, 3)
         let byName = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0) })
@@ -89,14 +157,52 @@ final class LibraryScannerTests: XCTestCase {
     func testPluginSkillInheritsInaccessibility() throws {
         let project = dir.appendingPathComponent("proj")
         let home = dir.appendingPathComponent("home")
+        let installPath = home.appendingPathComponent(".claude/plugins/cache/mkt/other/2.0")
         try makeSkill(
-            at: home.appendingPathComponent(".claude/plugins/cache/mkt/other/2.0/skills"),
+            at: installPath.appendingPathComponent("skills"),
             name: "locked", description: "elsewhere")
         let items = LibraryScanner.scanSkills(
-            projectRoot: project, home: home, accessiblePlugins: [])
+            projectRoot: project, home: home,
+            plugins: [PluginInstall(name: "other", installPath: installPath,
+                                     version: "2.0", accessible: false, accessReason: "elsewhere")])
         XCTAssertEqual(items.count, 1)
         XCTAssertFalse(items[0].accessible)
         XCTAssertFalse(items[0].accessReason.isEmpty)
+    }
+
+    /// Regression: the registry can reference an OLDER cached version
+    /// while a newer directory for the same skill also sits in
+    /// cache/<mkt>/<plugin>/* (from a prior update, or another project
+    /// pinned to a different version). Only the registry's resolved
+    /// installPath may be scanned — never every cached version — so
+    /// each skill appears exactly once, from the registry's path.
+    func testScanSkillsOnlyReadsRegistrysResolvedVersionNotEveryCachedVersion() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        let pluginRoot = home.appendingPathComponent(".claude/plugins/cache/mkt/stripe")
+        let registryVersionPath = pluginRoot.appendingPathComponent("1.0")
+        let staleVersionPath = pluginRoot.appendingPathComponent("2.0")
+        try makeSkill(at: registryVersionPath.appendingPathComponent("skills"),
+                      name: "stripe-directory", description: "registry version")
+        try makeSkill(at: staleVersionPath.appendingPathComponent("skills"),
+                      name: "stripe-directory", description: "stale cached version")
+
+        let items = LibraryScanner.scanSkills(
+            projectRoot: project, home: home,
+            plugins: [PluginInstall(name: "stripe", installPath: registryVersionPath,
+                                     version: "1.0", accessible: true, accessReason: "reachable")])
+
+        let matches = items.filter { $0.name == "stripe-directory" }
+        XCTAssertEqual(matches.count, 1, "must not scan every cached version directory")
+        // Resolve both sides: /tmp is itself a symlink into /private on
+        // macOS, and FileManager's directory enumeration returns the
+        // canonicalized form while our hand-built URL doesn't.
+        let matchedPath = matches[0].path.resolvingSymlinksInPath().path
+        let registryPath = registryVersionPath.resolvingSymlinksInPath().path
+        XCTAssertTrue(matchedPath.hasPrefix(registryPath),
+                      "the item's path must come from the registry's resolved installPath")
+        XCTAssertFalse(matchedPath.contains("/2.0/"),
+                       "must not fall back to another cached version's directory")
     }
 
     /// SkillLinker mirrors .agents/skills into .claude/skills via
@@ -114,7 +220,7 @@ final class LibraryScannerTests: XCTestCase {
 
         let items = LibraryScanner.scanSkills(
             projectRoot: project, home: dir.appendingPathComponent("home"),
-            accessiblePlugins: [])
+            plugins: [])
         XCTAssertEqual(items.filter { $0.name == "one" }.count, 1)
     }
 
@@ -135,7 +241,7 @@ final class LibraryScannerTests: XCTestCase {
 
         let items = LibraryScanner.scanSkills(
             projectRoot: project, home: dir.appendingPathComponent("home"),
-            accessiblePlugins: [])
+            plugins: [])
         XCTAssertEqual(items.filter { $0.name == "linked-only" }.count, 1,
                        "symlink-only skills must be enumerated")
     }
@@ -210,6 +316,41 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertTrue(items.contains { $0.name == "feature-only" && $0.scopeLabel == "Feature: thing" })
     }
 
+    /// HTTP-style servers (`"url"` instead of `"command"`) surface a
+    /// `url:` line in the detail panel.
+    func testScanMCPServersHTTPEntryShowsURLDetail() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON(["mcpServers": [
+            "hosted": ["url": "https://example.com/mcp"],
+        ]], to: project.appendingPathComponent(".mcp.json"))
+
+        let items = LibraryScanner.scanMCPServers(projectRoot: project, home: home)
+        let hosted = items.first { $0.name == "hosted" }
+        XCTAssertTrue(hosted!.detail.contains("url: https://example.com/mcp"))
+    }
+
+    /// `disabledMcpjsonServers` governs project/feature-dir .mcp.json
+    /// entries only — a GLOBAL server (~/.claude.json top-level map)
+    /// sharing a name with a disabled project server must stay
+    /// accessible; the disabling is scoped, not name-global.
+    func testScanMCPServersGlobalNotAffectedByProjectDisable() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON(["mcpServers": ["shared-name": ["command": "/project-one"]]],
+                      to: project.appendingPathComponent(".mcp.json"))
+        try writeJSON(["disabledMcpjsonServers": ["shared-name"]],
+                      to: project.appendingPathComponent(".claude/settings.local.json"))
+        try writeJSON(["mcpServers": ["shared-name": ["command": "/global-one"]]],
+                      to: home.appendingPathComponent(".claude.json"))
+
+        let items = LibraryScanner.scanMCPServers(projectRoot: project, home: home)
+        let byScope = Dictionary(uniqueKeysWithValues: items.map { ($0.scopeLabel, $0) })
+        XCTAssertEqual(byScope["Project"]?.accessible, false)
+        XCTAssertEqual(byScope["Global"]?.accessible, true,
+                       "a global server must not inherit a project-scoped disable")
+    }
+
     // MARK: - scanPlugins / accessiblePluginNames
 
     /// v2 registry: user scope reaches everywhere; project/local scope
@@ -238,6 +379,22 @@ final class LibraryScannerTests: XCTestCase {
                     "installPath": home.appendingPathComponent(".claude/plugins/cache/official/elsewhere/1.0").path,
                     "version": "1.0",
                 ]],
+                // Fix 3: an entry ordered BEFORE the access-granting one
+                // must not win — the chosen entry (and its version/path)
+                // is the one that actually grants access, in list order.
+                "ordered@official": [
+                    [
+                        "scope": "project",
+                        "projectPath": "/somewhere/else/Fur",
+                        "installPath": home.appendingPathComponent(".claude/plugins/cache/official/ordered/1.0").path,
+                        "version": "1.0",
+                    ],
+                    [
+                        "scope": "user",
+                        "installPath": home.appendingPathComponent(".claude/plugins/cache/official/ordered/2.0").path,
+                        "version": "2.0",
+                    ],
+                ],
             ],
         ], to: home.appendingPathComponent(".claude/plugins/installed_plugins.json"))
 
@@ -247,8 +404,92 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertEqual(byName["here-only"]?.accessible, true)
         XCTAssertEqual(byName["elsewhere"]?.accessible, false)
         XCTAssertTrue(byName["superpowers"]!.detail.contains { $0.contains("6.1.0") })
+        XCTAssertTrue(byName["elsewhere"]!.accessReason.contains("else"),
+                      "denied reason should name the project(s) the plugin belongs to")
+
+        let ordered = byName["ordered"]!
+        XCTAssertTrue(ordered.detail.contains { $0.contains("2.0") })
+        XCTAssertEqual(ordered.path,
+                       home.appendingPathComponent(".claude/plugins/cache/official/ordered/2.0"))
 
         let accessible = LibraryScanner.accessiblePluginNames(projectRoot: project, home: home)
-        XCTAssertEqual(accessible, ["superpowers", "here-only"])
+        XCTAssertEqual(accessible, ["superpowers", "here-only", "ordered"])
+    }
+
+    /// Fix 5: the denied reason names the project(s) the plugin is
+    /// actually installed for, using the projectPath basename.
+    func testScanPluginsDeniedReasonNamesTheProject() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON([
+            "version": 2,
+            "plugins": [
+                "typescript-lsp@official": [[
+                    "scope": "project",
+                    "projectPath": "/Users/olliejarvis/Development/Fur",
+                    "installPath": home.appendingPathComponent(".claude/plugins/cache/official/typescript-lsp/1.0").path,
+                    "version": "1.0",
+                ]],
+            ],
+        ], to: home.appendingPathComponent(".claude/plugins/installed_plugins.json"))
+
+        let items = LibraryScanner.scanPlugins(projectRoot: project, home: home)
+        XCTAssertEqual(items.first?.accessReason, "Installed for Fur only")
+    }
+
+    /// Fix 4: an installed plugin explicitly disabled via
+    /// `enabledPlugins` in the PROJECT's settings.local.json is
+    /// inaccessible even though its install scope would otherwise
+    /// grant access.
+    func testScanPluginsDisabledByProjectSettingsLocal() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON([
+            "version": 2,
+            "plugins": [
+                "superpowers@official": [[
+                    "scope": "user",
+                    "installPath": home.appendingPathComponent(".claude/plugins/cache/official/superpowers/6.1.0").path,
+                    "version": "6.1.0",
+                ]],
+            ],
+        ], to: home.appendingPathComponent(".claude/plugins/installed_plugins.json"))
+        try writeJSON(
+            ["enabledPlugins": ["superpowers@official": false]],
+            to: project.appendingPathComponent(".claude/settings.local.json"))
+
+        let items = LibraryScanner.scanPlugins(projectRoot: project, home: home)
+        let superpowers = items.first { $0.name == "superpowers" }
+        XCTAssertEqual(superpowers?.accessible, false)
+        XCTAssertEqual(superpowers?.accessReason, "Disabled in Claude settings")
+    }
+
+    /// Fix 5: `.claude-plugin/plugin.json` at the resolved installPath
+    /// fills the description (and the version, when the registry says
+    /// "unknown") — missing file falls back to today's empty behavior.
+    func testScanPluginsReadsPluginJSONForDescriptionAndVersion() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        let installPath = home.appendingPathComponent(".claude/plugins/cache/official/stripe/0.2.2")
+        try writeJSON([
+            "version": 2,
+            "plugins": [
+                "stripe@official": [[
+                    "scope": "user",
+                    "installPath": installPath.path,
+                    "version": "unknown",
+                ]],
+            ],
+        ], to: home.appendingPathComponent(".claude/plugins/installed_plugins.json"))
+        try writeJSON([
+            "name": "stripe",
+            "description": "Stripe development plugin for Claude",
+            "version": "0.2.2",
+        ], to: installPath.appendingPathComponent(".claude-plugin/plugin.json"))
+
+        let items = LibraryScanner.scanPlugins(projectRoot: project, home: home)
+        let stripe = items.first { $0.name == "stripe" }
+        XCTAssertEqual(stripe?.description, "Stripe development plugin for Claude")
+        XCTAssertTrue(stripe!.detail.contains { $0.contains("0.2.2") })
     }
 }

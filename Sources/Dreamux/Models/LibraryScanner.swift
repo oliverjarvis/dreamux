@@ -24,6 +24,20 @@ struct LibraryItem: Identifiable, Equatable {
     var id: String { "\(kind.rawValue)|\(scopeLabel)|\(name)" }
 }
 
+/// The single install of a plugin that matters for THIS project — the
+/// registry entry (`installed_plugins.json` v2) that grants access, or
+/// the first entry when none does. Everything downstream (which skills
+/// dir to scan, which version/path to show) reads from this one entry
+/// instead of re-deriving it, so a plugin can never appear twice with
+/// two different "current" versions.
+struct PluginInstall {
+    let name: String
+    let installPath: URL
+    let version: String
+    let accessible: Bool
+    let accessReason: String
+}
+
 /// Pure filesystem/JSON scanners over injectable roots — every input
 /// path is a parameter so tests run against temp dirs, never the real
 /// ~/.claude. Unreadable/malformed files are skipped silently: this is
@@ -33,26 +47,53 @@ enum LibraryScanner {
     // MARK: - Frontmatter
 
     /// The `---`-delimited `key: value` block SKILL.md files open with.
-    /// Values may be single- or double-quoted. No YAML nesting — the
-    /// convention in the wild is flat (verified against installed
-    /// plugins on this machine).
+    /// Values may be single- or double-quoted, or a folded (`>`/`>-`) or
+    /// literal (`|`/`|-`) block whose continuation lines are indented.
+    /// Only column-0 lines create keys — indented lines (block bodies,
+    /// or children of a nested `metadata:` map, as stripe's cached
+    /// skills ship) never do, so they can't pollute the flat map this
+    /// browser expects.
     static func parseFrontmatter(_ text: String) -> [String: String] {
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)[...]
+        let lines = Array(text.split(separator: "\n", omittingEmptySubsequences: false))
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return [:] }
-        lines = lines.dropFirst()
         var result: [String: String] = [:]
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        var i = 1
+        while i < lines.count {
+            let rawLine = lines[i]
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
             if trimmed == "---" { break }
-            guard let colon = trimmed.firstIndex(of: ":") else { continue }
+            // Indented lines never introduce a top-level key — either
+            // they're a fold/literal-block body consumed below, or a
+            // nested map's children, which we intentionally drop.
+            guard !rawLine.hasPrefix(" "), !rawLine.hasPrefix("\t") else { i += 1; continue }
+            guard let colon = trimmed.firstIndex(of: ":") else { i += 1; continue }
             let key = String(trimmed[..<colon]).trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty else { i += 1; continue }
             var value = String(trimmed[trimmed.index(after: colon)...])
                 .trimmingCharacters(in: .whitespaces)
+
+            if value == ">" || value == ">-" || value == "|" || value == "|-" {
+                let folded = value.hasPrefix(">")
+                var lineValues: [String] = []
+                var j = i + 1
+                while j < lines.count {
+                    let contLine = lines[j]
+                    let contTrimmed = contLine.trimmingCharacters(in: .whitespaces)
+                    if contTrimmed == "---" { break }
+                    guard contLine.hasPrefix(" ") || contLine.hasPrefix("\t") else { break }
+                    lineValues.append(contTrimmed)
+                    j += 1
+                }
+                result[key] = lineValues.joined(separator: folded ? " " : "\n")
+                i = j
+                continue
+            }
+
             for quote in ["\"", "'"] where value.hasPrefix(quote) && value.hasSuffix(quote) && value.count >= 2 {
                 value = String(value.dropFirst().dropLast())
             }
-            guard !key.isEmpty else { continue }
             result[key] = value
+            i += 1
         }
         return result
     }
@@ -62,7 +103,7 @@ enum LibraryScanner {
     static func scanSkills(
         projectRoot: URL,
         home: URL,
-        accessiblePlugins: Set<String>
+        plugins: [PluginInstall]
     ) -> [LibraryItem] {
         var items: [LibraryItem] = []
         var seenResolved: Set<String> = []
@@ -110,22 +151,19 @@ enum LibraryScanner {
                   scopeLabel: "Global", accessible: true,
                   accessReason: "Global — available to every session")
 
-        // Plugin-bundled: cache/<marketplace>/<plugin>/<version>/skills/*
-        let cache = home.appendingPathComponent(".claude/plugins/cache")
-        for marketplace in subdirectories(of: cache) {
-            for plugin in subdirectories(of: marketplace) {
-                for version in subdirectories(of: plugin) {
-                    let pluginName = plugin.lastPathComponent
-                    let reachable = accessiblePlugins.contains(pluginName)
-                    addSkills(
-                        under: version.appendingPathComponent("skills"),
-                        scopeLabel: "Plugin: \(pluginName)",
-                        accessible: reachable,
-                        accessReason: reachable
-                            ? "Ships with the \(pluginName) plugin, which this project can use"
-                            : "Ships with the \(pluginName) plugin, which isn't enabled for this project")
-                }
-            }
+        // Plugin-bundled: exactly the install the registry resolved for
+        // THIS project — not every cached version in cache/<mkt>/<plugin>/*,
+        // which on a machine with several projects/updates yields many
+        // stale duplicates of the same skill (and duplicate LibraryItem
+        // ids, since ids don't carry a version component).
+        for install in plugins {
+            addSkills(
+                under: install.installPath.appendingPathComponent("skills"),
+                scopeLabel: "Plugin: \(install.name)",
+                accessible: install.accessible,
+                accessReason: install.accessible
+                    ? "Ships with the \(install.name) plugin, which this project can use"
+                    : "Ships with the \(install.name) plugin, which isn't enabled for this project")
         }
 
         return items
@@ -175,6 +213,9 @@ enum LibraryScanner {
                 let args = (entry["args"] as? [String]) ?? []
                 lines.append(([command] + args).joined(separator: " "))
             }
+            if let url = entry["url"] as? String {
+                lines.append("url: \(url)")
+            }
             if let env = entry["env"] as? [String: Any], !env.isEmpty {
                 lines.append("env: " + env.keys.sorted().joined(separator: ", "))
             }
@@ -186,6 +227,7 @@ enum LibraryScanner {
             scopeLabel: String,
             skipNames: Set<String> = [],
             accessibleOverride: Bool? = nil,
+            applyDisabled: Bool = true,
             reasonWhenAccessible: String
         ) {
             guard let root = readJSON(url),
@@ -193,7 +235,10 @@ enum LibraryScanner {
             for (name, raw) in servers.sorted(by: { $0.key < $1.key }) {
                 guard !skipNames.contains(name),
                       let entry = raw as? [String: Any] else { continue }
-                let isDisabled = disabled.contains(name)
+                // disabledMcpjsonServers only governs project/feature-dir
+                // .mcp.json entries — a global server sharing a name with
+                // a disabled project one must stay accessible.
+                let isDisabled = applyDisabled && disabled.contains(name)
                 let accessible = accessibleOverride ?? !isDisabled
                 items.append(LibraryItem(
                     kind: .mcpServer,
@@ -230,7 +275,7 @@ enum LibraryScanner {
 
         // ~/.claude.json: global + this-project-keyed maps.
         let claudeJSON = home.appendingPathComponent(".claude.json")
-        addServers(from: claudeJSON, scopeLabel: "Global",
+        addServers(from: claudeJSON, scopeLabel: "Global", applyDisabled: false,
                    reasonWhenAccessible: "Global — every session")
         if let root = readJSON(claudeJSON),
            let projects = root["projects"] as? [String: Any],
@@ -272,70 +317,163 @@ enum LibraryScanner {
 
     // MARK: - Plugins
 
-    static func scanPlugins(projectRoot: URL, home: URL) -> [LibraryItem] {
+    /// Everything `loadPluginRegistry` learns about one plugin key —
+    /// `PluginInstall` plus the bits (marketplace, full scope label,
+    /// plugin.json description) only `scanPlugins`' cards need.
+    private struct PluginRegistryRow {
+        let name: String
+        let marketplace: String
+        let installPath: URL
+        let version: String
+        let accessible: Bool
+        let accessReason: String
+        let scopeLabel: String
+        let description: String
+    }
+
+    /// Parses `installed_plugins.json` v2 ONCE and, per plugin key,
+    /// resolves the single entry that matters for this project: the
+    /// entry that GRANTS access (user scope, or a `projectPath` at/under
+    /// `projectRoot`), or the registry's first entry when none does.
+    /// That chosen entry's installPath/version drive everything
+    /// downstream — the plugin can never show two "current" versions.
+    private static func loadPluginRegistry(projectRoot: URL, home: URL) -> [PluginRegistryRow] {
         guard let root = readJSON(home.appendingPathComponent(
             ".claude/plugins/installed_plugins.json")),
             let plugins = root["plugins"] as? [String: Any]
         else { return [] }
 
-        var items: [LibraryItem] = []
+        var rows: [PluginRegistryRow] = []
         for (key, raw) in plugins.sorted(by: { $0.key < $1.key }) {
-            guard let entries = raw as? [[String: Any]], let first = entries.first
-            else { continue }
+            guard let entries = raw as? [[String: Any]], !entries.isEmpty else { continue }
             // Key shape: "<name>@<marketplace>".
             let parts = key.split(separator: "@", maxSplits: 1)
             let name = String(parts.first ?? Substring(key))
             let marketplace = parts.count > 1 ? String(parts[1]) : ""
-            let installPath = (first["installPath"] as? String).map {
+
+            let (chosen, granted) = choosePluginEntry(entries: entries, projectRoot: projectRoot)
+            let installPath = (chosen["installPath"] as? String).map {
                 URL(fileURLWithPath: $0)
             } ?? home.appendingPathComponent(".claude/plugins/cache")
-            let version = (first["version"] as? String) ?? "unknown"
+            var version = (chosen["version"] as? String) ?? "unknown"
 
-            let (accessible, reason) = pluginAccess(entries: entries, projectRoot: projectRoot)
-            var detail = ["version \(version)"]
-            if !marketplace.isEmpty { detail.append("marketplace: \(marketplace)") }
-            let skillNames = subdirectories(of: installPath.appendingPathComponent("skills"))
-                .map(\.lastPathComponent)
-            if !skillNames.isEmpty {
-                detail.append("skills: " + skillNames.joined(separator: ", "))
+            var accessible = granted
+            var reason = pluginAccessReason(entry: chosen, granted: granted, allEntries: entries)
+            if isPluginDisabledBySettings(key: key, projectRoot: projectRoot, home: home) {
+                accessible = false
+                reason = "Disabled in Claude settings"
             }
-            items.append(LibraryItem(
-                kind: .plugin,
+
+            var description = ""
+            if let pluginJSON = readJSON(installPath.appendingPathComponent(".claude-plugin/plugin.json")) {
+                description = (pluginJSON["description"] as? String) ?? ""
+                if version == "unknown", let pluginJSONVersion = pluginJSON["version"] as? String {
+                    version = pluginJSONVersion
+                }
+            }
+
+            rows.append(PluginRegistryRow(
                 name: name,
-                description: "",
-                scopeLabel: pluginScopeLabel(entries: entries),
-                path: installPath,
+                marketplace: marketplace,
+                installPath: installPath,
+                version: version,
                 accessible: accessible,
                 accessReason: reason,
-                detail: detail))
+                scopeLabel: pluginScopeLabel(entries: entries),
+                description: description))
         }
-        return items
+        return rows
+    }
+
+    /// The one entry per plugin that the rest of the scanner should
+    /// treat as authoritative — see `pluginInstalls` doc.
+    static func pluginInstalls(projectRoot: URL, home: URL) -> [PluginInstall] {
+        loadPluginRegistry(projectRoot: projectRoot, home: home).map {
+            PluginInstall(
+                name: $0.name, installPath: $0.installPath, version: $0.version,
+                accessible: $0.accessible, accessReason: $0.accessReason)
+        }
+    }
+
+    private static func pluginItem(_ row: PluginRegistryRow) -> LibraryItem {
+        var detail = ["version \(row.version)"]
+        if !row.marketplace.isEmpty { detail.append("marketplace: \(row.marketplace)") }
+        let skillNames = subdirectories(of: row.installPath.appendingPathComponent("skills"))
+            .map(\.lastPathComponent)
+        if !skillNames.isEmpty {
+            detail.append("skills: " + skillNames.joined(separator: ", "))
+        }
+        return LibraryItem(
+            kind: .plugin,
+            name: row.name,
+            description: row.description,
+            scopeLabel: row.scopeLabel,
+            path: row.installPath,
+            accessible: row.accessible,
+            accessReason: row.accessReason,
+            detail: detail)
+    }
+
+    static func scanPlugins(projectRoot: URL, home: URL) -> [LibraryItem] {
+        loadPluginRegistry(projectRoot: projectRoot, home: home).map(pluginItem)
     }
 
     static func accessiblePluginNames(projectRoot: URL, home: URL) -> Set<String> {
-        Set(scanPlugins(projectRoot: projectRoot, home: home)
+        Set(pluginInstalls(projectRoot: projectRoot, home: home)
             .filter(\.accessible)
             .map(\.name))
     }
 
-    private static func pluginAccess(
+    /// The first entry (in registry order) that grants THIS project
+    /// access, or the registry's first entry as a fallback so callers
+    /// always have an installPath/version to show.
+    private static func choosePluginEntry(
         entries: [[String: Any]],
         projectRoot: URL
-    ) -> (Bool, String) {
-        for entry in entries {
-            let scope = (entry["scope"] as? String) ?? ""
-            if scope == "user" {
-                return (true, "Installed user-wide — every project")
-            }
-            if let path = entry["projectPath"] as? String {
-                // Feature-dir agents run INSIDE the project root, so a
-                // projectPath at or under the root counts.
-                if path == projectRoot.path || path.hasPrefix(projectRoot.path + "/") {
-                    return (true, "Installed for this project")
-                }
-            }
+    ) -> (entry: [String: Any], granted: Bool) {
+        if let granting = entries.first(where: { pluginEntryGrantsAccess($0, projectRoot: projectRoot) }) {
+            return (granting, true)
         }
-        return (false, "Installed only for other projects")
+        return (entries[0], false)
+    }
+
+    private static func pluginEntryGrantsAccess(_ entry: [String: Any], projectRoot: URL) -> Bool {
+        if (entry["scope"] as? String) == "user" { return true }
+        if let path = entry["projectPath"] as? String {
+            // Feature-dir agents run INSIDE the project root, so a
+            // projectPath at or under the root counts.
+            return path == projectRoot.path || path.hasPrefix(projectRoot.path + "/")
+        }
+        return false
+    }
+
+    private static func pluginAccessReason(
+        entry: [String: Any],
+        granted: Bool,
+        allEntries: [[String: Any]]
+    ) -> String {
+        guard granted else {
+            let elsewhere = otherProjectNames(allEntries)
+            return elsewhere.isEmpty
+                ? "Installed only for other projects"
+                : "Installed for \(elsewhere.joined(separator: ", ")) only"
+        }
+        return (entry["scope"] as? String) == "user"
+            ? "Installed user-wide — every project"
+            : "Installed for this project"
+    }
+
+    /// Distinct `projectPath` basenames across every entry, in registry
+    /// order — used to name the project(s) a denied plugin belongs to.
+    private static func otherProjectNames(_ entries: [[String: Any]]) -> [String] {
+        var seen: Set<String> = []
+        var names: [String] = []
+        for entry in entries {
+            guard let path = entry["projectPath"] as? String else { continue }
+            let base = URL(fileURLWithPath: path).lastPathComponent
+            if seen.insert(base).inserted { names.append(base) }
+        }
+        return names
     }
 
     private static func pluginScopeLabel(entries: [[String: Any]]) -> String {
@@ -343,14 +481,44 @@ enum LibraryScanner {
             ? "Global" : "Project-scoped"
     }
 
+    /// `enabledPlugins` in `~/.claude/settings.json` and the project's
+    /// `.claude/settings.local.json` / `.claude/settings.json` can force
+    /// a plugin off. Project settings override global; an explicit
+    /// `false` in EITHER project file wins outright, otherwise a global
+    /// `false` applies. An absent key is no opinion — install scope
+    /// decides, as it always has.
+    private static func isPluginDisabledBySettings(
+        key: String,
+        projectRoot: URL,
+        home: URL
+    ) -> Bool {
+        func explicitValue(_ url: URL) -> Bool? {
+            guard let root = readJSON(url),
+                  let map = root["enabledPlugins"] as? [String: Any]
+            else { return nil }
+            return map[key] as? Bool
+        }
+        let projectLocal = explicitValue(projectRoot.appendingPathComponent(".claude/settings.local.json"))
+        let projectMain = explicitValue(projectRoot.appendingPathComponent(".claude/settings.json"))
+        if projectLocal == false || projectMain == false { return true }
+        if projectLocal != nil || projectMain != nil { return false }
+        return explicitValue(home.appendingPathComponent(".claude/settings.json")) == false
+    }
+
     // MARK: - Everything
 
-    /// The page's one entry point: skills (plugin access pre-computed),
-    /// then servers, then plugins.
+    /// The page's one entry point: skills (plugin installs pre-resolved),
+    /// then servers, then plugins — one registry parse feeds both the
+    /// plugin section and the plugin-bundled skills.
     static func scanAll(projectRoot: URL, home: URL) -> [LibraryItem] {
-        let plugins = accessiblePluginNames(projectRoot: projectRoot, home: home)
-        return scanSkills(projectRoot: projectRoot, home: home, accessiblePlugins: plugins)
+        let rows = loadPluginRegistry(projectRoot: projectRoot, home: home)
+        let installs = rows.map {
+            PluginInstall(
+                name: $0.name, installPath: $0.installPath, version: $0.version,
+                accessible: $0.accessible, accessReason: $0.accessReason)
+        }
+        return scanSkills(projectRoot: projectRoot, home: home, plugins: installs)
             + scanMCPServers(projectRoot: projectRoot, home: home)
-            + scanPlugins(projectRoot: projectRoot, home: home)
+            + rows.map(pluginItem)
     }
 }
