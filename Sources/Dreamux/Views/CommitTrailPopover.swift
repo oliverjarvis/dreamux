@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The git chip's dropdown: this worktree's commits, newest first,
 /// each opening a diff vs its parent. Styling matches the services
-/// popover (HeaderRunControls) — 320pt, callout/caption, hover rows.
+/// popover (HeaderRunControls) — 340pt, callout/caption, hover rows.
 struct CommitTrailPopover: View {
     let worktreeURL: URL
     let branch: String
@@ -64,11 +64,15 @@ struct CommitTrailPopover: View {
             Spacer(minLength: 12)
             if let base = defaultBranch, base != branch {
                 Button {
-                    openDiff(DiffRequest(
-                        worktreeURL: worktreeURL,
-                        fromRevision: base,
-                        toRevision: "HEAD",
-                        title: "\(branch) vs \(base)"))
+                    Task {
+                        let from = await GitOperations.mergeBase(
+                            of: base, in: worktreeURL) ?? base
+                        openDiff(DiffRequest(
+                            worktreeURL: worktreeURL,
+                            fromRevision: from,
+                            toRevision: "HEAD",
+                            title: "\(branch) vs \(base)"))
+                    }
                 } label: {
                     Label("Diff vs \(base)", systemImage: "plus.forwardslash.minus")
                         .font(.caption)
@@ -179,9 +183,12 @@ struct CommitTrailPopover: View {
 
     private func load() async {
         hasUncommitted = await GitOperations.hasUncommittedChanges(in: worktreeURL)
+        // rootSHA must land before commits: a row renders as soon as
+        // `commits` is set, and until rootSHA is known its tap would
+        // build the root commit's invalid `sha^` revspec.
+        rootSHA = await GitOperations.rootCommitSHA(in: worktreeURL)
         commits = await GitOperations.commitLog(
             in: worktreeURL, baseBranch: defaultBranch)
-        rootSHA = await GitOperations.rootCommitSHA(in: worktreeURL)
         loaded = true
     }
 }

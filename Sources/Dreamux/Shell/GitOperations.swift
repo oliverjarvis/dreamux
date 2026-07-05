@@ -803,6 +803,17 @@ extension GitOperations {
         return sha.isEmpty ? nil : sha
     }
 
+    /// The fork point between `base` and HEAD (`git merge-base`) — the
+    /// correct FROM side for a whole-branch diff. Diffing against the
+    /// base TIP would show base-only commits reversed as noise.
+    static func mergeBase(of base: String, in worktreeURL: URL) async -> String? {
+        guard let output = try? await runGit(
+            ["merge-base", base, "HEAD"], in: worktreeURL)
+        else { return nil }
+        let sha = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sha.isEmpty ? nil : sha
+    }
+
     /// Git's canonical empty-tree object — the diffing "parent" of a
     /// root commit, which has no `^` to point at.
     static let emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"

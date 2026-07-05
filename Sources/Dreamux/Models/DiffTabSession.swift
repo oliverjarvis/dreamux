@@ -90,6 +90,9 @@ final class DiffTabSession {
     private func pushSelected() async {
         guard jsReady, let path = selectedPath else { return }
         let pair = await contentPair(for: path)
+        // Rapid rail navigation must not let a slow earlier fetch
+        // overwrite a newer selection.
+        guard selectedPath == path else { return }
         let ext = (path as NSString).pathExtension
         pushDiff(original: pair.original ?? "", modified: pair.modified ?? "", ext: ext)
     }

@@ -243,6 +243,32 @@ final class GitCommitLogTests: XCTestCase {
         XCTAssertEqual(ordinaryParent, "\(shaB)^")
     }
 
+    // MARK: - testMergeBaseIsForkPointNotBaseTip
+
+    /// `mergeBase(of:in:)` must resolve the fork point between the
+    /// branch and base, not whatever the base has since moved to — a
+    /// "Diff vs base" that used the base's tip would show base-only
+    /// commits landed after the fork reversed as noise.
+    func testMergeBaseIsForkPointNotBaseTip() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("v1\n", to: "app.txt", in: repoURL)
+        let forkPoint = try await commit("Main commit", in: repoURL)
+
+        let featWorktree = sandbox.root.appendingPathComponent("repo-feat", isDirectory: true)
+        _ = try await GitOperations.runGit(
+            ["worktree", "add", "-b", "feat", featWorktree.path], in: repoURL)
+        try write("f1\n", to: "f1.txt", in: featWorktree)
+        _ = try await commit("Feat commit", in: featWorktree)
+
+        // Main moves on after the fork — its tip must NOT be what
+        // mergeBase reports.
+        try write("v2\n", to: "app.txt", in: repoURL)
+        _ = try await commit("Main commit after fork", in: repoURL)
+
+        let base = await GitOperations.mergeBase(of: "main", in: featWorktree)
+        XCTAssertEqual(base, forkPoint, "must be the fork point, not main's new tip")
+    }
+
     // MARK: - Helpers
 
     /// A plain (non-bare) repo at `<sandbox>/<name>`, initialized on
