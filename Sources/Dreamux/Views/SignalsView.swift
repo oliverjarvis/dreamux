@@ -48,19 +48,19 @@ struct SignalsView: View {
                 // Arriving from a service row's "logs" button: show
                 // just that runner's sources. The chip row is right
                 // there for widening back out.
-                signals.pendingSourceFocus = nil
-                enabledSources = SignalStore.sourcesMatching(
-                    focus: focus, in: allKnownSources)
+                consumePendingFocus(focus)
             } else if enabledSources.isEmpty {
                 // Seed the source filter with everything we currently know
                 // about; the user can opt sources out from the chip row.
                 enabledSources = Set(allKnownSources)
             }
         }
-        .onChange(of: signals.knownSources) { _, newSources in
-            // Auto-include freshly-discovered sources so we don't hide
-            // a runner's first lines behind a chip the user never sees.
-            for source in newSources where !enabledSources.contains(source) {
+        .onChange(of: signals.knownSources) { oldSources, newSources in
+            // Auto-include only freshly-discovered sources — never
+            // re-add ones the user (or a "logs" focus jump) deliberately
+            // excluded.
+            let known = Set(oldSources)
+            for source in newSources where !known.contains(source) {
                 enabledSources.insert(source)
             }
         }
@@ -69,10 +69,16 @@ struct SignalsView: View {
             // already on screen — onAppear won't re-run, so consume
             // the parked focus here too.
             guard let focus else { return }
-            signals.pendingSourceFocus = nil
-            enabledSources = SignalStore.sourcesMatching(
-                focus: focus, in: allKnownSources)
+            consumePendingFocus(focus)
         }
+    }
+
+    /// Apply a parked "logs" focus jump: show only that runner's
+    /// sources. One-shot — clears the parked value.
+    private func consumePendingFocus(_ focus: String) {
+        signals.pendingSourceFocus = nil
+        enabledSources = SignalStore.sourcesMatching(
+            focus: focus, in: allKnownSources)
     }
 
     // MARK: - Filter bar
