@@ -21,7 +21,10 @@ final class FileTreeStore {
         var result: [FileNode] = []
         for repoID in workspace.linkedRepoIDs {
             guard let repo = byName[repoID] else { continue }
-            let worktree = repo.rootURL.appendingPathComponent(workspace.name, isDirectory: true)
+            // Main workspaces browse each repo's own default branch —
+            // display name aside, "main" here can be "master" there.
+            let branchFolder = workspace.isMain ? repo.defaultBranch : workspace.name
+            let worktree = repo.rootURL.appendingPathComponent(branchFolder, isDirectory: true)
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: worktree.path, isDirectory: &isDir),
                   isDir.boolValue else { continue }

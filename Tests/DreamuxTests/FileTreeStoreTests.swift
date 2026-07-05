@@ -81,4 +81,22 @@ final class FileTreeStoreTests: XCTestCase {
 
         XCTAssertEqual(names, ["src", "a.txt", "b.txt"])
     }
+
+    @MainActor
+    func testMainWorkspaceRootsUsePerRepoDefaultBranch() throws {
+        // fixture: repo "web" with defaultBranch "main" and a main/ dir;
+        // repo "api" with defaultBranch "master" and a master/ dir
+        try makeWorktree(repo: "web", branch: "main")
+        try makeWorktree(repo: "api", branch: "master")
+        let webRepo = Repository(rootURL: project.rootPath.appendingPathComponent("repos/web", isDirectory: true), defaultBranch: "main")
+        let apiRepo = Repository(rootURL: project.rootPath.appendingPathComponent("repos/api", isDirectory: true), defaultBranch: "master")
+        let workspace = Workspace(name: "main", linkedRepoIDs: ["web", "api"], isMain: true)
+        let store = FileTreeStore()
+
+        let roots = store.roots(for: workspace, repositories: [webRepo, apiRepo])
+
+        XCTAssertEqual(roots.count, 2)
+        XCTAssertTrue(roots[0].url.path.hasSuffix("web/main"))
+        XCTAssertTrue(roots[1].url.path.hasSuffix("api/master"))
+    }
 }
