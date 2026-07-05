@@ -44,9 +44,16 @@ struct SignalsView: View {
                 .background(.regularMaterial)
         }
         .onAppear {
-            // Seed the source filter with everything we currently know
-            // about; the user can opt sources out from the chip row.
-            if enabledSources.isEmpty {
+            if let focus = signals.pendingSourceFocus {
+                // Arriving from a service row's "logs" button: show
+                // just that runner's sources. The chip row is right
+                // there for widening back out.
+                signals.pendingSourceFocus = nil
+                enabledSources = SignalStore.sourcesMatching(
+                    focus: focus, in: allKnownSources)
+            } else if enabledSources.isEmpty {
+                // Seed the source filter with everything we currently know
+                // about; the user can opt sources out from the chip row.
                 enabledSources = Set(allKnownSources)
             }
         }

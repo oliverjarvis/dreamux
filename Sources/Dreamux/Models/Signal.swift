@@ -60,6 +60,22 @@ final class SignalStore {
     private(set) var knownSources: [String] = []
     private var knownSourcesSet: Set<String> = []
 
+    /// A runner name the Signals page should focus its source filter
+    /// on the next time it appears — parked by the header's services
+    /// popover ("logs"), consumed and cleared by SignalsView.onAppear.
+    /// The `RunnerManager.pendingIsolation` pattern again.
+    var pendingSourceFocus: String?
+
+    /// Sources belonging to one runner: the bare name plus any
+    /// `name:branch` variants (see RunnerManager.signalSource). Falls
+    /// back to the bare name when nothing matches yet, so focusing
+    /// before the first log line still yields a filter that lights up
+    /// once lines arrive.
+    static func sourcesMatching(focus: String, in sources: [String]) -> Set<String> {
+        let hits = sources.filter { $0 == focus || $0.hasPrefix("\(focus):") }
+        return hits.isEmpty ? [focus] : Set(hits)
+    }
+
     func append(source: String, line: String, at timestamp: Date = .now) {
         let level = Self.detectLevel(in: line)
         let entry = SignalEntry(
