@@ -57,6 +57,10 @@ struct WorkspaceSidebar: View {
     @State private var customizing: Workspace?
     /// Feature currently being dragged for reorder.
     @State private var draggingWorkspace: Workspace?
+    /// Non-nil when the pinned main row's last activation failed to
+    /// materialize a default-branch worktree in one or more repos —
+    /// surfaced on the row itself (tooltip + warning tint), never a modal.
+    @State private var mainWorktreeIssue: String?
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -235,7 +239,13 @@ struct WorkspaceSidebar: View {
                 autoRunFailure: autoRunFailure,
                 onViewTaskChanges: { plan, task in
                     viewTaskChanges(plan: plan, task: task)
-                }
+                },
+                mainWorkspaceActive: store.workspaces.first(where: \.isMain).map(isWorkspaceActive) ?? false,
+                mainWorktreeIssue: mainWorktreeIssue,
+                onOpenMain: { openMainWorkspace() },
+                mainBranchDisplayName: repoStore.repositories.first?.defaultBranch ?? "main",
+                mainRepoNames: repoStore.repositories.map(\.name),
+                mainWorkspace: { store.workspaces.first(where: \.isMain) }
             )
 
             switchNoticeIfAny
@@ -729,6 +739,38 @@ struct WorkspaceSidebar: View {
         case .workspace: return true
         case .run(let id): return id == workspace.id
         case .signals: return false
+        }
+    }
+
+    /// Activate the reserved main workspace, materializing any missing
+    /// default-branch worktrees. Failures land on the row (tooltip +
+    /// warning tint), never in a modal — the workspace still activates
+    /// so the terminal (project root) keeps working.
+    private func openMainWorkspace() {
+        let workspace = store.mainWorkspace(
+            name: repoStore.repositories.first?.defaultBranch ?? "main",
+            workingDirectory: repoStore.project.rootPath.path,
+            linkedRepoIDs: repoStore.repositories.map(\.name))
+        sidebarMode = .workspace
+        store.activate(workspace.id)
+        mainWorktreeIssue = nil
+        Task { @MainActor in
+            var issues: [String] = []
+            for repo in repoStore.repositories {
+                let existing = await GitOperations.worktreeURL(
+                    forBranch: repo.defaultBranch, in: repo.rootURL)
+                guard existing == nil else { continue }
+                do {
+                    try await GitOperations.addWorktree(
+                        in: repo.rootURL, branch: repo.defaultBranch)
+                } catch {
+                    issues.append("\(repo.name): \(error.localizedDescription)")
+                }
+            }
+            if !issues.isEmpty {
+                mainWorktreeIssue = "Couldn't check out "
+                    + issues.joined(separator: "; ")
+            }
         }
     }
 

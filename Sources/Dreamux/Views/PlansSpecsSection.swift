@@ -56,6 +56,24 @@ struct PlansSpecsSection: View {
     /// there's nothing to show) — the task row's context-menu item and
     /// hover button both call straight through to this.
     let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
+    /// The pinned main row: is the reserved main workspace currently
+    /// the active one (selection styling)?
+    let mainWorkspaceActive: Bool
+    /// Non-nil when the last activation failed to materialize a
+    /// default-branch worktree — rendered as a warning on the row.
+    let mainWorktreeIssue: String?
+    /// Activate (and lazily provision) the main workspace.
+    let onOpenMain: () -> Void
+    /// Display name for the pinned main row — the project's default
+    /// branch name (e.g. "main").
+    let mainBranchDisplayName: String
+    /// Linked repo names shown in the row's subtitle when more than one
+    /// repo is involved. Plain data — computed in `WorkspaceSidebar`.
+    let mainRepoNames: [String]
+    /// Live accessor for the reserved main workspace — nil until the
+    /// first activation creates it. Resolves the row's target for
+    /// `makeRunControls`.
+    let mainWorkspace: () -> Workspace?
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
@@ -84,6 +102,8 @@ struct PlansSpecsSection: View {
     /// "View changes" button (`taskRow`), keyed by the task's line so it
     /// stays lightweight (no per-row `@State`).
     @State private var hoveredTaskLine: Int?
+    /// Hover state for the pinned main row — reveals its run controls.
+    @State private var mainRowHovered = false
 
     /// The plan + anchor + header a course correction is being filed against.
     /// Built at the clicked row (task / phase / plan), consumed on submit.
@@ -97,6 +117,7 @@ struct PlansSpecsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             header
+            mainRow
             if layout.plansExpanded {
                 if docStore.plans.isEmpty && docStore.unpairedSpecs.isEmpty
                     && docStore.otherDocs.isEmpty {
@@ -184,6 +205,55 @@ struct PlansSpecsSection: View {
             .help("New plan… (opens a planning session)")
         }
         .padding(.bottom, 2)
+    }
+
+    /// The permanent main-branch row — a place, not a plan: no status
+    /// machinery, no close/merge, always present. Clicking activates
+    /// the reserved main workspace (worktrees materialize on demand).
+    @ViewBuilder
+    private var mainRow: some View {
+        Button {
+            onOpenMain()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(mainWorktreeIssue == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
+                    .frame(width: 16)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(mainBranchDisplayName)
+                        .font(.callout.weight(mainWorkspaceActive ? .semibold : .medium))
+                        .foregroundStyle(.primary)
+                    if mainRepoNames.count > 1 {
+                        Text(mainRepoNames.joined(separator: " · "))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                if let workspace = mainWorkspace() {
+                    makeRunControls(workspace)
+                        .opacity(mainRowHovered || runnersLive(for: workspace) ? 1 : 0)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(mainWorkspaceActive ? Color.primary.opacity(0.08) : .clear))
+        }
+        .buttonStyle(.plain)
+        .onHover { mainRowHovered = $0 }
+        .help(mainWorktreeIssue ?? "Work on \(mainBranchDisplayName) — terminal, files, and services on the default branch")
+    }
+
+    /// Whether a runner is currently up on the given workspace's branch —
+    /// mirrors the feature rows' `isRunning` check, so the pinned row keeps
+    /// its run controls visible without hover while something is running.
+    private func runnersLive(for workspace: Workspace) -> Bool {
+        !runners.runningRunners(onBranch: workspace.name).isEmpty
     }
 
     private var emptyState: some View {
