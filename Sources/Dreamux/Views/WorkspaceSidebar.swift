@@ -776,11 +776,16 @@ struct WorkspaceSidebar: View {
                     in: worktree, baseBranch: repo.defaultBranch)
                 guard let range = TaskDiffResolver.range(for: matchTitle, in: log)
                 else { continue }
+                // range.from is "<oldest>^" — invalid when oldest is the
+                // root commit; parentRevision maps that to the empty tree.
+                let oldestSHA = String(range.from.dropLast())
+                let fromRevision = await GitOperations.parentRevision(
+                    of: oldestSHA, in: worktree)
                 sidebarMode = .workspace
                 store.activate(workspace.id)
                 store.session(for: workspace).openDiffTab(DiffRequest(
                     worktreeURL: worktree,
-                    fromRevision: range.from,
+                    fromRevision: fromRevision,
                     toRevision: range.to,
                     title: repos.count > 1 ? "\(displayTitle) — \(repo.name)" : displayTitle))
                 opened += 1

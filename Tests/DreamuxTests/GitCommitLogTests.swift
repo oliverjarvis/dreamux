@@ -221,6 +221,28 @@ final class GitCommitLogTests: XCTestCase {
         XCTAssertEqual(root, shaA, "first commit in the fixture repo")
     }
 
+    // MARK: - testParentRevisionGuardsRootCommit
+
+    /// `<root>^` is an invalid revspec — `changedFiles` would fail
+    /// silently (via `try?`) and render an empty diff with no error,
+    /// since the caller's "matched" counter already incremented. For
+    /// the root commit, `parentRevision` must return the empty-tree
+    /// sentinel instead of a bogus `^` revspec; for any other commit
+    /// it's the ordinary parent revspec.
+    func testParentRevisionGuardsRootCommit() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("one\ntwo\n", to: "a.txt", in: repoURL)
+        let shaA = try await commit("First commit", in: repoURL)
+        try write("one\ntwo\nthree\n", to: "a.txt", in: repoURL)
+        let shaB = try await commit("Second commit", in: repoURL)
+
+        let rootParent = await GitOperations.parentRevision(of: shaA, in: repoURL)
+        XCTAssertEqual(rootParent, GitOperations.emptyTreeSHA)
+
+        let ordinaryParent = await GitOperations.parentRevision(of: shaB, in: repoURL)
+        XCTAssertEqual(ordinaryParent, "\(shaB)^")
+    }
+
     // MARK: - Helpers
 
     /// A plain (non-bare) repo at `<sandbox>/<name>`, initialized on

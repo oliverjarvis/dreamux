@@ -15,10 +15,6 @@ struct CommitTrailPopover: View {
     @State private var hoveredID: String?
     @State private var rootSHA: String?
 
-    /// Git's canonical empty-tree object — the "parent" of a root
-    /// commit for diffing purposes (`<root>^` does not exist).
-    private static let emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -101,7 +97,7 @@ struct CommitTrailPopover: View {
         ) {
             openDiff(DiffRequest(
                 worktreeURL: worktreeURL,
-                fromRevision: commit.sha == rootSHA ? Self.emptyTree : "\(commit.sha)^",
+                fromRevision: commit.sha == rootSHA ? GitOperations.emptyTreeSHA : "\(commit.sha)^",
                 toRevision: commit.sha,
                 title: commit.shortSHA))
         }

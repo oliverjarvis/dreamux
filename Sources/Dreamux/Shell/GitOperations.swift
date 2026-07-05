@@ -803,6 +803,20 @@ extension GitOperations {
         return sha.isEmpty ? nil : sha
     }
 
+    /// Git's canonical empty-tree object — the diffing "parent" of a
+    /// root commit, which has no `^` to point at.
+    static let emptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    /// The revision to diff `sha` against: its parent, or the empty
+    /// tree when `sha` is the repo's root commit (whose `^` is an
+    /// invalid revspec that would silently yield an empty diff).
+    static func parentRevision(of sha: String, in worktreeURL: URL) async -> String {
+        if let root = await rootCommitSHA(in: worktreeURL), root == sha {
+            return emptyTreeSHA
+        }
+        return "\(sha)^"
+    }
+
     /// Text content of `path` at `revision` (`git show rev:path`), or
     /// from the working tree when revision is nil. Returns nil when
     /// the file doesn't exist there or looks binary (NUL byte) — the
