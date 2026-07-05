@@ -58,6 +58,11 @@ enum PlanPrompts {
         step's commit exists, then continue from the first unchecked step, \
         ticking checkboxes in the plan file as you go and committing as \
         the plan directs.
+
+        - The `dreamux-signals` MCP is available: `signals_query` / \
+        `signals_recent` read this project's live service logs (useful \
+        when a dev server misbehaves), and `signals_emit` records \
+        findings the app surfaces in its Signals page.
         """
     }
 

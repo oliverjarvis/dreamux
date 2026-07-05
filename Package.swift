@@ -22,6 +22,7 @@ let package = Package(
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui.git", from: "2.4.0"),
     ],
     targets: [
+        // Must never link XCTest — ProjectSession gates signal persistence on NSClassFromString("XCTestCase") == nil.
         .executableTarget(
             name: "Dreamux",
             dependencies: [

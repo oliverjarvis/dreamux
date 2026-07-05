@@ -17,6 +17,8 @@ final class PlanPromptsTests: XCTestCase {
         XCTAssertTrue(p.contains("project-docs/plans/x.md")
                       || p.contains("docs/plans/x.md"))
         XCTAssertTrue(p.lowercased().contains("continue"))
+        XCTAssertTrue(p.contains("dreamux-signals"),
+                      "agents resuming a plan must also learn the signals MCP exists")
     }
 
     func testBrainstormKickoffCarriesIdeaAndTargets() {

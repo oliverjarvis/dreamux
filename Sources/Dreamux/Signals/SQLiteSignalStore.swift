@@ -102,7 +102,7 @@ final class SQLiteSignalStore: @unchecked Sendable {
         return dir.appendingPathComponent("signals.db")
     }
 
-    // MARK: - SignalStore
+    // MARK: - Persistence API
 
     /// Append a signal. Fire-and-forget for hot paths (terminal line
     /// fan-out). The store is responsible for ordering writes; callers
