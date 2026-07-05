@@ -76,6 +76,7 @@ Six feature groups, delivered and merged in order, each its own branch:
 **Auto-commit.**
 - Prompt: after finishing a task and checking its boxes, the agent runs, in each repo worktree it touched, `git add -A && git commit -m "Task N: <title>"`.
 - Backstop: when `PlanQueueController.tick()` observes a task transition to fully-checked, or the plan reach `.awaitingReview`, and `hasUncommittedChanges` in a feature worktree, the app runs `commitAll` with message `Task N: <title> (auto)` (or `Plan review checkpoint (auto)` at review time when no single task boundary applies).
+- **Settings toggle:** "Commit after each task" in a new **Workflow** section of the Settings window (alongside Appearance), `@AppStorage`-backed, default **on**. Off disables both halves — the prompt instruction is omitted and the backstop never commits. `PlanRunCoordinator` reads it when building the prompt; `PlanQueueController` reads it per tick, so flipping it mid-plan takes effect from the next task boundary. The commit-trail popover and task diffs (below) remain available either way — with the toggle off they simply reflect whatever commits the agent chose to make.
 
 **Git plumbing.** `GitOperations` additions:
 - `commitLog(in:baseBranch:limit:)` → `[CommitInfo]` (`sha`, `shortSHA`, `subject`, `authorDate`, `insertions`, `deletions`) via `git log --numstat --format=…` from `baseBranch..HEAD` (falling back to recent HEAD history on main, where the range is empty).
