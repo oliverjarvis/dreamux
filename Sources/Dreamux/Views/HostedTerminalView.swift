@@ -158,6 +158,27 @@ final class TerminalDropContainer: NSView {
 final class TerminalDropOverlay: NSView {
     weak var container: TerminalDropContainer?
 
+    /// True while a readable file drag is over this overlay — drives
+    /// the accent drop-target wash so the user sees the bar/terminal
+    /// is a live target (the overlay is otherwise invisible).
+    private var isTargeted = false {
+        didSet {
+            guard oldValue != isTargeted else { return }
+            needsDisplay = true
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isTargeted else { return }
+        let inset = bounds.insetBy(dx: 2, dy: 2)
+        let path = NSBezierPath(roundedRect: inset, xRadius: 6, yRadius: 6)
+        NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
+        path.fill()
+        NSColor.controlAccentColor.withAlphaComponent(0.8).setStroke()
+        path.lineWidth = 2
+        path.stroke()
+    }
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes([.fileURL])
@@ -169,10 +190,21 @@ final class TerminalDropOverlay: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        canReadFileURLs(sender) ? .copy : []
+        let readable = canReadFileURLs(sender)
+        isTargeted = readable
+        return readable ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        isTargeted = false
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        isTargeted = false
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        isTargeted = false
         let options: [NSPasteboard.ReadingOptionKey: Any] = [
             .urlReadingFileURLsOnly: true
         ]
