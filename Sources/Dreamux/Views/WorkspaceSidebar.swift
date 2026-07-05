@@ -202,7 +202,7 @@ struct WorkspaceSidebar: View {
             PlansSpecsSection(
                 docStore: docStore,
                 layout: layout,
-                featureExists: { name in store.workspaces.contains { $0.name == name } },
+                featureExists: { name in store.featureNames.contains(name) },
                 onOpenDoc: onOpenDoc,
                 onOpenDocAtLine: onOpenDocAtLine,
                 onRunPlan: { runningPlan = $0 },
@@ -216,7 +216,7 @@ struct WorkspaceSidebar: View {
                 },
                 queue: planQueue,
                 onOpenFeature: { name in
-                    guard let workspace = store.workspaces.first(where: { $0.name == name })
+                    guard let workspace = store.featureWorkspace(named: name)
                     else { return }
                     sidebarMode = .workspace
                     store.activate(workspace.id)
@@ -224,13 +224,13 @@ struct WorkspaceSidebar: View {
                 onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) },
                 featureName: { featureName(for: $0) },
                 hasUnread: { name in
-                    guard let workspace = store.workspaces.first(where: { $0.name == name })
+                    guard let workspace = store.featureWorkspace(named: name)
                     else { return false }
                     return store.hasUnread(for: workspace)
                 },
                 runners: runners,
                 workspaceForFeature: { name in
-                    store.workspaces.first(where: { $0.name == name })
+                    store.featureWorkspace(named: name)
                 },
                 makeRunControls: { runControls(for: $0) },
                 gateMergeWorkspaceID: $gateMergeWorkspaceID,
@@ -796,7 +796,7 @@ struct WorkspaceSidebar: View {
     /// item both call through here).
     private func viewTaskChanges(plan: PlanDoc, task: PlanTask) {
         let feature = featureName(for: plan)
-        guard let workspace = store.workspaces.first(where: { $0.name == feature })
+        guard let workspace = store.featureWorkspace(named: feature)
         else {
             addError = "No workspace for this plan yet — run the plan first."
             return
@@ -910,7 +910,7 @@ struct WorkspaceSidebar: View {
     /// default branch).
     private func intakeDigest() async -> String? {
         let featureExists: (String) -> Bool = { name in
-            store.workspaces.contains { $0.name == name }
+            store.featureNames.contains(name)
         }
         guard docStore.plans.contains(where: {
             docStore.status(for: $0, featureExists: featureExists) != .merged
@@ -985,7 +985,7 @@ struct WorkspaceSidebar: View {
         }
         store.remove(workspace)
         docStore.reconcileLedger(
-            existingFeatureNames: Set(store.workspaces.map(\.name)))
+            existingFeatureNames: store.featureNames)
         guard !linkedRepos.isEmpty else { return }
         Task {
             await FeatureProvisioner.teardown(

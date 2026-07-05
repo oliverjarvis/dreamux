@@ -228,7 +228,7 @@ struct ContentView: View {
             if store.didLoadFeatures {
                 docStore.refresh()
                 docStore.reconcileLedger(
-                    existingFeatureNames: Set(store.workspaces.map(\.name)))
+                    existingFeatureNames: store.featureNames)
                 planQueue.startPolling()
             }
         }
@@ -236,7 +236,7 @@ struct ContentView: View {
             guard loaded else { return }
             docStore.refresh()
             docStore.reconcileLedger(
-                existingFeatureNames: Set(store.workspaces.map(\.name)))
+                existingFeatureNames: store.featureNames)
             planQueue.startPolling()
         }
         // Header git chip: re-resolve on workspace changes and keep a

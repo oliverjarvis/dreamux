@@ -112,7 +112,7 @@ final class ProjectSession {
             guard let doc = docStore.docs.first(where: { docStore.relativePath(of: $0) == path })
             else { return nil }
             return docStore.status(for: doc) { name in
-                store.workspaces.contains { $0.name == name }
+                store.featureNames.contains(name)
             }
         }
         planQueue.featureNameForPlan = { [weak docStore] path in
@@ -120,7 +120,7 @@ final class ProjectSession {
         }
         planQueue.isFeatureQuiescent = { [weak store] feature in
             guard let store,
-                  let workspace = store.workspaces.first(where: { $0.name == feature })
+                  let workspace = store.featureWorkspace(named: feature)
             else { return true }
             // Quiescent = no tab in the feature's session produced output
             // in the last 5 s.
@@ -186,7 +186,7 @@ final class ProjectSession {
         // must not retain it back through its own closure.
         planQueue.requestMerge = { [weak self] featureName in
             guard let self,
-                  let workspace = self.store.workspaces.first(where: { $0.name == featureName })
+                  let workspace = self.store.featureWorkspace(named: featureName)
             else { return }
             // The merge sheet is owned by WorkspaceSidebar; reuse the
             // same pending channel the e2e openMergeSheet command uses.
@@ -214,7 +214,7 @@ final class ProjectSession {
             guard let doc = self.docStore.docs.first(
                 where: { self.docStore.relativePath(of: $0) == path }) else { return nil }
             return self.docStore.status(for: doc) { name in
-                self.store.workspaces.contains { $0.name == name }
+                self.store.featureNames.contains(name)
             }
         }
         nudgeCenter.isQuiescent = { [weak self] path in
@@ -238,7 +238,7 @@ final class ProjectSession {
             guard let self else { return }
             let statusOf: (PlanDoc) -> PlanStatus = { doc in
                 self.docStore.status(for: doc) { name in
-                    self.store.workspaces.contains { $0.name == name }
+                    self.store.featureNames.contains(name)
                 }
             }
             IntakeEnactment.enact(
@@ -304,7 +304,7 @@ final class ProjectSession {
         guard WorkflowSettings.autoCommitEnabled else { return }
         guard let docStore, let workspaceStore, let repoStore,
               let feature = docStore.ledger.recordForPlan(planPath)?.featureName,
-              let workspace = workspaceStore.workspaces.first(where: { $0.name == feature })
+              let workspace = workspaceStore.featureWorkspace(named: feature)
         else { return }
         let repos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
         guard !repos.isEmpty else { return }
@@ -475,7 +475,7 @@ final class ProjectSession {
     /// tab the nudge center probes for quiescence and types into.
     private func agentTab(forPlan planPath: String) -> TabSession? {
         guard let feature = docStore.ledger.recordForPlan(planPath)?.featureName,
-              let workspace = store.workspaces.first(where: { $0.name == feature })
+              let workspace = store.featureWorkspace(named: feature)
         else { return nil }
         return store.session(for: workspace).agentTabSession()
     }

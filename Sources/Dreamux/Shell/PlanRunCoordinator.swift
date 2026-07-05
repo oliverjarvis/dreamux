@@ -46,7 +46,7 @@ final class PlanRunCoordinator {
         let planPath = docStore.relativePath(of: doc)
         let existing = docStore.ledger.recordForPlan(planPath)
         let isResume = existing?.featureName == branchName
-            && workspaceStore.workspaces.contains { $0.name == branchName }
+            && workspaceStore.featureNames.contains(branchName)
 
         let featureDir: URL
         if isResume {

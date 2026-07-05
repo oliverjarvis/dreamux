@@ -123,6 +123,21 @@ final class WorkspaceStore {
         return workspace
     }
 
+    /// Names of FEATURE workspaces only — the reserved main workspace
+    /// is a place, not a feature, and must never satisfy name-keyed
+    /// "does this plan's feature exist?" checks (a plan branch
+    /// literally named "main" would otherwise bind to it, and the
+    /// merge sheet's cleanup would force-delete the default branch).
+    var featureNames: Set<String> {
+        Set(workspaces.filter { !$0.isMain }.map(\.name))
+    }
+
+    /// The feature workspace with this name, excluding the reserved
+    /// main workspace — see `featureNames`.
+    func featureWorkspace(named name: String) -> Workspace? {
+        workspaces.first { $0.name == name && !$0.isMain }
+    }
+
     /// The reserved main workspace's id — a literal, deliberately NOT
     /// derived from stableUUID(forFeature:), so no branch name can ever
     /// hash-collide with it.

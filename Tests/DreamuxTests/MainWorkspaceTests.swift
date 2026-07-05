@@ -88,4 +88,25 @@ final class MainWorkspaceTests: XCTestCase {
 
         XCTAssertTrue(store.workspaces.contains { $0.id == main.id && $0.isMain })
     }
+
+    /// A plan branch literally named like the default branch must NOT
+    /// resolve the reserved main workspace as its feature — that path
+    /// ends at the merge sheet force-deleting the default branch.
+    func testFeatureLookupsExcludeMainWorkspace() {
+        let store = makeStore()
+        _ = store.mainWorkspace(
+            name: "main", workingDirectory: "/tmp/proj", linkedRepoIDs: ["web"])
+
+        XCTAssertNil(store.featureWorkspace(named: "main"))
+        XCTAssertFalse(store.featureNames.contains("main"))
+
+        // A REAL feature with a different name still resolves.
+        let feature = store.registerFeature(
+            name: "feature-x",
+            featureDirectory: URL(fileURLWithPath: "/tmp/proj/features/feature-x"),
+            linkedRepoIDs: ["web"]
+        )
+        XCTAssertEqual(store.featureWorkspace(named: "feature-x")?.id, feature.id)
+        XCTAssertTrue(store.featureNames.contains("feature-x"))
+    }
 }

@@ -207,7 +207,7 @@ enum E2ECommands {
 
         if let docStore = handles.docStore, let workspaceStore = handles.workspaceStore {
             let featureExists: (String) -> Bool = { name in
-                workspaceStore.workspaces.contains { $0.name == name }
+                workspaceStore.featureNames.contains(name)
             }
             // Parked live nudges for a plan (Task 4): keyed by the plan's
             // project-relative path in the center, at most one per plan.
@@ -507,7 +507,7 @@ enum E2ECommands {
         }
         docStore.refresh()
         let featureExists: (String) -> Bool = { name in
-            workspaceStore.workspaces.contains { $0.name == name }
+            workspaceStore.featureNames.contains(name)
         }
         let entries = docStore.docs.map { doc -> [String: Any] in
             var entry: [String: Any] = [
