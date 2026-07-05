@@ -36,10 +36,21 @@ struct CommitTrailPopover: View {
                 }
                 .padding(8)
             }
-            .frame(maxHeight: 360)
+            // Popovers size to intrinsic content and a ScrollView
+            // reports essentially none — without an explicit height the
+            // list collapses to a sliver under the header. Estimate
+            // from the row count (two-line rows ≈ 44pt) and cap.
+            .frame(height: listHeight)
         }
         .frame(width: 340)
         .task { await load() }
+    }
+
+    private var listHeight: CGFloat {
+        let rows = commits.count + (hasUncommitted ? 1 : 0)
+        guard loaded else { return 80 }
+        guard rows > 0 else { return 56 }
+        return min(360, CGFloat(rows) * 44 + 16)
     }
 
     private var header: some View {
