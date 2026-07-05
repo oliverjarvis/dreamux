@@ -435,6 +435,23 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
+            // Run cluster: play/stop for the active workspace's
+            // services, plus the services popover. Left of the git chip
+            // so the header reads context → run state → repo state.
+            if let workspace = store.activeWorkspace {
+                HeaderRunControls(
+                    workspace: workspace,
+                    runners: runners,
+                    start: { startHeaderRunners(for: workspace) },
+                    stop: { stopHeaderRunners(for: workspace) },
+                    openRunPane: {
+                        sidebarMode = .run(workspaceID: workspace.id)
+                    },
+                    showLogs: { runnerName in
+                        signals.pendingSourceFocus = runnerName
+                        sidebarMode = .signals
+                    })
+            }
             // Git chip: the active workspace's worktree branch, HEAD
             // short-SHA, and working-tree diff totals.
             if let git = gitStatus {
@@ -508,6 +525,30 @@ struct ContentView: View {
         }
         guard let worktree else { return nil }
         return await GitOperations.headStatus(in: worktree)
+    }
+
+    /// Header play: the same planning the sidebar rows use — `startPlan`
+    /// decides, `executeStart` acts. The sidebar's displacement banner
+    /// is deliberately not duplicated here; a fixed-port switch still
+    /// happens, and the popover's "Other worktrees" group shows the
+    /// result.
+    private func startHeaderRunners(for workspace: Workspace) {
+        switch runners.startPlan(for: workspace) {
+        case .openRunPane:
+            sidebarMode = .run(workspaceID: workspace.id)
+        case .start(let toStart, _):
+            runners.executeStart(toStart)
+        }
+    }
+
+    /// Header stop: every live instance on this workspace's worktree —
+    /// mirrors the sidebar's `stopAllRunning(on:)`, per-instance so
+    /// other worktrees keep running.
+    private func stopHeaderRunners(for workspace: Workspace) {
+        for runner in runners.runners
+        where runners.status(for: runner, on: workspace.name)?.isRunning == true {
+            runners.stop(runner, on: workspace.name)
+        }
     }
 
     private var activeContextTitle: String? {

@@ -64,6 +64,15 @@ struct SignalsView: View {
                 enabledSources.insert(source)
             }
         }
+        .onChange(of: signals.pendingSourceFocus) { _, focus in
+            // The header popover can fire "logs" while this view is
+            // already on screen — onAppear won't re-run, so consume
+            // the parked focus here too.
+            guard let focus else { return }
+            signals.pendingSourceFocus = nil
+            enabledSources = SignalStore.sourcesMatching(
+                focus: focus, in: allKnownSources)
+        }
     }
 
     // MARK: - Filter bar
