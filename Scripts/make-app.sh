@@ -62,6 +62,35 @@ for f in .zshenv .zprofile .zshrc .zlogin; do
     fi
 done
 
+# Bundle the dreamux-signals MCP server (script + pinned deps) so
+# MCPInstaller's Resources/mcp lookup resolves no matter where the app
+# was built from — worktree builds and moved checkouts included. The
+# dev-path fallback in resolveScriptPath() still covers a bundle
+# without deps (e.g. bun missing on the build machine).
+if [[ -f "$ROOT/mcp/dreamux-signals-mcp.ts" ]]; then
+    mkdir -p "$APP/Contents/Resources/mcp"
+    cp "$ROOT/mcp/dreamux-signals-mcp.ts" \
+       "$ROOT/mcp/package.json" \
+       "$ROOT/mcp/bun.lock" \
+       "$APP/Contents/Resources/mcp/"
+    # Same probe order as MCPInstaller.resolveBunPath: official installer,
+    # Homebrew, then newest asdf install. PATH's shim is unreliable here.
+    BUN=""
+    for candidate in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
+        [[ -x "$candidate" ]] && BUN="$candidate" && break
+    done
+    if [[ -z "$BUN" && -d "$HOME/.asdf/installs/bun" ]]; then
+        latest="$(ls "$HOME/.asdf/installs/bun" | sort -r | head -1)"
+        [[ -x "$HOME/.asdf/installs/bun/$latest/bin/bun" ]] && BUN="$HOME/.asdf/installs/bun/$latest/bin/bun"
+    fi
+    if [[ -n "$BUN" ]]; then
+        (cd "$APP/Contents/Resources/mcp" && "$BUN" install --frozen-lockfile --silent) \
+            || echo "warning: bun install for bundled MCP failed; dev-path fallback still applies" >&2
+    else
+        echo "warning: bun not found; bundled MCP ships without node_modules" >&2
+    fi
+fi
+
 # Ad-hoc sign so launchd is willing to run it.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
