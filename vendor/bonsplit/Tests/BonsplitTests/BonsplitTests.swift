@@ -84,10 +84,57 @@ final class BonsplitTests: XCTestCase {
         let pane = controller.allPaneIds.first!
         let urls = [URL(fileURLWithPath: "/tmp/a.txt"), URL(fileURLWithPath: "/tmp/b.txt")]
 
-        controller.notifyFileDrop(urls, inPane: pane)
+        controller.notifyFileDrop(urls, inPane: pane, atIndex: 1)
 
         XCTAssertEqual(delegate.receivedURLs, urls)
         XCTAssertEqual(delegate.receivedPane, pane)
+        XCTAssertEqual(delegate.receivedIndex, 1)
+    }
+
+    // Note: `BonsplitController()` seeds a "Welcome" tab (see
+    // `SplitViewController`'s init) -- these expected orderings include
+    // it as the pre-existing tab at index 0.
+
+    @MainActor
+    func testMoveTabRepositionsWithinPane() {
+        let controller = BonsplitController()
+        let pane = controller.allPaneIds.first!
+        let first = controller.createTab(title: "First", icon: "doc")!
+        _ = controller.createTab(title: "Second", icon: "doc")!
+        _ = controller.createTab(title: "Third", icon: "doc")!
+        // Initial order: Welcome, First, Second, Third
+
+        controller.moveTab(first, toIndex: 3, inPane: pane)
+
+        let titles = controller.tabs(inPane: pane).map(\.title)
+        XCTAssertEqual(titles, ["Welcome", "Second", "First", "Third"])
+    }
+
+    @MainActor
+    func testMoveTabClampsOutOfRangeIndex() {
+        let controller = BonsplitController()
+        let pane = controller.allPaneIds.first!
+        let first = controller.createTab(title: "First", icon: "doc")!
+        _ = controller.createTab(title: "Second", icon: "doc")!
+        // Initial order: Welcome, First, Second
+
+        controller.moveTab(first, toIndex: 999, inPane: pane)
+
+        let titles = controller.tabs(inPane: pane).map(\.title)
+        XCTAssertEqual(titles, ["Welcome", "Second", "First"])
+    }
+
+    @MainActor
+    func testMoveTabUnknownTabIsNoOp() {
+        let controller = BonsplitController()
+        let pane = controller.allPaneIds.first!
+        _ = controller.createTab(title: "First", icon: "doc")!
+        // Initial order: Welcome, First
+
+        controller.moveTab(TabID(), toIndex: 0, inPane: pane)
+
+        let titles = controller.tabs(inPane: pane).map(\.title)
+        XCTAssertEqual(titles, ["Welcome", "First"])
     }
 }
 
@@ -95,9 +142,11 @@ final class BonsplitTests: XCTestCase {
 private final class RecordingDelegate: BonsplitDelegate {
     var receivedURLs: [URL]?
     var receivedPane: PaneID?
+    var receivedIndex: Int?
 
-    func splitTabBar(_ controller: BonsplitController, didReceiveFileDrops urls: [URL], inPane pane: PaneID) {
+    func splitTabBar(_ controller: BonsplitController, didReceiveFileDrops urls: [URL], inPane pane: PaneID, atIndex index: Int) {
         receivedURLs = urls
         receivedPane = pane
+        receivedIndex = index
     }
 }

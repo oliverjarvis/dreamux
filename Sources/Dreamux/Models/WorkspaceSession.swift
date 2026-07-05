@@ -253,18 +253,37 @@ final class WorkspaceSession {
         }
     }
 
-    /// Files dropped onto the tab bar strip. Directories aren't openable as
-    /// file tabs, so they're filtered out; if nothing survives, do nothing.
-    /// Opening each survivor in order leaves the last one selected, since
-    /// `openFileTab` selects whichever tab it just created (or reused).
-    private func handleDidReceiveFileDrops(_ urls: [URL]) {
+    /// Files dropped onto the tab bar strip at a specific insertion index
+    /// (where the drop's blue indicator was pointing). Directories aren't
+    /// openable as file tabs, so they're filtered out; if nothing
+    /// survives, do nothing. Opening each survivor in order leaves the
+    /// last one selected, since `openFileTab` selects whichever tab it
+    /// just created (or reused).
+    ///
+    /// Each newly-created tab is repositioned to land exactly at the
+    /// drop's index -- `createTab` always lands per
+    /// `configuration.newTabPosition` (`.current`, i.e. after the
+    /// selected tab), not at an arbitrary index, so this needs a
+    /// follow-up `moveTab`. Multiple files insert sequentially (first
+    /// at `index`, next at `index + 1`, ...). A dropped file that's
+    /// already open dedup-selects its existing tab instead of creating
+    /// one -- `openFileTab` doesn't fire `didCreateTab` in that case, so
+    /// `lastCreatedTabID` (cleared just before the call) stays nil and
+    /// that file's position is left alone, as if it were the file that
+    /// wasn't "inserted."
+    private func handleDidReceiveFileDrops(_ urls: [URL], inPane pane: PaneID, atIndex index: Int) {
         let files = urls.filter { url in
             let resolved = url.resolvingSymlinksInPath()
             let isDirectory = (try? resolved.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             return !isDirectory
         }
+        var insertionIndex = index
         for url in files {
+            lastCreatedTabID = nil
             openFileTab(at: url)
+            guard let newTabID = lastCreatedTabID else { continue }
+            controller.moveTab(newTabID, toIndex: insertionIndex, inPane: pane)
+            insertionIndex += 1
         }
     }
 
@@ -514,8 +533,9 @@ extension WorkspaceSession: BonsplitDelegate {
 
     nonisolated func splitTabBar(_ controller: BonsplitController,
                                  didReceiveFileDrops urls: [URL],
-                                 inPane pane: PaneID) {
-        MainActor.assumeIsolated { self.handleDidReceiveFileDrops(urls) }
+                                 inPane pane: PaneID,
+                                 atIndex index: Int) {
+        MainActor.assumeIsolated { self.handleDidReceiveFileDrops(urls, inPane: pane, atIndex: index) }
     }
 }
 

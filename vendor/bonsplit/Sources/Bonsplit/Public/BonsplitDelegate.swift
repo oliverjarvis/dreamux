@@ -29,8 +29,11 @@ public protocol BonsplitDelegate: AnyObject {
     /// Called when file URLs are dropped onto the tab bar strip (on/between
     /// tabs, or in the empty trailing area). Bonsplit does no interpretation
     /// of the URLs -- it's purely a passthrough so hosts can decide what
-    /// "opening" a dropped file means.
-    func splitTabBar(_ controller: BonsplitController, didReceiveFileDrops urls: [URL], inPane pane: PaneID)
+    /// "opening" a dropped file means. `index` is the insertion index the
+    /// drop's x-position resolved to (the same one the drop-indicator
+    /// tracked while hovering); it may equal `tabs(inPane:).count` for
+    /// "append after the last tab."
+    func splitTabBar(_ controller: BonsplitController, didReceiveFileDrops urls: [URL], inPane pane: PaneID, atIndex index: Int)
 
     // MARK: - Split Lifecycle (Veto Operations)
 
@@ -73,7 +76,7 @@ public extension BonsplitDelegate {
     func splitTabBar(_ controller: BonsplitController, didCloseTab tabId: TabID, fromPane pane: PaneID) {}
     func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Tab, inPane pane: PaneID) {}
     func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Tab, fromPane source: PaneID, toPane destination: PaneID) {}
-    func splitTabBar(_ controller: BonsplitController, didReceiveFileDrops urls: [URL], inPane pane: PaneID) {}
+    func splitTabBar(_ controller: BonsplitController, didReceiveFileDrops urls: [URL], inPane pane: PaneID, atIndex index: Int) {}
     func splitTabBar(_ controller: BonsplitController, shouldSplitPane pane: PaneID, orientation: SplitOrientation) -> Bool { true }
     func splitTabBar(_ controller: BonsplitController, shouldClosePane pane: PaneID) -> Bool { true }
     func splitTabBar(_ controller: BonsplitController, didSplitPane originalPane: PaneID, newPane: PaneID, orientation: SplitOrientation) {}

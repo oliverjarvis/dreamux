@@ -23,20 +23,32 @@ import AppKit
 /// content `ZStack` that keeps offstage tabs mounted at the same
 /// frame -- there's no "shadow" bar competing for the same window
 /// rect, so window/hidden-ancestor checks alone are a sufficient gate.
+///
+/// This anchor reports two things to the SwiftUI side, rather than
+/// drawing any feedback itself: the drag's live x-position
+/// (`onHoverX`, anchor-local, nil when not hovering) so `TabBarView`
+/// can drive its own insertion-point indicator -- the same one
+/// tab-reordering uses -- and the drop itself (`onDropAtX`) carrying
+/// the x-position the drop resolved at, so the host can map it to the
+/// same insertion index the indicator was showing.
 struct TabBarFileDropAnchor: NSViewRepresentable {
-    let onFileDrop: ([URL]) -> Void
+    let onHoverX: (CGFloat?) -> Void
+    let onDropAtX: ([URL], CGFloat) -> Void
 
     func makeNSView(context: Context) -> AnchorView {
         let view = AnchorView()
-        view.onFileDrop = onFileDrop
+        view.onHoverX = onHoverX
+        view.onDropAtX = onDropAtX
         return view
     }
 
     func updateNSView(_ nsView: AnchorView, context: Context) {
-        // The closure captures `pane.id` from the SwiftUI body that
-        // constructed it; refresh it on every update so a stale pane
-        // id from an earlier body evaluation never lingers.
-        nsView.onFileDrop = onFileDrop
+        // The closures capture `pane.id` (and local state) from the
+        // SwiftUI body that constructed them; refresh both on every
+        // update so stale captures from an earlier body evaluation
+        // never linger.
+        nsView.onHoverX = onHoverX
+        nsView.onDropAtX = onDropAtX
     }
 }
 
@@ -44,7 +56,8 @@ struct TabBarFileDropAnchor: NSViewRepresentable {
 /// view's bounds. See `TabBarFileDropAnchor`'s doc comment for why an
 /// overlay is needed instead of a SwiftUI drop modifier.
 final class AnchorView: NSView {
-    var onFileDrop: (([URL]) -> Void)?
+    var onHoverX: ((CGFloat?) -> Void)?
+    var onDropAtX: (([URL], CGFloat) -> Void)?
     private var overlay: FileDropOverlayView?
 
     override func viewDidMoveToWindow() {
@@ -97,29 +110,13 @@ final class AnchorView: NSView {
 /// clicks and drags) passes through to the bar beneath; drag-
 /// destination discovery goes by registered types, which is exactly
 /// the one signal we want to catch here.
+///
+/// Draws nothing itself -- the drop-target feedback is the same blue
+/// insertion-point indicator tab-reordering uses, rendered by
+/// `TabBarView` from the x-position this view reports via
+/// `AnchorView.onHoverX`/`onDropAtX`.
 final class FileDropOverlayView: NSView {
     weak var anchor: AnchorView?
-
-    /// True while a readable file drag is over this overlay — drives
-    /// the accent drop-target wash so the user sees the bar/terminal
-    /// is a live target (the overlay is otherwise invisible).
-    private var isTargeted = false {
-        didSet {
-            guard oldValue != isTargeted else { return }
-            needsDisplay = true
-        }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard isTargeted else { return }
-        let inset = bounds.insetBy(dx: 2, dy: 2)
-        let path = NSBezierPath(roundedRect: inset, xRadius: 6, yRadius: 6)
-        NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
-        path.fill()
-        NSColor.controlAccentColor.withAlphaComponent(0.8).setStroke()
-        path.lineWidth = 2
-        path.stroke()
-    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -133,31 +130,60 @@ final class FileDropOverlayView: NSView {
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         let readable = canReadFileURLs(sender)
-        isTargeted = readable
+        if readable {
+            reportHoverX(sender)
+        }
+        return readable ? .copy : []
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let readable = canReadFileURLs(sender)
+        if readable {
+            reportHoverX(sender)
+        } else {
+            anchor?.onHoverX?(nil)
+        }
         return readable ? .copy : []
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        isTargeted = false
+        anchor?.onHoverX?(nil)
     }
 
     override func draggingEnded(_ sender: NSDraggingInfo) {
-        isTargeted = false
+        anchor?.onHoverX?(nil)
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        isTargeted = false
         let options: [NSPasteboard.ReadingOptionKey: Any] = [
             .urlReadingFileURLsOnly: true
         ]
         guard let urls = sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self], options: options) as? [URL],
             !urls.isEmpty
-        else { return false }
+        else {
+            anchor?.onHoverX?(nil)
+            return false
+        }
+        let x = localX(for: sender)
+        anchor?.onHoverX?(nil)
         DispatchQueue.main.async { [anchor] in
-            anchor?.onFileDrop?(urls)
+            anchor?.onDropAtX?(urls, x)
         }
         return true
+    }
+
+    private func reportHoverX(_ sender: NSDraggingInfo) {
+        anchor?.onHoverX?(localX(for: sender))
+    }
+
+    /// `draggingLocation` is in the window's base coordinate system;
+    /// convert to this view's local coordinates. Since this overlay's
+    /// frame is kept frame-synced 1:1 with the anchor's bounds (see
+    /// `AnchorView.syncOverlay`), the resulting x is exactly the
+    /// anchor-local x `TabBarView` needs.
+    private func localX(for sender: NSDraggingInfo) -> CGFloat {
+        convert(sender.draggingLocation, from: nil).x
     }
 
     private func canReadFileURLs(_ sender: NSDraggingInfo) -> Bool {

@@ -14,6 +14,15 @@ struct TabBarView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var contentWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
+    /// Each tab's frame in the "tabScroll" coordinate space, keyed by
+    /// index -- the same space `scrollOffset`/`contentWidth` are
+    /// measured in (see the `TabFramePreferenceKey` collection below).
+    /// Used to map a file drag's x-position to an insertion index.
+    @State private var tabFrames: [Int: CGRect] = [:]
+    /// Insertion index a file drag (tracked via `TabBarFileDropAnchor`)
+    /// currently resolves to, or nil when no file drag is hovering this
+    /// bar. Drives the same `dropIndicator` tab-reordering shows.
+    @State private var fileDropIndex: Int?
 
     private var canScrollLeft: Bool {
         scrollOffset > 1
@@ -81,6 +90,9 @@ struct TabBarView: View {
                             }
                         }
                     }
+                    .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+                        tabFrames = frames
+                    }
                 }
                 .frame(height: TabBarMetrics.barHeight)
                 .overlay(fadeOverlays)
@@ -101,10 +113,44 @@ struct TabBarView: View {
         // trailing area. SwiftUI's `.onDrop`/`.dropDestination` never
         // fired here (see `TabBarFileDropAnchor`'s doc comment for why),
         // so this is a window-level AppKit overlay frame-synced to the
-        // bar instead of a SwiftUI drop modifier.
-        .background(TabBarFileDropAnchor { urls in
-            controller.notifyFileDrop(urls, inPane: pane.id)
-        })
+        // bar instead of a SwiftUI drop modifier. It reports the drag's
+        // x-position rather than drawing anything itself, so the same
+        // `dropIndicator` used for tab reordering can track it.
+        .background(TabBarFileDropAnchor(
+            onHoverX: { x in
+                fileDropIndex = x.map(fileDropInsertionIndex(forBarLocalX:))
+            },
+            onDropAtX: { urls, x in
+                let index = fileDropInsertionIndex(forBarLocalX: x)
+                fileDropIndex = nil
+                controller.notifyFileDrop(urls, inPane: pane.id, atIndex: index)
+            }
+        ))
+    }
+
+    // MARK: - File Drop Index Mapping
+
+    /// Maps a file drag's anchor-local x (from `TabBarFileDropAnchor`,
+    /// whose bounds cover the whole bar) to a tab insertion index, using
+    /// the same "tabScroll" coordinate space `tabFrames` are captured in.
+    ///
+    /// The anchor and the scrollable tab row share an origin (the
+    /// `GeometryReader` is the leading, spacing-0 child of the bar's
+    /// outer `HStack`, and the `ScrollView` fills it exactly), so the
+    /// reported x is already relative to the *visible* (scrolled)
+    /// viewport in that same space. `scrollOffset` is tracked as
+    /// `-contentFrame.minX` (see the `onChange`/`onAppear` above this
+    /// computes it in), i.e. how far the content has scrolled left of
+    /// its own origin -- so adding it back converts a viewport-relative
+    /// x into the content-relative x the tab frames are measured in.
+    private func fileDropInsertionIndex(forBarLocalX x: CGFloat) -> Int {
+        let contentX = x + scrollOffset
+        for index in 0..<pane.tabs.count {
+            if let frame = tabFrames[index], contentX < frame.midX {
+                return index
+            }
+        }
+        return pane.tabs.count
     }
 
     // MARK: - Tab Item
@@ -137,8 +183,16 @@ struct TabBarView: View {
             controller: splitViewController,
             dropTargetIndex: $dropTargetIndex
         ))
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: TabFramePreferenceKey.self,
+                    value: [index: geo.frame(in: .named("tabScroll"))]
+                )
+            }
+        )
         .overlay(alignment: .leading) {
-            if dropTargetIndex == index {
+            if dropTargetIndex == index || fileDropIndex == index {
                 dropIndicator
             }
         }
@@ -178,7 +232,7 @@ struct TabBarView: View {
                 dropTargetIndex: $dropTargetIndex
             ))
             .overlay(alignment: .leading) {
-                if dropTargetIndex == pane.tabs.count {
+                if dropTargetIndex == pane.tabs.count || fileDropIndex == pane.tabs.count {
                     dropIndicator
                 }
             }
@@ -267,6 +321,20 @@ struct TabBarView: View {
                     .fill(TabBarColors.separator)
                     .frame(height: 1)
             }
+    }
+}
+
+// MARK: - Tab Frame Preference Key
+
+/// Collects each rendered tab's frame (in the "tabScroll" coordinate
+/// space), keyed by index, so `TabBarView` can map a file drag's
+/// x-position to an insertion index. Merges by index since every tab
+/// reports its own single-entry dictionary.
+struct TabFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [Int: CGRect] = [:]
+
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 

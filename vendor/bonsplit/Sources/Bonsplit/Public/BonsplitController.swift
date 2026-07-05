@@ -174,12 +174,34 @@ public final class BonsplitController {
     }
 
     /// Notify the delegate that file URLs were dropped onto the tab bar
-    /// strip for a pane. Bonsplit performs no interpretation of the URLs
-    /// (it doesn't even check whether they're directories) -- this is a
-    /// pure passthrough so hosts can decide what "opening" a dropped file
-    /// means. Called by `TabBarView`'s `.dropDestination`.
-    public func notifyFileDrop(_ urls: [URL], inPane pane: PaneID) {
-        delegate?.splitTabBar(self, didReceiveFileDrops: urls, inPane: pane)
+    /// strip for a pane at a specific insertion index. Bonsplit performs
+    /// no interpretation of the URLs (it doesn't even check whether
+    /// they're directories) -- this is a pure passthrough so hosts can
+    /// decide what "opening" a dropped file means and where the
+    /// resulting tab lands. `index` is the position the drop's
+    /// x-coordinate resolved to (see `TabBarView`'s drop-indicator
+    /// mapping); it may equal `tabs(inPane:).count` for "append after
+    /// the last tab." Called by `TabBarView`'s window-level file-drop
+    /// overlay (`TabBarFileDropAnchor`).
+    public func notifyFileDrop(_ urls: [URL], inPane pane: PaneID, atIndex index: Int) {
+        delegate?.splitTabBar(self, didReceiveFileDrops: urls, inPane: pane, atIndex: index)
+    }
+
+    /// Move a tab to a new position within its own pane. Useful for
+    /// repositioning a tab just created via `createTab` (which always
+    /// lands per `configuration.newTabPosition`, not at an arbitrary
+    /// index) -- e.g. landing a file-drop-created tab exactly where the
+    /// drop's insertion indicator pointed. `index` is clamped to the
+    /// pane's current tab count, since tabs can mutate between when a
+    /// caller computed the index and when this runs. No-op if `tabId`
+    /// isn't found in `paneId`.
+    public func moveTab(_ tabId: TabID, toIndex index: Int, inPane paneId: PaneID) {
+        guard let pane = internalController.rootNode.findPane(PaneID(id: paneId.id)),
+              let sourceIndex = pane.tabs.firstIndex(where: { $0.id == tabId.id }) else {
+            return
+        }
+        let clampedIndex = min(max(0, index), pane.tabs.count)
+        pane.moveTab(from: sourceIndex, to: clampedIndex)
     }
 
     // MARK: - Split Operations
