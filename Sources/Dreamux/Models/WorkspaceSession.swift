@@ -22,6 +22,10 @@ final class WorkspaceSession {
     /// so an unsaved file shows the dirty indicator (mirrors how
     /// `titleObservers` propagates terminal titles).
     private var fileDirtyObservers: [TabID: FileTabDirtyObserver] = [:]
+    /// Read-only Monaco diff tabs, keyed by the same Bonsplit tab ids as
+    /// the other three maps — a tab id appears in exactly one of the
+    /// four maps.
+    private var diffTabSessions: [TabID: DiffTabSession] = [:]
     private var titleObservers: [TabID: TitleObserver] = [:]
     private var didBootstrap = false
 
@@ -97,6 +101,10 @@ final class WorkspaceSession {
         fileTabSessions[tabId]
     }
 
+    func diffTabSession(for tabId: TabID) -> DiffTabSession? {
+        diffTabSessions[tabId]
+    }
+
     /// URLs of every in-app browser tab, for the e2e state dump.
     var webTabURLs: [URL] {
         webTabSessions.values.map(\.url)
@@ -160,7 +168,8 @@ final class WorkspaceSession {
     private func handleDidCreateTab(_ tab: Tab) {
         guard tabSessions[tab.id] == nil,
               webTabSessions[tab.id] == nil,
-              fileTabSessions[tab.id] == nil else { return }
+              fileTabSessions[tab.id] == nil,
+              diffTabSessions[tab.id] == nil else { return }
 
         lastCreatedTabID = tab.id
 
@@ -181,6 +190,14 @@ final class WorkspaceSession {
         if let url = nextTabWebURL {
             nextTabWebURL = nil
             webTabSessions[tab.id] = WebTabSession(url: url)
+            return
+        }
+
+        // Diff tab: the pending request (set by openDiffTab just before
+        // createTab) claims this tab id.
+        if let request = nextDiffRequest {
+            nextDiffRequest = nil
+            diffTabSessions[tab.id] = DiffTabSession(request: request)
             return
         }
 
@@ -208,6 +225,7 @@ final class WorkspaceSession {
         webTabSessions.removeValue(forKey: tabId)
         fileTabSessions.removeValue(forKey: tabId)
         fileDirtyObservers.removeValue(forKey: tabId)
+        diffTabSessions.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
         if planningTabID == tabId { planningTabID = nil }
         if agentTabID == tabId { agentTabID = nil }
@@ -372,6 +390,19 @@ final class WorkspaceSession {
             fresh.viewMode = .source
             fresh.reveal(line: line)
         }
+    }
+
+    /// Request claimed by the next created tab — the diff analog of
+    /// `nextTabFileURL`, read once in `handleDidCreateTab`.
+    private var nextDiffRequest: DiffRequest?
+
+    /// Open a read-only diff tab for a revision range. No dedup: a
+    /// diff is a snapshot of a question ("what changed here?"), and
+    /// asking again deserves fresh content.
+    func openDiffTab(_ request: DiffRequest) {
+        nextDiffRequest = request
+        controller.createTab(title: request.title, icon: "plus.forwardslash.minus")
+        nextDiffRequest = nil
     }
 
     /// Called by the store when this workspace becomes the visible one.

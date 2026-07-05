@@ -85,6 +85,8 @@ private struct TabContentView: View {
                 .onAppear { tabSession.startIfNeeded() }
         } else if let fileTab = session.fileTabSession(for: tabId) {
             FileEditorView(session: fileTab)
+        } else if let diffTab = session.diffTabSession(for: tabId) {
+            DiffTabView(session: diffTab)
         } else if let webTab = session.webTabSession(for: tabId) {
             WebTabView(session: webTab)
         } else {
@@ -202,6 +204,56 @@ private struct FileEditorView: View {
             case .code:
                 FileEditorWebView(webView: session.webView)
             }
+        }
+    }
+}
+
+/// The diff tab: changed-file rail + Monaco side-by-side. Read-only by
+/// construction — the session has no save path.
+private struct DiffTabView: View {
+    @Bindable var session: DiffTabSession
+
+    var body: some View {
+        HSplitView {
+            List(session.files, selection: Binding(
+                get: { session.selectedPath },
+                set: { if let path = $0 { session.selectFile(path) } }
+            )) { file in
+                HStack(spacing: 6) {
+                    Text(file.status.prefix(1))
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(statusColor(file.status))
+                        .frame(width: 14)
+                    Text(file.path)
+                        .font(.callout)
+                        .lineLimit(1).truncationMode(.head)
+                }
+                .tag(file.path)
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .frame(minWidth: 180, idealWidth: 220, maxWidth: 340)
+
+            FileEditorWebView(webView: session.webView)
+                .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .overlay {
+            if session.isLoading {
+                ProgressView()
+            } else if session.files.isEmpty {
+                Text("No changes in this range")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status.first {
+        case "A": return .green
+        case "D": return .red
+        case "R": return .orange
+        default: return .secondary
         }
     }
 }

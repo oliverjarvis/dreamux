@@ -107,6 +107,33 @@ require(['vs/editor/editor.main'], function () {
     post({ type: 'dirty', value: false });
   };
 
+  // Read-only side-by-side diff. First call disposes the standard
+  // editor and replaces it with a diff editor in the same container;
+  // later calls just swap models. ext drives language inference the
+  // same way __setContents does (languageForExtension, above).
+  var diffEditor = null;
+  window.__setDiff = function (originalText, modifiedText, ext, theme) {
+    var language = languageForExtension(ext);
+    if (!diffEditor) {
+      if (editor) { editor.dispose(); editor = null; }
+      diffEditor = monaco.editor.createDiffEditor(
+        document.getElementById('container'), {
+          automaticLayout: true,
+          readOnly: true,
+          originalEditable: false,
+          renderSideBySide: true,
+          minimap: { enabled: false },
+          fontSize: 14,
+        });
+    }
+    monaco.editor.setTheme(theme);
+    var original = monaco.editor.createModel(originalText, language);
+    var modified = monaco.editor.createModel(modifiedText, language);
+    var old = diffEditor.getModel();
+    diffEditor.setModel({ original: original, modified: modified });
+    if (old) { old.original.dispose(); old.modified.dispose(); }
+  };
+
   // Editor → Swift pull: the rendered-markdown toggle reads the live
   // buffer without waiting for a save.
   window.__getValue = function () { return editor.getValue(); };
