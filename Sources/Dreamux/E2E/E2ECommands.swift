@@ -263,6 +263,7 @@ enum E2ECommands {
         case .workspace: return "workspace"
         case .run: return "run"
         case .signals: return "signals"
+        case .library: return "library"
         }
     }
 

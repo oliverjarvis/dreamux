@@ -56,7 +56,7 @@ final class SidebarLayoutStoreTests: XCTestCase {
         first.tiles = [.browser, .signals]
         first.persistTiles()
         let reloaded = SidebarLayoutStore(project: project)
-        XCTAssertEqual(reloaded.tiles, [.browser, .signals])
+        XCTAssertEqual(reloaded.tiles, [.browser, .signals, .library])
     }
 
     @MainActor func testMissingTilesAreReconciledOnLoad() {
@@ -67,7 +67,22 @@ final class SidebarLayoutStoreTests: XCTestCase {
         try? json.write(to: dir.appendingPathComponent("sidebar.json"), atomically: true, encoding: .utf8)
 
         let store = SidebarLayoutStore(project: project)
-        XCTAssertEqual(store.tiles, [.signals, .browser])
+        XCTAssertEqual(store.tiles, [.signals, .browser, .library])
+    }
+
+    /// sidebar.json written before a tile case existed must still show
+    /// the new tile after load — union missing cases (append, keeping
+    /// the user's saved order for the rest).
+    @MainActor func testTilesUnionInMissingCases() throws {
+        let dir = project.rootPath.appendingPathComponent(".dreamux", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json = #"{"features":[],"tiles":["signals","browser"]}"#
+        try json.write(to: dir.appendingPathComponent("sidebar.json"), atomically: true, encoding: .utf8)
+
+        let store = SidebarLayoutStore(project: project)
+        XCTAssertTrue(store.tiles.contains(.library))
+        XCTAssertEqual(Array(store.tiles.prefix(2)), [.signals, .browser],
+                       "saved order preserved; new cases appended")
     }
 
     @MainActor

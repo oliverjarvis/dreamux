@@ -421,7 +421,8 @@ struct WorkspaceSidebar: View {
     /// One icon+label row per pinned destination — monochrome outline
     /// icon, callout label, hover highlight, tinted while selected.
     private func tileRow(_ tile: SidebarTile) -> some View {
-        let selected = tile == .signals && sidebarMode == .signals
+        let selected = (tile == .signals && sidebarMode == .signals)
+            || (tile == .library && sidebarMode == .library)
         return Button {
             handleTileTap(tile)
         } label: {
@@ -462,6 +463,8 @@ struct WorkspaceSidebar: View {
             sidebarMode = .signals
         case .browser:
             openBrowserTab()
+        case .library:
+            sidebarMode = .library
         }
     }
 
@@ -739,6 +742,7 @@ struct WorkspaceSidebar: View {
         case .workspace: return true
         case .run(let id): return id == workspace.id
         case .signals: return false
+        case .library: return false
         }
     }
 
