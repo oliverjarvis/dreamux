@@ -141,6 +141,31 @@ final class ProjectSession {
                 repoNames: repoStore.repositories.map(\.name)
             )
         }
+        // Queue backstop (Task 3): commit whatever the agent left
+        // uncommitted at each task boundary and at the review gate, so a
+        // forgotten commit never silently drops work. `tick()` only
+        // reports which task titles are now fully-checked — the git work
+        // (and the `autoCommitEnabled` check, re-read per event so a
+        // mid-plan toggle flip takes effect immediately) lives entirely
+        // here in the wiring, never inside the queue.
+        planQueue.completedTaskTitlesForPlan = { [weak docStore] path in
+            guard let docStore,
+                  let plan = docStore.plans.first(where: { docStore.relativePath(of: $0) == path })
+            else { return nil }
+            return plan.tasks
+                .filter { !$0.title.isEmpty && !$0.steps.isEmpty && $0.steps.allSatisfy(\.checked) }
+                .map(\.title)
+        }
+        planQueue.onTaskCompleted = { [weak docStore, weak store, weak repoStore] path, title in
+            Self.backstopCommit(
+                message: "\(title) (auto)", planPath: path,
+                docStore: docStore, workspaceStore: store, repoStore: repoStore)
+        }
+        planQueue.onPlanReachedReview = { [weak docStore, weak store, weak repoStore] path in
+            Self.backstopCommit(
+                message: "Plan review checkpoint (auto)", planPath: path,
+                docStore: docStore, workspaceStore: store, repoStore: repoStore)
+        }
 
         let nudgeCenter = PlanNudgeCenter()
 
@@ -244,6 +269,42 @@ final class ProjectSession {
         }
 
         wireSignalPersistence()
+    }
+
+    /// The auto-commit backstop (Task 3): commit whatever the agent left
+    /// uncommitted in each of the plan's feature repo worktrees. Fire
+    /// and forget — a failed or skipped commit is logged and never
+    /// blocks the queue. Re-reads `WorkflowSettings.autoCommitEnabled`
+    /// on every call (not once at wiring time) so a toggle flipped
+    /// mid-plan takes effect on the very next event. Resolution mirrors
+    /// `featureNameForPlan` above: ledger record → feature name →
+    /// workspace by name → its linked repos → each repo's worktree for
+    /// that branch.
+    private static func backstopCommit(
+        message: String, planPath: String,
+        docStore: DocStore?, workspaceStore: WorkspaceStore?, repoStore: RepoStore?
+    ) {
+        guard WorkflowSettings.autoCommitEnabled else { return }
+        guard let docStore, let workspaceStore, let repoStore,
+              let feature = docStore.ledger.recordForPlan(planPath)?.featureName,
+              let workspace = workspaceStore.workspaces.first(where: { $0.name == feature })
+        else { return }
+        let repos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
+        guard !repos.isEmpty else { return }
+        Task { @MainActor in
+            for repo in repos {
+                guard let worktree = await GitOperations.worktreeURL(
+                    forBranch: feature, in: repo.rootURL)
+                else { continue }
+                guard await GitOperations.hasUncommittedChanges(in: worktree) else { continue }
+                do {
+                    try await GitOperations.commitAll(message: message, in: worktree)
+                } catch {
+                    NSLog("auto-commit backstop failed in %@: %@",
+                          worktree.path, String(describing: error))
+                }
+            }
+        }
     }
 
     /// Bridge this project's in-memory signal ring to the app-global

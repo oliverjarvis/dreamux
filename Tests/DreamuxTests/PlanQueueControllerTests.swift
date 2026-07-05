@@ -331,4 +331,61 @@ final class PlanQueueControllerTests: XCTestCase {
         controller.tick()
         XCTAssertEqual(controller.state, .running)
     }
+
+    // MARK: - Task completion events (Task 3: queue backstop)
+
+    /// The backstop's trigger: a task flipping to fully-checked between
+    /// ticks fires onTaskCompleted exactly once, with the task's title.
+    func testTaskCompletionFiresOncePerNewlyCompletedTask() {
+        var completed: [String] = []
+        var events: [(String, String)] = []
+        controller.completedTaskTitlesForPlan = { _ in completed }
+        controller.onTaskCompleted = { events.append(($0, $1)) }
+        controller.enqueue("p.md")
+        controller.start()
+        statuses["p.md"] = .running
+
+        controller.tick()                       // baseline snapshot, no events
+        XCTAssertTrue(events.isEmpty)
+
+        completed = ["Task 1: Foundations"]
+        controller.tick()
+        XCTAssertEqual(events.map(\.1), ["Task 1: Foundations"])
+
+        controller.tick()                       // unchanged → no re-fire
+        XCTAssertEqual(events.count, 1)
+
+        completed = ["Task 1: Foundations", "Task 2: Wiring"]
+        controller.tick()
+        XCTAssertEqual(events.map(\.1), ["Task 1: Foundations", "Task 2: Wiring"])
+    }
+
+    /// Resume safety: the FIRST observation of a plan seeds the
+    /// snapshot silently — tasks completed before the app launched
+    /// (or before the queue started) must not trigger a storm of
+    /// stale backstop commits.
+    func testFirstObservationSeedsWithoutFiring() {
+        var events: [(String, String)] = []
+        controller.completedTaskTitlesForPlan = { _ in ["Task 1: Done long ago"] }
+        controller.onTaskCompleted = { events.append(($0, $1)) }
+        controller.enqueue("p.md")
+        controller.start()
+        statuses["p.md"] = .running
+        controller.tick()
+        XCTAssertTrue(events.isEmpty, "pre-existing completions are history, not events")
+    }
+
+    /// The review checkpoint: the .running → .atGate transition fires
+    /// onPlanReachedReview exactly once.
+    func testReviewTransitionFiresPlanReachedReview() {
+        var reviews: [String] = []
+        controller.onPlanReachedReview = { reviews.append($0) }
+        controller.enqueue("p.md")
+        controller.start()
+        statuses["p.md"] = .awaitingReview
+        controller.tick()
+        XCTAssertEqual(reviews, ["p.md"])
+        controller.tick()                        // already atGate → no re-fire
+        XCTAssertEqual(reviews.count, 1)
+    }
 }

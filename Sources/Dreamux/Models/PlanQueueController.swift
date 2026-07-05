@@ -23,6 +23,16 @@ final class PlanQueueController {
     @ObservationIgnored var requestMerge: (String) -> Void = { _ in }
     @ObservationIgnored var now: () -> Date = Date.init
 
+    /// Ordered titles of the plan's fully-checked tasks — injected so
+    /// tick() stays a pure function of probes. nil = plan unreadable.
+    @ObservationIgnored var completedTaskTitlesForPlan: ((String) -> [String]?)?
+    /// Fires once per task that transitions to fully-checked while the
+    /// queue is running the plan — the auto-commit backstop's trigger.
+    @ObservationIgnored var onTaskCompleted: ((_ planPath: String, _ taskTitle: String) -> Void)?
+    /// Fires once when the running plan reaches review (.atGate) — the
+    /// backstop's final leftover-commit checkpoint.
+    @ObservationIgnored var onPlanReachedReview: ((_ planPath: String) -> Void)?
+
     /// Additive side-effect run on every poll cycle, independent of the
     /// queue's state machine (wired in `ProjectSession` to retry parked
     /// nudge delivery). The queue's transitions are untouched by it — it is
@@ -56,6 +66,13 @@ final class PlanQueueController {
     /// plan file that reuses a retired path stays suppressed — the same
     /// accepted trade-off `enactedBlockers` makes).
     @ObservationIgnored private(set) var autoRanPlans: Set<String> = []
+
+    /// Last observed completed-task set per plan path. Seeded silently
+    /// on first observation so pre-existing completions never fire
+    /// stale events (relaunch/resume safety). In-memory only: a fresh
+    /// launch re-seeds, which is exactly the conservative behavior we
+    /// want for the backstop.
+    @ObservationIgnored private var observedCompletedTasks: [String: Set<String>] = [:]
 
     /// How long an unchanged, quiescent session may sit before the
     /// queue asks for attention.
@@ -221,11 +238,19 @@ final class PlanQueueController {
             return
         }
 
+        if case .running = state {
+            noteTaskCompletions(for: path)
+        }
+
         switch (state, status) {
         case (.running, .awaitingReview):
+            // Catch the final task's flip in the same tick, before the
+            // state transition would otherwise swallow it.
+            noteTaskCompletions(for: path)
             state = .atGate
             quiescentSince = nil
             save()
+            onPlanReachedReview?(path)
         case (.running, .merged), (.atGate, .merged):
             entries.removeAll { $0 == path }
             advance(after: path)
@@ -249,6 +274,25 @@ final class PlanQueueController {
         case (.running, _), (.atGate, _), (.attention, _), (.idle, _):
             break
         }
+    }
+
+    /// Diff the plan's currently fully-checked task titles against the
+    /// last observed set, firing `onTaskCompleted` for each newly
+    /// completed one (document order). First observation of a plan
+    /// seeds silently — see `observedCompletedTasks`.
+    private func noteTaskCompletions(for path: String) {
+        guard let titles = completedTaskTitlesForPlan?(path) else { return }
+        let completed = Set(titles)
+        guard let previous = observedCompletedTasks[path] else {
+            observedCompletedTasks[path] = completed   // seed silently
+            return
+        }
+        guard completed != previous else { return }
+        // Preserve document order for multi-task flips in one tick.
+        for title in titles where !previous.contains(title) {
+            onTaskCompleted?(path, title)
+        }
+        observedCompletedTasks[path] = completed
     }
 
     private func trackStall(for path: String) {
