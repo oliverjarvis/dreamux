@@ -683,3 +683,144 @@ extension GitOperations {
         )
     }
 }
+
+// MARK: - Commit log and diff content
+
+/// One commit in a worktree's trail — the commit-trail popover's row
+/// model and the task-diff resolver's input.
+struct CommitInfo: Equatable, Sendable, Identifiable {
+    let sha: String
+    let shortSHA: String
+    let subject: String
+    let authorDate: Date?
+    let insertions: Int
+    let deletions: Int
+    var id: String { sha }
+}
+
+extension GitOperations {
+    /// Commits on this worktree, newest first, with per-commit diff
+    /// totals. `baseBranch` scopes to `<base>..HEAD` (the branch's own
+    /// commits); when that range is empty or the base doesn't resolve
+    /// (we're ON the default branch), fall back to plain HEAD history
+    /// so the chip is never uselessly blank.
+    ///
+    /// Format: one `%H<TAB>%h<TAB>%s<TAB>%aI` line per commit followed
+    /// by its --numstat lines (`ins<TAB>del<TAB>path`, "-" for binary)
+    /// and a blank separator. Subjects can contain anything except \n,
+    /// so the header line is parsed by splitting on TAB with a max of
+    /// 4 fields.
+    static func commitLog(
+        in worktreeURL: URL,
+        baseBranch: String?,
+        limit: Int = 50
+    ) async -> [CommitInfo] {
+        let format = "--format=%H%x09%h%x09%s%x09%aI"
+        var output: String?
+        if let baseBranch {
+            output = try? await runGit(
+                ["log", format, "--numstat", "-n", String(limit), "\(baseBranch)..HEAD"],
+                in: worktreeURL)
+        }
+        if output == nil || output?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            output = try? await runGit(
+                ["log", format, "--numstat", "-n", String(limit), "HEAD"],
+                in: worktreeURL)
+        }
+        guard let output else { return [] }
+        return parseCommitLog(output)
+    }
+
+    /// Split out for direct unit testing of the parsing edge cases
+    /// (binary "-" numstat lines, tabs in nothing, blank separators).
+    static func parseCommitLog(_ output: String) -> [CommitInfo] {
+        var results: [CommitInfo] = []
+        var current: (sha: String, short: String, subject: String, date: Date?)?
+        var ins = 0, del = 0
+        let isoParser = ISO8601DateFormatter()
+
+        func flush() {
+            if let c = current {
+                results.append(CommitInfo(
+                    sha: c.sha, shortSHA: c.short, subject: c.subject,
+                    authorDate: c.date, insertions: ins, deletions: del))
+            }
+            current = nil; ins = 0; del = 0
+        }
+
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            let fields = line.split(separator: "\t", maxSplits: 3,
+                                    omittingEmptySubsequences: false)
+            if fields.count == 4, fields[0].count == 40,
+               fields[0].allSatisfy({ $0.isHexDigit }) {
+                flush()
+                current = (
+                    sha: String(fields[0]),
+                    short: String(fields[1]),
+                    subject: String(fields[2]),
+                    date: isoParser.date(from: String(fields[3]))
+                )
+            } else if fields.count == 3 {
+                // numstat: ins<TAB>del<TAB>path; "-" for binary sides.
+                if let i = Int(fields[0]) { ins += i }
+                if let d = Int(fields[1]) { del += d }
+            }
+        }
+        flush()
+        return results
+    }
+
+    /// `git diff --name-status` between two revisions, or against the
+    /// working tree when `to` is nil. Rename lines (`R100<TAB>old<TAB>new`)
+    /// surface the NEW path with the "R…" status.
+    static func changedFiles(
+        from: String?,
+        to: String?,
+        in worktreeURL: URL
+    ) async -> [(status: String, path: String)] {
+        var args = ["diff", "--name-status"]
+        if let from { args.append(from) }
+        if let to { args.append(to) }
+        guard let output = try? await runGit(args, in: worktreeURL) else { return [] }
+        return output.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t",
+                                   omittingEmptySubsequences: false)
+            guard parts.count >= 2 else { return nil }
+            let status = String(parts[0])
+            let path = String(parts.last!)  // rename: last field is new path
+            return (status: status, path: path)
+        }
+    }
+
+    /// The repo's root commit (no parents). The commit-trail popover
+    /// diffs it against git's empty tree because `<root>^` doesn't
+    /// exist.
+    static func rootCommitSHA(in worktreeURL: URL) async -> String? {
+        guard let output = try? await runGit(
+            ["rev-list", "--max-parents=0", "-n1", "HEAD"], in: worktreeURL)
+        else { return nil }
+        let sha = output.split(separator: "\n").first.map(String.init) ?? ""
+        return sha.isEmpty ? nil : sha
+    }
+
+    /// Text content of `path` at `revision` (`git show rev:path`), or
+    /// from the working tree when revision is nil. Returns nil when
+    /// the file doesn't exist there or looks binary (NUL byte) — the
+    /// diff viewer shows an empty side instead of garbage.
+    static func fileContent(
+        at path: String,
+        revision: String?,
+        in worktreeURL: URL
+    ) async -> String? {
+        if let revision {
+            guard let output = try? await runGit(
+                ["show", "\(revision):\(path)"], in: worktreeURL)
+            else { return nil }
+            return output.contains("\0") ? nil : output
+        }
+        let url = worktreeURL.appendingPathComponent(path)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        if data.contains(0) { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+}
