@@ -374,8 +374,14 @@ struct TabDropDelegate: DropDelegate {
         DropProposal(operation: .move)
     }
 
+    /// Only claim actual tab drags. Type-sniffing (`.text`) is not
+    /// enough: NSURL-backed file drags also expose a plain-text
+    /// representation, so a type-based claim swallows file drops meant
+    /// for the bar-level file handler (and flashes the reorder
+    /// indicator at them). `draggingTab` is set when a tab drag
+    /// actually starts and cleared when it lands.
     func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [.text])
+        controller.draggingTab != nil
     }
 
     private func decodeTransfer(from string: String) -> TabTransferData? {
@@ -386,3 +392,5 @@ struct TabDropDelegate: DropDelegate {
         return transfer
     }
 }
+
+
