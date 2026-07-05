@@ -146,19 +146,6 @@ final class WorkspaceSession {
         controller.closeTab(tab.id)
     }
 
-    /// Type `text` into the focused pane's selected tab, if that tab
-    /// is a terminal (file/web/diff tabs can't receive keystrokes this
-    /// way). Returns false when there is no focused terminal — callers
-    /// surface that however fits their context.
-    @discardableResult
-    func sendToFocusedTerminal(_ text: String) -> Bool {
-        guard let pane = controller.focusedPaneId,
-              let tab = controller.selectedTab(inPane: pane),
-              let terminal = tabSessions[tab.id] else { return false }
-        terminal.send(text)
-        return true
-    }
-
     func selectTab(at index: Int) {
         guard let pane = controller.focusedPaneId else { return }
         let tabs = controller.tabs(inPane: pane)

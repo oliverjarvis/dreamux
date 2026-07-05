@@ -11,9 +11,9 @@ struct FileTreePanel: View {
     @Bindable var repoStore: RepoStore
     let tree: FileTreeStore
     let onOpenFile: (URL) -> Void
-    /// Types text into the focused terminal tab; false = no terminal
-    /// focused (we beep). Wired to WorkspaceSession.sendToFocusedTerminal.
-    let onSendToTerminal: (String) -> Bool
+    /// Opens a new terminal tab cwd'd at the folder — never types into
+    /// an existing session, which may be a busy agent.
+    let onOpenTerminal: (URL) -> Void
 
     /// Bumped by the refresh button and after any mutation to force a
     /// fresh disk read of the (uncached) tree.
@@ -113,8 +113,7 @@ struct FileTreePanel: View {
                 NSSound.beep()
             }
         case .openInTerminal:
-            let line = "cd \(FileTreeOperations.shellEscaped(node.url.path))\n"
-            if !onSendToTerminal(line) { NSSound.beep() }
+            onOpenTerminal(node.url)
         }
     }
 

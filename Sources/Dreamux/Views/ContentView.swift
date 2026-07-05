@@ -161,9 +161,13 @@ struct ContentView: View {
                                     repoStore: repoStore,
                                     tree: fileTree,
                                     onOpenFile: openFile,
-                                    onSendToTerminal: { text in
-                                        guard let workspace = store.activeWorkspace else { return false }
-                                        return store.session(for: workspace).sendToFocusedTerminal(text)
+                                    onOpenTerminal: { url in
+                                        guard let workspace = store.activeWorkspace else { return }
+                                        sidebarMode = .workspace
+                                        store.session(for: workspace).openTab(
+                                            at: url.path,
+                                            title: url.lastPathComponent,
+                                            icon: "terminal")
                                     }
                                 )
                                 .frame(width: fileTreeWidth)
