@@ -226,7 +226,7 @@ private struct FileTreeRow: View {
                     .font(.callout)
                     .lineLimit(1)
                     .contentShape(Rectangle())
-                    .onDrag { NSItemProvider(contentsOf: node.url) ?? NSItemProvider() }
+                    .onDrag { NSItemProvider(object: node.url as NSURL) }
                     .contextMenu { menu }
             }
         } else {
@@ -238,7 +238,7 @@ private struct FileTreeRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .onDrag { NSItemProvider(contentsOf: node.url) ?? NSItemProvider() }
+            .onDrag { NSItemProvider(object: node.url as NSURL) }
             .contextMenu { menu }
         }
     }
