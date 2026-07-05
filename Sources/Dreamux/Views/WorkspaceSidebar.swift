@@ -641,7 +641,7 @@ struct WorkspaceSidebar: View {
     private var adHocWorkspaces: [Workspace] {
         let planBacked = AdHocWorkspaces.planBackedFeatureNames(
             in: docStore.initiatives, record: planRecord)
-        return store.workspaces.filter { !planBacked.contains($0.name) }
+        return store.workspaces.filter { !planBacked.contains($0.name) && !$0.isMain }
     }
 
     /// Live drag-reorder scoped to the ad-hoc subset: reads the ad-hoc
@@ -933,6 +933,7 @@ struct WorkspaceSidebar: View {
     }
 
     private func closeFeature(_ workspace: Workspace) {
+        guard !workspace.isMain else { return }  // belt-and-braces — no UI offers this
         let project = repoStore.project
         let linkedRepos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
         // Stop any runner that's executing on this feature's worktree —

@@ -20,6 +20,9 @@ struct Workspace: Identifiable, Hashable {
     /// feature spans. Empty for an orphan workspace with no associated
     /// repos.
     var linkedRepoIDs: [String]
+    /// The reserved main-branch workspace — permanent, excluded from
+    /// feature machinery; see WorkspaceStore.mainWorkspace.
+    var isMain: Bool
 
     init(
         id: UUID = UUID(),
@@ -27,7 +30,8 @@ struct Workspace: Identifiable, Hashable {
         symbol: String = "terminal.fill",
         tint: Color = .accentColor,
         workingDirectory: String? = nil,
-        linkedRepoIDs: [String] = []
+        linkedRepoIDs: [String] = [],
+        isMain: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -35,5 +39,6 @@ struct Workspace: Identifiable, Hashable {
         self.tint = tint
         self.workingDirectory = workingDirectory
         self.linkedRepoIDs = linkedRepoIDs
+        self.isMain = isMain
     }
 }

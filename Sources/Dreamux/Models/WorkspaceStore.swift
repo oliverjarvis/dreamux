@@ -123,6 +123,34 @@ final class WorkspaceStore {
         return workspace
     }
 
+    /// Find-or-create the reserved main-branch workspace. Deterministic
+    /// id (same trick registerFeature uses) so repeated activations and
+    /// relaunches converge on one workspace; linked repos refresh on
+    /// every call because the project's repo set can change.
+    @discardableResult
+    func mainWorkspace(
+        name: String,
+        workingDirectory: String,
+        linkedRepoIDs: [String]
+    ) -> Workspace {
+        if let index = workspaces.firstIndex(where: { $0.isMain }) {
+            workspaces[index].name = name
+            workspaces[index].linkedRepoIDs = linkedRepoIDs
+            workspaces[index].workingDirectory = workingDirectory
+            return workspaces[index]
+        }
+        let workspace = Workspace(
+            id: Self.stableUUID(forFeature: "reserved-main-workspace"),
+            name: name,
+            symbol: "arrow.triangle.branch",
+            workingDirectory: workingDirectory,
+            linkedRepoIDs: linkedRepoIDs,
+            isMain: true
+        )
+        workspaces.append(workspace)
+        return workspace
+    }
+
     /// Rebuild the feature list from on-disk worktree state. Branch
     /// names that appear as worktrees in one or more repos become
     /// features; same-named branches across repos collapse into one
@@ -156,7 +184,10 @@ final class WorkspaceStore {
 
         // Keep orphan workspaces (no linked repos) — they're transient
         // shells the user opened that don't correspond to any worktree.
-        let orphans = workspaces.filter { $0.linkedRepoIDs.isEmpty }
+        // The reserved main workspace rides along the same way even
+        // though it has linked repos: it never comes from worktree
+        // discovery, so it would otherwise be dropped as a stale feature.
+        let orphans = workspaces.filter { $0.linkedRepoIDs.isEmpty || $0.isMain }
         let ordered = layout?.ordered(discovered) ?? discovered
         let merged = ordered + orphans
         workspaces = merged
@@ -180,7 +211,8 @@ final class WorkspaceStore {
     /// linked features are recorded; orphan shells stay session-only and
     /// always render after the linked features.
     func persistFeatureOrder() {
-        layout?.setFeatureOrder(workspaces.filter { !$0.linkedRepoIDs.isEmpty }.map(\.name))
+        layout?.setFeatureOrder(
+            workspaces.filter { !$0.linkedRepoIDs.isEmpty && !$0.isMain }.map(\.name))
     }
 
     /// Free-floating workspace with no repo. Used by ⌘⇧T as a fallback
@@ -221,6 +253,7 @@ final class WorkspaceStore {
     }
 
     func remove(_ workspace: Workspace) {
+        guard !workspace.isMain else { return }  // the reserved main workspace is permanent
         sessions[workspace.id]?.stop()
         sessions.removeValue(forKey: workspace.id)
         workspaces.removeAll { $0.id == workspace.id }
