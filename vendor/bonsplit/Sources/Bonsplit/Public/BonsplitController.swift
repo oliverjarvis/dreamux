@@ -173,6 +173,15 @@ public final class BonsplitController {
         notifyTabSelection()
     }
 
+    /// Notify the delegate that file URLs were dropped onto the tab bar
+    /// strip for a pane. Bonsplit performs no interpretation of the URLs
+    /// (it doesn't even check whether they're directories) -- this is a
+    /// pure passthrough so hosts can decide what "opening" a dropped file
+    /// means. Called by `TabBarView`'s `.dropDestination`.
+    public func notifyFileDrop(_ urls: [URL], inPane pane: PaneID) {
+        delegate?.splitTabBar(self, didReceiveFileDrops: urls, inPane: pane)
+    }
+
     // MARK: - Split Operations
 
     /// Split the focused pane (or specified pane)

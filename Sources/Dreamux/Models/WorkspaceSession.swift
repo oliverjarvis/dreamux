@@ -253,6 +253,21 @@ final class WorkspaceSession {
         }
     }
 
+    /// Files dropped onto the tab bar strip. Directories aren't openable as
+    /// file tabs, so they're filtered out; if nothing survives, do nothing.
+    /// Opening each survivor in order leaves the last one selected, since
+    /// `openFileTab` selects whichever tab it just created (or reused).
+    private func handleDidReceiveFileDrops(_ urls: [URL]) {
+        let files = urls.filter { url in
+            let resolved = url.resolvingSymlinksInPath()
+            let isDirectory = (try? resolved.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            return !isDirectory
+        }
+        for url in files {
+            openFileTab(at: url)
+        }
+    }
+
     // MARK: - Activity / unread
 
     var anyTabHasUnread: Bool {
@@ -495,6 +510,12 @@ extension WorkspaceSession: BonsplitDelegate {
                                  didSelectTab tab: Tab,
                                  inPane pane: PaneID) {
         MainActor.assumeIsolated { self.handleDidSelectTab(tab) }
+    }
+
+    nonisolated func splitTabBar(_ controller: BonsplitController,
+                                 didReceiveFileDrops urls: [URL],
+                                 inPane pane: PaneID) {
+        MainActor.assumeIsolated { self.handleDidReceiveFileDrops(urls) }
     }
 }
 

@@ -97,6 +97,20 @@ struct TabBarView: View {
         .contentShape(Rectangle())
         .background(tabBarBackground)
         .saturation(shouldShowFullSaturation ? 1.0 : 0)
+        // Whole-strip file drop target: on/between tabs and in the empty
+        // trailing area. Attached at the bar's outer container (after the
+        // per-tab/end-zone reorder `.onDrop(of: [.text])`s, which are on
+        // nested child views) so it only catches drags those don't claim.
+        // Tab-reorder drags carry a JSON string via `.text`; Finder file
+        // drags don't advertise `.text`, so they fall through to this
+        // outer `.dropDestination` untouched. The `.contentShape` above
+        // makes the full-width bar (including the trailing run-off) a
+        // valid drop target even where there's no visible content.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !urls.isEmpty else { return false }
+            controller.notifyFileDrop(urls, inPane: pane.id)
+            return true
+        }
     }
 
     // MARK: - Tab Item
