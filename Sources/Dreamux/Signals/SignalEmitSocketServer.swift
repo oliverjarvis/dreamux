@@ -125,6 +125,10 @@ final class SignalEmitSocketServer: @unchecked Sendable {
         source.setEventHandler { [weak self] in
             self?.acceptOne()
         }
+        // SOLE owner of the listen fd's close. Cancellation is the one
+        // point where GCD guarantees the event handler can no longer
+        // fire, so closing anywhere else (stop() used to as well) is a
+        // double close that can kill an unrelated fd under reuse.
         source.setCancelHandler {
             close(fd)
         }
@@ -133,13 +137,16 @@ final class SignalEmitSocketServer: @unchecked Sendable {
     }
 
     func stop() {
+        // The accept source's cancel handler closes listenFD (exactly
+        // once, after any in-flight accept); here we only cancel and
+        // clear our state.
         acceptSource?.cancel()
         acceptSource = nil
-        if listenFD >= 0 {
-            close(listenFD)
-            listenFD = -1
+        listenFD = -1
+        if !socketPath.isEmpty {
+            unlink(socketPath)
+            socketPath = ""
         }
-        if !socketPath.isEmpty { unlink(socketPath) }
     }
 
     deinit { stop() }
@@ -229,8 +236,18 @@ final class SignalEmitSocketServer: @unchecked Sendable {
         let timeoutSeconds = (request["timeout_seconds"] as? Int) ?? 0
 
         // Send an initial ack so the client knows the subscription
-        // is live before any envelopes flow.
+        // is live before any envelopes flow. Still a blocking write:
+        // the buffer is empty at this point and O_NONBLOCK isn't set
+        // on the fd yet.
         writeJSONLine(fd: fd, object: ["ok": true, "subscribed": true])
+
+        // Everything after the ack is written non-blocking: envelope
+        // writes run on the bus's serial delivery queue, so a stalled
+        // subscriber blocking in send(2) would stall signal delivery
+        // for the whole app. See `writeStreamLine` for the resulting
+        // drop semantics.
+        let fdFlags = fcntl(fd, F_GETFL, 0)
+        _ = fcntl(fd, F_SETFL, fdFlags | O_NONBLOCK)
 
         // Watch the FD for EOF / readable input. The MCP push side
         // never sends data after the initial subscribe request, so
@@ -238,7 +255,7 @@ final class SignalEmitSocketServer: @unchecked Sendable {
         // closed (or sent unexpected data, also a teardown trigger).
         // Detecting this here is what makes the cleanup proactive:
         // without it we'd only notice the dead peer the next time a
-        // signal happened to arrive and writeJSONLine returned false.
+        // signal happened to arrive and the envelope write failed.
         let eofSource = DispatchSource.makeReadSource(fileDescriptor: fd, queue: workQueue)
         let lockForEof = NSLock()
         let semaphoreForEof = DispatchSemaphore(value: 0)
@@ -254,21 +271,32 @@ final class SignalEmitSocketServer: @unchecked Sendable {
         }
         eofSource.setEventHandler {
             // Peek at the connection — recv with MSG_PEEK returns 0
-            // on clean EOF, -1 on error. Either way, time to wind
-            // down.
+            // on clean EOF, -1 on error. The fd is O_NONBLOCK, so an
+            // EAGAIN here is a spurious wakeup, not a dead peer.
             var byte: UInt8 = 0
             let n = recv(fd, &byte, 1, MSG_PEEK)
-            if n <= 0 { triggerTeardown() }
+            if n == 0 { triggerTeardown(); return }
+            if n < 0 && errno != EAGAIN && errno != EWOULDBLOCK { triggerTeardown() }
+        }
+        // SOLE owner of the connection fd's close. Cancellation is the
+        // one point where GCD guarantees the read source's event
+        // handler can no longer fire, so closing anywhere else risks a
+        // recv on a closed — possibly reused — fd. Every exit path
+        // below funnels into the single `eofSource.cancel()` at the end
+        // of this function, giving exactly-once close.
+        eofSource.setCancelHandler {
+            close(fd)
         }
         eofSource.resume()
 
         var deliveredCount = 0
         let lock = NSLock()
         let semaphore = DispatchSemaphore(value: 0)
-        // The cancellable's handler runs on whatever queue the bus
-        // publishes on (off main); writes to fd happen there. The
-        // semaphore + lock keep deliveredCount + the cancellable
-        // tracking sound across threads.
+        // The sink runs on the bus's serial delivery queue (the bus
+        // serializes all emits); writes to fd happen there, under
+        // `lock`, and only after re-checking `done` — the shutdown
+        // path flips `done` under the same lock BEFORE the fd close is
+        // scheduled, so an envelope write can never race the close.
         var cancellable: AnyCancellable?
         var done = false
 
@@ -281,9 +309,10 @@ final class SignalEmitSocketServer: @unchecked Sendable {
             }
             .sink { signal in
                 lock.lock()
-                let alreadyDone = done
-                lock.unlock()
-                guard !alreadyDone else { return }
+                guard !done else {
+                    lock.unlock()
+                    return
+                }
 
                 let envelope: [String: Any] = [
                     "id": signal.id,
@@ -294,25 +323,25 @@ final class SignalEmitSocketServer: @unchecked Sendable {
                     "tags": signal.tags,
                     "payload": Self.payloadAsAny(signal.payload),
                 ]
-                guard self.writeJSONLine(fd: fd, object: ["signal": envelope]) else {
-                    // Client gone — tear down.
-                    lock.lock()
-                    if !done {
-                        done = true
-                        semaphore.signal()
-                    }
+                switch self.writeStreamLine(fd: fd, object: ["signal": envelope]) {
+                case .dropped:
+                    // Subscriber's socket buffer is full. Live-tail
+                    // semantics: this envelope is dropped rather than
+                    // blocking the bus queue behind a stalled client;
+                    // the subscription stays live for later signals.
                     lock.unlock()
-                    return
-                }
-
-                lock.lock()
-                deliveredCount += 1
-                let reachedCap = deliveredCount >= maxEvents
-                if reachedCap {
+                case .failed:
+                    // Client gone (EPIPE, …) or mid-line stall — tear down.
                     done = true
+                    lock.unlock()
                     semaphore.signal()
+                case .sent:
+                    deliveredCount += 1
+                    let reachedCap = deliveredCount >= maxEvents
+                    if reachedCap { done = true }
+                    lock.unlock()
+                    if reachedCap { semaphore.signal() }
                 }
-                lock.unlock()
             }
 
         // Race three exit paths:
@@ -335,16 +364,75 @@ final class SignalEmitSocketServer: @unchecked Sendable {
             combined.wait()
         }
 
-        // Final shutdown.
+        // Final shutdown — the ONE place the connection winds down,
+        // whichever exit path won the race above:
+        //   1. `done` flips under the lock, so no envelope write can
+        //      start after this point (an in-flight write holds the
+        //      lock, so we can't get past this line mid-write either).
+        //   2. The farewell goes out while the fd is still open —
+        //      best-effort: dropped if the subscriber's buffer is
+        //      full; it's about to get EOF anyway.
+        //   3. Both helper semaphores are released so neither waiter
+        //      block above leaks (extra signals are harmless).
+        //   4. `eofSource.cancel()` — its cancel handler owns the
+        //      close and GCD runs it exactly once, after any in-flight
+        //      read event. No recv- or send-after-close on any path
+        //      (max_events, write failure, EOF, timeout).
         lock.lock()
         done = true
         lock.unlock()
+        cancellable?.cancel()
+        _ = writeStreamLine(fd: fd, object: ["closed": true])
+        semaphore.signal()
         triggerTeardown()
         eofSource.cancel()
-        cancellable?.cancel()
-        // Politely close the stream.
-        writeJSONLine(fd: fd, object: ["closed": true])
-        close(fd)
+    }
+
+    /// Outcome of a non-blocking stream write. See `writeStreamLine`.
+    private enum StreamWrite {
+        /// Whole line written.
+        case sent
+        /// Nothing written — the buffer was full before the first
+        /// byte. The line is dropped; the subscription stays live.
+        case dropped
+        /// Hard error (EPIPE, …) or the buffer filled MID-line. The
+        /// connection must be torn down.
+        case failed
+    }
+
+    /// Non-blocking line write for subscription streams (the fd has
+    /// O_NONBLOCK set). Envelope writes run on the bus's serial
+    /// delivery queue, where a blocking send(2) against a stalled
+    /// subscriber would stall every signal in the app — so this never
+    /// blocks.
+    ///
+    /// Drop semantics: if the buffer is full before anything is
+    /// written, the line is dropped and the subscription stays live —
+    /// a live tail that misses events under backpressure beats one
+    /// that kills the feed. If the buffer fills MID-line we cannot
+    /// drop (the peer already holds a partial line; writing the next
+    /// envelope would corrupt the newline framing), so it reports
+    /// `.failed` and the caller tears the connection down.
+    private func writeStreamLine(fd: Int32, object: [String: Any]) -> StreamWrite {
+        var data = (try? JSONSerialization.data(withJSONObject: object, options: [])) ?? Data()
+        data.append(0x0A)
+        var written = 0
+        return data.withUnsafeBytes { ptr -> StreamWrite in
+            guard let base = ptr.baseAddress else { return .failed }
+            while written < data.count {
+                let n = send(fd, base.advanced(by: written), data.count - written, 0)
+                if n > 0 {
+                    written += n
+                    continue
+                }
+                if n < 0 && errno == EINTR { continue }
+                if n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    return written == 0 ? .dropped : .failed
+                }
+                return .failed
+            }
+            return .sent
+        }
     }
 
     @discardableResult

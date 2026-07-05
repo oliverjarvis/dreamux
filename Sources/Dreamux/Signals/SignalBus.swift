@@ -16,10 +16,17 @@ final class SignalBus: @unchecked Sendable {
     /// stream just won't retain history across launches.
     let store: SQLiteSignalStore?
 
-    /// Combine fan-out. Sent on whatever thread `emit` was called from;
-    /// subscribers hop schedulers as appropriate.
+    /// Combine fan-out. Values are always delivered on `emitQueue`
+    /// (the bus's private serial queue); subscribers hop schedulers as
+    /// appropriate (ProjectSession does `.receive(on: .main)`).
     let publisher: AnyPublisher<Signal, Never>
     private let subject = PassthroughSubject<Signal, Never>()
+    /// Serializes emission. `emit` is called concurrently — from the
+    /// main actor (app producers) and from the socket server's
+    /// concurrent work queue (external emits) — but
+    /// `PassthroughSubject.send` requires serialized calls, so every
+    /// emit hops onto this queue before touching the subject.
+    private let emitQueue = DispatchQueue(label: "dreamux.signals.bus")
     private var socketServer: SignalEmitSocketServer?
 
     private convenience init() {
@@ -57,9 +64,16 @@ final class SignalBus: @unchecked Sendable {
         return server
     }
 
-    /// Fan out a signal to disk and to subscribers. Safe from any thread.
+    /// Fan out a signal to disk and to subscribers. Safe to call from
+    /// any thread BECAUSE the append + publish are funneled through the
+    /// bus's private serial queue — concurrent `subject.send` calls are
+    /// undefined behavior, so the queue is what makes this claim true.
+    /// Consequently subscribers receive values on that queue, never on
+    /// the emitter's thread.
     func emit(_ signal: Signal) {
-        store?.append(signal)
-        subject.send(signal)
+        emitQueue.async { [store, subject] in
+            store?.append(signal)
+            subject.send(signal)
+        }
     }
 }
