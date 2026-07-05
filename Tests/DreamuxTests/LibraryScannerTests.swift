@@ -139,4 +139,116 @@ final class LibraryScannerTests: XCTestCase {
         XCTAssertEqual(items.filter { $0.name == "linked-only" }.count, 1,
                        "symlink-only skills must be enumerated")
     }
+
+    // MARK: - scanMCPServers
+
+    private func writeJSON(_ obj: [String: Any], to url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted])
+            .write(to: url)
+    }
+
+    /// Project .mcp.json servers are accessible unless a settings file
+    /// disables them; the disabled one still LISTS (inventory) with an
+    /// honest badge.
+    func testScanMCPServersProjectWithDisables() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON([
+            "mcpServers": [
+                "dreamux-signals": ["command": "/bun", "args": ["run", "x.ts"]],
+                "muted": ["command": "/bin/echo"],
+            ],
+        ], to: project.appendingPathComponent(".mcp.json"))
+        try writeJSON(
+            ["disabledMcpjsonServers": ["muted"]],
+            to: project.appendingPathComponent(".claude/settings.local.json"))
+
+        let items = LibraryScanner.scanMCPServers(projectRoot: project, home: home)
+        let byName = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0) })
+        XCTAssertEqual(byName["dreamux-signals"]?.accessible, true)
+        XCTAssertEqual(byName["muted"]?.accessible, false)
+        XCTAssertTrue(byName["muted"]!.accessReason.contains("disabled"))
+        XCTAssertTrue(byName["dreamux-signals"]!.detail.joined().contains("/bun"))
+    }
+
+    /// Global servers come from ~/.claude.json — both the top-level map
+    /// and the entry keyed by this project's path.
+    func testScanMCPServersGlobalAndProjectKeyed() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON([
+            "mcpServers": ["everywhere": ["command": "/g"]],
+            "projects": [
+                project.path: ["mcpServers": ["scoped": ["command": "/p"]]],
+                "/elsewhere": ["mcpServers": ["other": ["command": "/o"]]],
+            ],
+        ], to: home.appendingPathComponent(".claude.json"))
+
+        let items = LibraryScanner.scanMCPServers(projectRoot: project, home: home)
+        let names = Set(items.map(\.name))
+        XCTAssertTrue(names.contains("everywhere"))
+        XCTAssertTrue(names.contains("scoped"))
+        XCTAssertFalse(names.contains("other"), "another project's servers are not this project's inventory")
+    }
+
+    /// Feature-dir .mcp.json entries surface unless the project root
+    /// already declares the same server name.
+    func testScanMCPServersFeatureDirsDedupAgainstProject() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON(["mcpServers": ["dreamux-signals": ["command": "/a"]]],
+                      to: project.appendingPathComponent(".mcp.json"))
+        try writeJSON(["mcpServers": [
+            "dreamux-signals": ["command": "/b"],
+            "feature-only": ["command": "/c"],
+        ]], to: project.appendingPathComponent("features/thing/.mcp.json"))
+
+        let items = LibraryScanner.scanMCPServers(projectRoot: project, home: home)
+        XCTAssertEqual(items.filter { $0.name == "dreamux-signals" }.count, 1)
+        XCTAssertTrue(items.contains { $0.name == "feature-only" && $0.scopeLabel == "Feature: thing" })
+    }
+
+    // MARK: - scanPlugins / accessiblePluginNames
+
+    /// v2 registry: user scope reaches everywhere; project/local scope
+    /// reaches only when its projectPath is this project (or inside it,
+    /// where feature-dir agents run).
+    func testScanPluginsScopes() throws {
+        let project = dir.appendingPathComponent("proj")
+        let home = dir.appendingPathComponent("home")
+        try writeJSON([
+            "version": 2,
+            "plugins": [
+                "superpowers@official": [[
+                    "scope": "user",
+                    "installPath": home.appendingPathComponent(".claude/plugins/cache/official/superpowers/6.1.0").path,
+                    "version": "6.1.0",
+                ]],
+                "here-only@official": [[
+                    "scope": "project",
+                    "projectPath": project.path,
+                    "installPath": home.appendingPathComponent(".claude/plugins/cache/official/here-only/1.0").path,
+                    "version": "1.0",
+                ]],
+                "elsewhere@official": [[
+                    "scope": "project",
+                    "projectPath": "/somewhere/else",
+                    "installPath": home.appendingPathComponent(".claude/plugins/cache/official/elsewhere/1.0").path,
+                    "version": "1.0",
+                ]],
+            ],
+        ], to: home.appendingPathComponent(".claude/plugins/installed_plugins.json"))
+
+        let items = LibraryScanner.scanPlugins(projectRoot: project, home: home)
+        let byName = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0) })
+        XCTAssertEqual(byName["superpowers"]?.accessible, true)
+        XCTAssertEqual(byName["here-only"]?.accessible, true)
+        XCTAssertEqual(byName["elsewhere"]?.accessible, false)
+        XCTAssertTrue(byName["superpowers"]!.detail.contains { $0.contains("6.1.0") })
+
+        let accessible = LibraryScanner.accessiblePluginNames(projectRoot: project, home: home)
+        XCTAssertEqual(accessible, ["superpowers", "here-only"])
+    }
 }
