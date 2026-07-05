@@ -255,6 +255,20 @@ final class RunnerManager {
     /// doesn't have to manually navigate and click Isolate.
     var pendingIsolation: ParsedRunner?
 
+    /// Fires on every distinct status transition (same-value writes are
+    /// swallowed) — the project session turns these into service.health
+    /// signals. nil keeps tests and headless managers silent.
+    var statusChanged: ((_ runnerName: String, _ branch: String, _ previous: RunnerStatus?, _ new: RunnerStatus) -> Void)?
+
+    /// Single write path for `statusByInstance` so transitions can't
+    /// slip past the hook. Same value → no event (health must not spam).
+    private func setStatus(_ status: RunnerStatus, for key: RunnerInstanceKey) {
+        let previous = statusByInstance[key]
+        guard previous != status else { return }
+        statusByInstance[key] = status
+        statusChanged?(key.runnerName, key.branch, previous, status)
+    }
+
     init(project: Project, signals: SignalStore) {
         self.project = project
         self.signals = signals
@@ -320,8 +334,11 @@ final class RunnerManager {
             // worse — let port-hopping dev servers silently come up
             // somewhere else while the UI claims \(fixedPort). Fail
             // visibly instead and point at the fix.
-            statusByInstance[key] = .failed(
-                message: "Port \(fixedPort) is already in use. Stop whatever is using it, or Isolate this runner so each worktree gets its own port."
+            setStatus(
+                .failed(
+                    message: "Port \(fixedPort) is already in use. Stop whatever is using it, or Isolate this runner so each worktree gets its own port."
+                ),
+                for: key
             )
             signals.append(
                 source: sourceTag,
@@ -363,7 +380,7 @@ final class RunnerManager {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 var buf = self.stdoutBuffers[capturedKey] ?? ""
-                signals.appendChunk(source: sourceTag, chunk, buffer: &buf)
+                signals.appendChunk(source: sourceTag, chunk, buffer: &buf, stream: "stdout")
                 self.stdoutBuffers[capturedKey] = buf
             }
         }
@@ -377,7 +394,7 @@ final class RunnerManager {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 var buf = self.stderrBuffers[capturedKey] ?? ""
-                signals.appendChunk(source: sourceTag, chunk, buffer: &buf)
+                signals.appendChunk(source: sourceTag, chunk, buffer: &buf, stream: "stderr")
                 self.stderrBuffers[capturedKey] = buf
             }
         }
@@ -388,7 +405,7 @@ final class RunnerManager {
                 if let startedAt = self.lastStartedAt[capturedKey] {
                     self.lastRunDuration[capturedKey] = Date().timeIntervalSince(startedAt)
                 }
-                self.statusByInstance[capturedKey] = .exited(code: proc.terminationStatus)
+                self.setStatus(.exited(code: proc.terminationStatus), for: capturedKey)
                 self.processes.removeValue(forKey: capturedKey)
                 self.assignedPorts.removeValue(forKey: capturedKey)
                 self.openTasks.removeValue(forKey: capturedKey)?.cancel()
@@ -406,7 +423,7 @@ final class RunnerManager {
         do {
             try process.run()
             processes[key] = process
-            statusByInstance[key] = .running(pid: process.processIdentifier)
+            setStatus(.running(pid: process.processIdentifier), for: key)
             lastStartedAt[key] = Date()
             lastRunDuration[key] = nil
             let portNote = injectedEnv.isEmpty
@@ -415,7 +432,7 @@ final class RunnerManager {
             signals.append(source: sourceTag, line: "› starting: \(runner.start)\(portNote)")
             scheduleAutoOpen(for: runner, key: key, sourceTag: sourceTag)
         } catch {
-            statusByInstance[key] = .failed(message: error.localizedDescription)
+            setStatus(.failed(message: error.localizedDescription), for: key)
             assignedPorts.removeValue(forKey: key)
             signals.append(
                 source: sourceTag,

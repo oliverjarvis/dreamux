@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import Observation
 
@@ -58,6 +59,11 @@ final class ProjectSession {
     @ObservationIgnored var onAutoRunFailure: ((String, String) -> Void)?
 
     @ObservationIgnored private var didBootstrap = false
+
+    /// Bus-subscriber path (external emits surfacing live in this
+    /// project's Signals page). Held so it isn't torn down the moment
+    /// `wireSignalPersistence` returns.
+    @ObservationIgnored private var busSubscription: AnyCancellable?
 
     init(project: Project) {
         self.project = project
@@ -235,6 +241,130 @@ final class ProjectSession {
                 featureName: { self.docStore.ledger.recordForPlan($0)?.featureName },
                 now: Date.init)
             self.nudgeCenter.deliverPending()
+        }
+
+        wireSignalPersistence()
+    }
+
+    /// Bridge this project's in-memory signal ring to the app-global
+    /// persistent bus. Order matters: hydrate FIRST (appendExternal —
+    /// no forwarding), only then install `forward`, so history is never
+    /// re-persisted on launch.
+    ///
+    /// Skipped entirely under XCTest: merely touching `SignalBus.shared`
+    /// lazily opens the real `signals.db` under Application Support and
+    /// binds the real `/tmp/dreamux-emit-*.sock` — fine for the running
+    /// app (there's one process), fatal for a test suite that constructs
+    /// many `ProjectSession`s and must stay hermetic. `NSClassFromString`
+    /// sees the XCTest framework loaded in-process only when a test host
+    /// (`swift test` / Xcode's test runner) launched us.
+    private func wireSignalPersistence() {
+        guard NSClassFromString("XCTestCase") == nil else { return }
+
+        let projectDir = project.rootPath.path
+        let bus = SignalBus.shared
+        let uiStore = signals
+
+        // 1. Hydrate the ring with recent history for this project.
+        if let disk = bus.store {
+            Task { @MainActor in
+                let rows = (try? await disk.query(
+                    kind: SignalKind.terminalLine, source: nil,
+                    projectDir: projectDir, since: nil, limit: 500)) ?? []
+                for row in rows.reversed() {  // query is newest-first; ring wants oldest-first
+                    guard case .object(let obj) = row.payload,
+                          case .string(let text)? = obj["text"] else { continue }
+                    uiStore.appendExternal(source: row.source, line: text, at: row.ts)
+                }
+                self.installSignalForwarding(projectDir: projectDir, bus: bus)
+            }
+        } else {
+            installSignalForwarding(projectDir: projectDir, bus: bus)
+        }
+
+        // 2. Surface external emits (MCP signals_emit) in this project's
+        //    Signals page, live. App-origin signals are skipped — they
+        //    already went through the UI store on their way in.
+        busSubscription = bus.publisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak uiStore] signal in
+                guard signal.tags["origin"] != "app",
+                      signal.tags["project_dir"] == projectDir else { return }
+                uiStore?.appendExternal(
+                    source: signal.source,
+                    line: Self.externalLine(for: signal),
+                    at: signal.ts)
+            }
+
+        // 3. Health transitions → service.health envelopes.
+        runners.statusChanged = { runnerName, branch, previous, new in
+            bus.emit(Signal(
+                source: "services.\(runnerName)",
+                kind: SignalKind.serviceHealth,
+                severity: Self.healthSeverity(for: new),
+                tags: [
+                    "origin": "app",
+                    "project_dir": projectDir,
+                    "service": runnerName,
+                    "branch": branch,
+                ],
+                payload: .object([
+                    "previous": .string(previous.map(Self.statusWord) ?? "none"),
+                    "current": .string(Self.statusWord(new)),
+                ])))
+        }
+    }
+
+    private func installSignalForwarding(projectDir: String, bus: SignalBus) {
+        signals.forward = { entry, stream in
+            var tags = [
+                "origin": "app",
+                "project_dir": projectDir,
+                "service": entry.source,
+                "level": entry.level.rawValue,
+            ]
+            if let stream { tags["stream"] = stream }
+            bus.emit(Signal(
+                source: entry.source,
+                kind: SignalKind.terminalLine,
+                ts: entry.timestamp,
+                severity: entry.level == .error ? .warning : .info,
+                tags: tags,
+                payload: .terminalLine(entry.message, stream: stream ?? "combined")))
+        }
+    }
+
+    /// Render an external signal as one log line for the UI ring.
+    private static func externalLine(for signal: Signal) -> String {
+        if case .object(let obj) = signal.payload,
+           case .string(let text)? = obj["text"] {
+            return "[\(signal.kind)] \(text)"
+        }
+        let payload: String
+        if let data = try? JSONEncoder().encode(signal.payload),
+           let s = String(data: data, encoding: .utf8) {
+            payload = s
+        } else {
+            payload = ""
+        }
+        return "[\(signal.kind)] \(payload)"
+    }
+
+    private static func healthSeverity(for status: RunnerStatus) -> SignalSeverityLevel {
+        switch status {
+        case .running: return .success
+        case .failed: return .critical
+        case .exited(let code): return code == 0 ? .info : .warning
+        case .idle: return .info
+        }
+    }
+
+    private static func statusWord(_ status: RunnerStatus) -> String {
+        switch status {
+        case .idle: return "idle"
+        case .running: return "running"
+        case .failed: return "failed"
+        case .exited(let code): return "exited(\(code))"
         }
     }
 

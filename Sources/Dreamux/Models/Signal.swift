@@ -66,6 +66,12 @@ final class SignalStore {
     /// The `RunnerManager.pendingIsolation` pattern again.
     var pendingSourceFocus: String?
 
+    /// Write-through hook: called once per appended line so the owning
+    /// session can fan the line onto the persistent SignalBus. nil by
+    /// default — tests and headless stores stay in-memory-only.
+    /// `stream` is "stdout"/"stderr" when the caller knows it.
+    var forward: ((SignalEntry, _ stream: String?) -> Void)?
+
     /// Sources belonging to one runner: the bare name plus any
     /// `name:branch` variants (see RunnerManager.signalSource). Falls
     /// back to the bare name when nothing matches yet, so focusing
@@ -76,13 +82,26 @@ final class SignalStore {
         return hits.isEmpty ? [focus] : Set(hits)
     }
 
-    func append(source: String, line: String, at timestamp: Date = .now) {
-        let level = Self.detectLevel(in: line)
+    func append(source: String, line: String, at timestamp: Date = .now, stream: String? = nil) {
+        let entry = insertEntry(source: source, line: line, at: timestamp)
+        forward?(entry, stream)
+    }
+
+    /// Append WITHOUT forwarding — for lines that already live on the
+    /// bus/disk (hydration at launch, external emits surfacing in the
+    /// UI). Forwarding these would re-persist history or bounce
+    /// external signals in a UI→bus→UI loop.
+    func appendExternal(source: String, line: String, at timestamp: Date = .now) {
+        _ = insertEntry(source: source, line: line, at: timestamp)
+    }
+
+    @discardableResult
+    private func insertEntry(source: String, line: String, at timestamp: Date) -> SignalEntry {
         let entry = SignalEntry(
             id: nextID,
             timestamp: timestamp,
             source: source,
-            level: level,
+            level: Self.detectLevel(in: line),
             message: line
         )
         nextID &+= 1
@@ -94,18 +113,19 @@ final class SignalStore {
             knownSourcesSet.insert(source)
             knownSources.append(source)
         }
+        return entry
     }
 
     /// Buffer raw chunks, only flush complete lines. Stdout/stderr arrives
     /// in arbitrary-sized blobs; we want one entry per line.
-    func appendChunk(source: String, _ chunk: String, buffer: inout String) {
+    func appendChunk(source: String, _ chunk: String, buffer: inout String, stream: String? = nil) {
         buffer.append(chunk)
         while let newline = buffer.firstIndex(of: "\n") {
             let raw = String(buffer[..<newline])
             buffer.removeSubrange(buffer.startIndex...newline)
             let trimmed = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
             if trimmed.isEmpty { continue }
-            append(source: source, line: trimmed)
+            append(source: source, line: trimmed, stream: stream)
         }
     }
 
