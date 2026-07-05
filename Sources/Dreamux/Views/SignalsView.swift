@@ -8,6 +8,7 @@ import AppKit
 struct SignalsView: View {
     @Bindable var signals: SignalStore
     @Bindable var runners: RunnerManager
+    let projectDir: String
 
     @State private var query: String = ""
     @State private var enabledSources: Set<String> = []
@@ -15,6 +16,7 @@ struct SignalsView: View {
     @State private var sortDescending: Bool = false
     @State private var autoScroll: Bool = true
     @State private var selectedEntryID: SignalEntry.ID?
+    @State private var mcpStatus: MCPInstaller.Status?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,6 +85,31 @@ struct SignalsView: View {
 
     // MARK: - Filter bar
 
+    /// Manual (re)install affordance for the dreamux-signals MCP —
+    /// mirrors the auto-install at session start, for when the user
+    /// wants to wire a project up (or repair a stale path) by hand.
+    private var mcpStatusButton: some View {
+        Button {
+            _ = MCPInstaller.installIfNeeded(at: projectDir, force: true)
+            mcpStatus = MCPInstaller.status(at: projectDir)
+        } label: {
+            switch mcpStatus {
+            case .installed:
+                Label("MCP ready", systemImage: "checkmark.seal")
+            case .installedButScriptMissing:
+                Label("Repair MCP", systemImage: "exclamationmark.triangle")
+            case .noScriptAvailable:
+                Label("MCP unavailable", systemImage: "xmark.seal")
+            default:
+                Label("Install MCP", systemImage: "puzzlepiece.extension")
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("Give agents signal access via .mcp.json (dreamux-signals)")
+        .onAppear { mcpStatus = MCPInstaller.status(at: projectDir) }
+    }
+
     private var filterBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -119,6 +146,8 @@ struct SignalsView: View {
                 }
                 .toggleStyle(.switch)
                 .controlSize(.mini)
+
+                mcpStatusButton
 
                 Button(role: .destructive) {
                     signals.clear()

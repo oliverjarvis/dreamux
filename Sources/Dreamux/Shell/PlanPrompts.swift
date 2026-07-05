@@ -38,6 +38,10 @@ enum PlanPrompts {
         progress from that file.
         - Commit exactly as the plan's steps direct, inside the relevant \
         repo subfolder.
+        - The `dreamux-signals` MCP is available: `signals_query` / \
+        `signals_recent` read this project's live service logs (useful \
+        when a dev server misbehaves), and `signals_emit` records \
+        findings the app surfaces in its Signals page.
         - Stop and ask if a step fails rather than improvising around it.
 
         Begin with Task 1's first unchecked step.

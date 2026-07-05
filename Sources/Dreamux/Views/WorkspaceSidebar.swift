@@ -798,6 +798,7 @@ struct WorkspaceSidebar: View {
         let session = store.session(for: workspace)
         DocStore.ensureDocsHome(at: repoStore.project.rootPath)
         docStore.refresh()
+        MCPInstaller.installIfNeeded(at: repoStore.project.rootPath.path)
         guard let tab = session.reuseOrOpenPlanningTab(
             at: repoStore.project.rootPath.path) else { return }
         tab.startIfNeeded()

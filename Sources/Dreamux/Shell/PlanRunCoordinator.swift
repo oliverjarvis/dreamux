@@ -74,6 +74,7 @@ final class PlanRunCoordinator {
             : PlanPrompts.runPlan(planRelativePath: pathInFeature, docsLinkName: docsLink)
 
         let session = workspaceStore.session(for: workspace)
+        MCPInstaller.installIfNeeded(at: featureDir.path)
         if let tab = session.openPlanAgentTab(
             at: featureDir.path,
             title: "plan: \(branchName)",

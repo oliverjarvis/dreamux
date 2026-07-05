@@ -259,7 +259,7 @@ struct ContentView: View {
                 scope: store.workspaces.first(where: { $0.id == workspaceID })
             )
         case .signals:
-            SignalsView(signals: signals, runners: runners)
+            SignalsView(signals: signals, runners: runners, projectDir: repoStore.project.rootPath.path)
         }
     }
 
