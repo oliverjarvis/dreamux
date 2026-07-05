@@ -98,40 +98,13 @@ struct TabBarView: View {
         .background(tabBarBackground)
         .saturation(shouldShowFullSaturation ? 1.0 : 0)
         // Whole-strip file drop target: on/between tabs and in the empty
-        // trailing area. Attached at the bar's outer container (after the
-        // per-tab/end-zone reorder `.onDrop(of: [.text])`s, which are on
-        // nested child views) so it only catches drags those don't claim.
-        // Tab-reorder drags carry a JSON string via `.text`; Finder file
-        // drags don't advertise `.text`, so they fall through untouched.
-        // The `.contentShape` above makes the full-width bar (including
-        // the trailing run-off) a valid drop target even where there's
-        // no visible content. Classic `.onDrop` + NSItemProvider rather
-        // than `.dropDestination(for: URL.self)`: Transferable's URL
-        // import targets on the type match but fails to decode providers
-        // that only carry `public.file-url` (e.g. NSItemProvider(object:
-        // NSURL) drags), silently rejecting the drop.
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            guard !providers.isEmpty else { return false }
-            let group = DispatchGroup()
-            var dropped: [URL] = []
-            let lock = NSLock()
-            for provider in providers {
-                group.enter()
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let url {
-                        lock.lock()
-                        dropped.append(url)
-                        lock.unlock()
-                    }
-                    group.leave()
-                }
-            }
-            group.notify(queue: .main) {
-                guard !dropped.isEmpty else { return }
-                controller.notifyFileDrop(dropped, inPane: pane.id)
-            }
-            return true
-        }
+        // trailing area. SwiftUI's `.onDrop`/`.dropDestination` never
+        // fired here (see `TabBarFileDropAnchor`'s doc comment for why),
+        // so this is a window-level AppKit overlay frame-synced to the
+        // bar instead of a SwiftUI drop modifier.
+        .background(TabBarFileDropAnchor { urls in
+            controller.notifyFileDrop(urls, inPane: pane.id)
+        })
     }
 
     // MARK: - Tab Item
@@ -374,14 +347,8 @@ struct TabDropDelegate: DropDelegate {
         DropProposal(operation: .move)
     }
 
-    /// Only claim actual tab drags. Type-sniffing (`.text`) is not
-    /// enough: NSURL-backed file drags also expose a plain-text
-    /// representation, so a type-based claim swallows file drops meant
-    /// for the bar-level file handler (and flashes the reorder
-    /// indicator at them). `draggingTab` is set when a tab drag
-    /// actually starts and cleared when it lands.
     func validateDrop(info: DropInfo) -> Bool {
-        controller.draggingTab != nil
+        info.hasItemsConforming(to: [.text])
     }
 
     private func decodeTransfer(from string: String) -> TabTransferData? {
