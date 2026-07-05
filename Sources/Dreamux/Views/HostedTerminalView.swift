@@ -1,5 +1,6 @@
 import SwiftUI
 import GhosttyTerminal
+import UniformTypeIdentifiers
 
 /// Hosts a session-owned terminal NSView (see `TabSession.terminalView`).
 /// Replaces the package's `TerminalSurfaceView`, which creates a fresh
@@ -17,6 +18,21 @@ struct HostedTerminalView: View {
             // Same light/dark adoption `TerminalSurfaceView` performs.
             .onChange(of: colorScheme, initial: true) {
                 session.viewState.adopt(colorScheme: colorScheme)
+            }
+            // Dropping files types their shell-escaped paths into THIS
+            // terminal (the drop target picks the tab — no "active tab"
+            // guessing). Trailing space per path matches Terminal.app.
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                for provider in providers {
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        guard let url else { return }
+                        let text = FileTreeOperations.shellEscaped(url.path) + " "
+                        Task { @MainActor in
+                            session.send(text)
+                        }
+                    }
+                }
+                return !providers.isEmpty
             }
     }
 }
