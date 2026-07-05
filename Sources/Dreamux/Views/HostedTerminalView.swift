@@ -41,19 +41,86 @@ private struct HostedTerminalRepresentable: NSViewRepresentable {
     }
 }
 
-/// AppKit drop shim around the terminal. SwiftUI's `.onDrop` on the
-/// representable proved unreliable with an embedded platform view in
-/// the drag-routing path (drops never reached the handler), so the
-/// container registers as the drag destination itself — deterministic
-/// AppKit, nothing deeper registers to preempt it.
+/// Container for the terminal view that maintains a window-level file-
+/// drop overlay for its region.
 ///
-/// Dropping files types their shell-escaped paths into THIS terminal
-/// (the drop target picks the tab — no "active tab" guessing). One
-/// joined send keeps multi-file drops in pasteboard order; trailing
-/// space per path matches Terminal.app. No newline — even a claude
-/// tab just gets composer text, never a submitted prompt.
+/// Why an overlay instead of a drop handler here: SwiftUI's platform-
+/// view host blocks drag-destination routing into its subtree — both
+/// `registerForDraggedTypes` on views inside it and `.dropDestination`
+/// on the representable go silent (verified empirically: a pure-SwiftUI
+/// sibling region targeted fine while this whole subtree never did).
+/// The only reliable drop target is a view OUTSIDE that subtree, so the
+/// container keeps a transparent, click-through sibling of the window's
+/// hosting view frame-synced over itself.
 final class TerminalDropContainer: NSView {
     weak var session: TabSession?
+    private var overlay: TerminalDropOverlay?
+
+    func attach(_ view: NSView) {
+        guard view.superview !== self else { return }
+        view.frame = bounds
+        view.autoresizingMask = [.width, .height]
+        addSubview(view)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        syncOverlay()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        syncOverlay()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        syncOverlay()
+    }
+
+    override func layout() {
+        super.layout()
+        syncOverlay()
+    }
+
+    /// Create/position the overlay while this terminal is visible in a
+    /// window; tear it down when hidden (keepAllAlive keeps offstage
+    /// tabs mounted — a stale overlay would misroute drops meant for
+    /// the tab actually on screen) or unparented (tab closed/moved).
+    private func syncOverlay() {
+        guard let window, let host = window.contentView,
+              !isHiddenOrHasHiddenAncestor else {
+            overlay?.removeFromSuperview()
+            overlay = nil
+            return
+        }
+        let target = overlay ?? {
+            let fresh = TerminalDropOverlay()
+            fresh.container = self
+            overlay = fresh
+            return fresh
+        }()
+        if target.superview !== host {
+            host.addSubview(target, positioned: .above, relativeTo: nil)
+        }
+        target.frame = convert(bounds, to: host)
+    }
+}
+
+/// Transparent, click-through drop target parented at window level —
+/// outside the SwiftUI platform-view subtree that swallows drag
+/// routing. `hitTest` returns nil so every mouse event passes through
+/// to the terminal beneath; drag-destination discovery goes by
+/// registered types, which is exactly the one signal we want to catch.
+///
+/// Dropping files types their shell-escaped paths into the OWNING
+/// terminal (the drop target is frame-locked to one tab — no "active
+/// tab" guessing). One joined send keeps multi-file drops in
+/// pasteboard order; trailing space per path matches Terminal.app. No
+/// newline — even a claude tab just gets composer text, never a
+/// submitted prompt.
+final class TerminalDropOverlay: NSView {
+    weak var container: TerminalDropContainer?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -63,12 +130,7 @@ final class TerminalDropContainer: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func attach(_ view: NSView) {
-        guard view.superview !== self else { return }
-        view.frame = bounds
-        view.autoresizingMask = [.width, .height]
-        addSubview(view)
-    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         canReadFileURLs(sender) ? .copy : []
@@ -85,7 +147,7 @@ final class TerminalDropContainer: NSView {
         let text = urls
             .map { FileTreeOperations.shellEscaped($0.path) + " " }
             .joined()
-        session?.send(text)
+        container?.session?.send(text)
         return true
     }
 
