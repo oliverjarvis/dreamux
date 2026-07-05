@@ -139,7 +139,19 @@ enum LibraryScanner {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles])) ?? []
         return entries
-            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+            .filter { entry in
+                // Test directory-ness on the RESOLVED target: SkillLinker
+                // (and the skills.sh CLI) populate skill dirs as symlinks,
+                // and a symlink's own dirent reports isDirectory == false
+                // even when it points at a perfectly readable directory.
+                // Filtering on the raw dirent would silently drop every
+                // linked skill; the resolved-path dedup in scanSkills then
+                // keeps mirrors from listing twice.
+                var isDir: ObjCBool = false
+                return FileManager.default.fileExists(
+                    atPath: entry.resolvingSymlinksInPath().path,
+                    isDirectory: &isDir) && isDir.boolValue
+            }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 

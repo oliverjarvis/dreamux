@@ -117,4 +117,26 @@ final class LibraryScannerTests: XCTestCase {
             accessiblePlugins: [])
         XCTAssertEqual(items.filter { $0.name == "one" }.count, 1)
     }
+
+    /// SkillLinker populates worktrees (and the skills.sh CLI populates
+    /// project roots) with SYMLINKED skill dirs — a skill present ONLY
+    /// via symlink must still be found. The naive dirent isDirectory
+    /// check reports false for symlinks-to-directories and silently
+    /// dropped every linked skill.
+    func testSymlinkOnlySkillIsFound() throws {
+        let project = dir.appendingPathComponent("proj")
+        let external = dir.appendingPathComponent("elsewhere/skills")
+        try makeSkill(at: external, name: "linked-only", description: "via symlink")
+        let claudeSkills = project.appendingPathComponent(".claude/skills")
+        try FileManager.default.createDirectory(at: claudeSkills, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: claudeSkills.appendingPathComponent("linked-only"),
+            withDestinationURL: external.appendingPathComponent("linked-only"))
+
+        let items = LibraryScanner.scanSkills(
+            projectRoot: project, home: dir.appendingPathComponent("home"),
+            accessiblePlugins: [])
+        XCTAssertEqual(items.filter { $0.name == "linked-only" }.count, 1,
+                       "symlink-only skills must be enumerated")
+    }
 }
