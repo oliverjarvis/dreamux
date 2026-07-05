@@ -34,6 +34,16 @@ struct ContentView: View {
     @State private var showCreateProject = false
     /// The active workspace's git HEAD summary (header chip) — polled.
     @State private var gitStatus: GitHeadStatus?
+    /// The worktree the chip's `gitStatus` was resolved against — stashed
+    /// alongside it so the commit-trail popover can run git commands
+    /// against the exact same checkout without re-resolving it.
+    @State private var gitWorktree: URL?
+    /// The chosen repo's default branch, for the popover's "diff vs
+    /// base" affordance and to scope `commitLog` to this branch's own
+    /// commits.
+    @State private var gitDefaultBranch: String?
+    /// Whether the git chip's commit-trail popover is showing.
+    @State private var showCommitTrail = false
     /// Appearance knobs (Settings window) — applied live.
     @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
     @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
@@ -226,7 +236,15 @@ struct ContentView: View {
         // three cheap git calls against the active worktree.
         .task(id: store.activeID) {
             while !Task.isCancelled {
-                gitStatus = await resolveGitStatus()
+                if let resolved = await resolveGitStatus() {
+                    gitStatus = resolved.status
+                    gitWorktree = resolved.worktree
+                    gitDefaultBranch = resolved.defaultBranch
+                } else {
+                    gitStatus = nil
+                    gitWorktree = nil
+                    gitDefaultBranch = nil
+                }
                 try? await Task.sleep(for: .seconds(5))
             }
         }
@@ -453,36 +471,54 @@ struct ContentView: View {
                     })
             }
             // Git chip: the active workspace's worktree branch, HEAD
-            // short-SHA, and working-tree diff totals.
+            // short-SHA, and working-tree diff totals. Clicking opens
+            // the commit-trail popover for this worktree.
             if let git = gitStatus {
-                HStack(spacing: 8) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                        Text(git.branch)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Text(git.shortSHA)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(.tertiary)
-                    }
-                    if git.insertions > 0 || git.deletions > 0 {
+                Button {
+                    showCommitTrail = true
+                } label: {
+                    HStack(spacing: 8) {
                         HStack(spacing: 4) {
-                            Text("+\(git.insertions)")
-                                .foregroundStyle(.green)
-                            Text("−\(git.deletions)")
-                                .foregroundStyle(.red)
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                            Text(git.branch)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Text(git.shortSHA)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.tertiary)
                         }
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        if git.insertions > 0 || git.deletions > 0 {
+                            HStack(spacing: 4) {
+                                Text("+\(git.insertions)")
+                                    .foregroundStyle(.green)
+                                Text("−\(git.deletions)")
+                                    .foregroundStyle(.red)
+                            }
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        }
+                    }
+                    .font(.system(size: 11))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule().fill(Color.primary.opacity(0.05)))
+                }
+                .buttonStyle(.plain)
+                .help("Commit trail of the active worktree")
+                .popover(isPresented: $showCommitTrail, arrowEdge: .bottom) {
+                    if let worktree = gitWorktree, let git = gitStatus {
+                        CommitTrailPopover(
+                            worktreeURL: worktree,
+                            branch: git.branch,
+                            defaultBranch: gitDefaultBranch,
+                            openDiff: { request in
+                                showCommitTrail = false
+                                openDiffTab(request)
+                            })
                     }
                 }
-                .font(.system(size: 11))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(
-                    Capsule().fill(Color.primary.opacity(0.05)))
-                .help("HEAD of the active workspace's worktree")
             }
             // The file-explorer toggle lives in the card's own header,
             // reference-style — there is no window toolbar. ⌥⌘E is the
@@ -510,7 +546,12 @@ struct ContentView: View {
     /// The header chip's data: find the active workspace's worktree (its
     /// branch across linked repos, else the first repo's default-branch
     /// checkout for scratch workspaces) and summarize HEAD + diff totals.
-    private func resolveGitStatus() async -> GitHeadStatus? {
+    /// Returns the resolved worktree and the *chosen* repo's default
+    /// branch alongside the status — the commit-trail popover needs both
+    /// to run its own git commands without re-resolving the candidate
+    /// repo (which would be wrong for multi-repo projects if it just
+    /// grabbed `repositories.first`).
+    private func resolveGitStatus() async -> (status: GitHeadStatus, worktree: URL, defaultBranch: String)? {
         guard let workspace = store.activeWorkspace else { return nil }
         let repos = repoStore.repositories
         let candidates = workspace.linkedRepoIDs.isEmpty
@@ -524,7 +565,8 @@ struct ContentView: View {
                 forBranch: repo.defaultBranch, in: repo.rootURL)
         }
         guard let worktree else { return nil }
-        return await GitOperations.headStatus(in: worktree)
+        guard let status = await GitOperations.headStatus(in: worktree) else { return nil }
+        return (status: status, worktree: worktree, defaultBranch: repo.defaultBranch)
     }
 
     /// Header play: the same planning the sidebar rows use — `startPlan`
@@ -577,6 +619,15 @@ struct ContentView: View {
         store.activate(workspace.id)
         sidebarMode = .workspace
         store.session(for: workspace).openFileTab(at: url, revealingLine: line)
+    }
+
+    /// Route a diff request into the active workspace's pane, flipping
+    /// to the terminal/tab view so the new tab is visible (same move
+    /// as openFile).
+    private func openDiffTab(_ request: DiffRequest) {
+        guard let workspace = store.activeWorkspace else { return }
+        sidebarMode = .workspace
+        store.session(for: workspace).openDiffTab(request)
     }
 
     /// Bridge for this project window. `nil` whenever the e2e harness is
