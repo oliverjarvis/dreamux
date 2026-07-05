@@ -160,7 +160,11 @@ struct ContentView: View {
                                     store: store,
                                     repoStore: repoStore,
                                     tree: fileTree,
-                                    onOpenFile: openFile
+                                    onOpenFile: openFile,
+                                    onSendToTerminal: { text in
+                                        guard let workspace = store.activeWorkspace else { return false }
+                                        return store.session(for: workspace).sendToFocusedTerminal(text)
+                                    }
                                 )
                                 .frame(width: fileTreeWidth)
                             }
