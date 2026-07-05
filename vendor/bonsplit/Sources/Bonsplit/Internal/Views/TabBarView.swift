@@ -102,13 +102,34 @@ struct TabBarView: View {
         // per-tab/end-zone reorder `.onDrop(of: [.text])`s, which are on
         // nested child views) so it only catches drags those don't claim.
         // Tab-reorder drags carry a JSON string via `.text`; Finder file
-        // drags don't advertise `.text`, so they fall through to this
-        // outer `.dropDestination` untouched. The `.contentShape` above
-        // makes the full-width bar (including the trailing run-off) a
-        // valid drop target even where there's no visible content.
-        .dropDestination(for: URL.self) { urls, _ in
-            guard !urls.isEmpty else { return false }
-            controller.notifyFileDrop(urls, inPane: pane.id)
+        // drags don't advertise `.text`, so they fall through untouched.
+        // The `.contentShape` above makes the full-width bar (including
+        // the trailing run-off) a valid drop target even where there's
+        // no visible content. Classic `.onDrop` + NSItemProvider rather
+        // than `.dropDestination(for: URL.self)`: Transferable's URL
+        // import targets on the type match but fails to decode providers
+        // that only carry `public.file-url` (e.g. NSItemProvider(object:
+        // NSURL) drags), silently rejecting the drop.
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard !providers.isEmpty else { return false }
+            let group = DispatchGroup()
+            var dropped: [URL] = []
+            let lock = NSLock()
+            for provider in providers {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    if let url {
+                        lock.lock()
+                        dropped.append(url)
+                        lock.unlock()
+                    }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) {
+                guard !dropped.isEmpty else { return }
+                controller.notifyFileDrop(dropped, inPane: pane.id)
+            }
             return true
         }
     }
