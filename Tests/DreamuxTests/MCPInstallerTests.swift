@@ -23,13 +23,13 @@ final class MCPInstallerTests: XCTestCase {
         try? FileManager.default.removeItem(at: dir)
     }
 
-    private func readServers() throws -> [String: Any] {
-        let data = try Data(contentsOf: dir.appendingPathComponent(".mcp.json"))
+    private func readServers(in base: URL? = nil) throws -> [String: Any] {
+        let data = try Data(contentsOf: (base ?? dir).appendingPathComponent(".mcp.json"))
         let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         return (root?["mcpServers"] as? [String: Any]) ?? [:]
     }
 
-    func testFreshInstallWritesEntryWithProjectEnv() throws {
+    func testFreshInstallDefaultsEnvScopeToInstallDir() throws {
         let result = MCPInstaller.installIfNeeded(at: dir.path)
         guard case .installed = result else {
             return XCTFail("expected .installed, got \(result)")
@@ -39,10 +39,32 @@ final class MCPInstallerTests: XCTestCase {
         XCTAssertNotNil(entry)
         let env = entry?["env"] as? [String: String]
         XCTAssertEqual(env?["DREAMUX_PROJECT_DIR"], dir.path,
-                       "agents run in feature subdirs; scoping must pin the project root")
+                       "no explicit scope: the install dir IS the project root "
+                       + "(planning tab, sidebar, SignalsView repair button)")
         if case .installed = MCPInstaller.status(at: dir.path) {} else {
             XCTFail("status should read back installed")
         }
+    }
+
+    func testExplicitProjectScopeOverridesInstallDirInEnv() throws {
+        // Plan runs install into `<project>/features/<branch>` (where the
+        // agent runs), but every signal is tagged with the project ROOT
+        // (ProjectSession). The env must carry the root, or the agent's
+        // queries and emits are scoped to a dir no signal ever matches.
+        let featureDir = dir.appendingPathComponent("features/my-branch")
+        try FileManager.default.createDirectory(
+            at: featureDir, withIntermediateDirectories: true)
+
+        let result = MCPInstaller.installIfNeeded(
+            at: featureDir.path, projectScope: dir.path)
+        guard case .installed = result else {
+            return XCTFail("expected .installed, got \(result)")
+        }
+        let servers = try readServers(in: featureDir)
+        let entry = servers["dreamux-signals"] as? [String: Any]
+        let env = entry?["env"] as? [String: String]
+        XCTAssertEqual(env?["DREAMUX_PROJECT_DIR"], dir.path,
+                       "agents run in feature subdirs; scoping must pin the project root")
     }
 
     func testExistingServersArePreserved() throws {

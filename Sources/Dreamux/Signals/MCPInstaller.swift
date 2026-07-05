@@ -204,18 +204,39 @@ enum MCPInstaller {
     /// `dreamux-signals` MCP server entry points at the bundled
     /// compiled binary (preferred) or the dev `.ts` script
     /// (fallback). Returns what we did.
-    /// - Parameter force: when true, rewrites even if an existing
-    ///   entry already references a working file. The manual
-    ///   "Install MCP" / "MCP ready" button passes this so it
-    ///   upgrades a still-running `.ts`-form entry to the bundled
-    ///   binary. Auto-install at env init defaults to `false` to
-    ///   avoid `git status` churn for committed `.mcp.json` files.
+    ///
+    /// Two distinct directories are in play and must not be conflated:
+    /// - Parameters:
+    ///   - installDir: where `.mcp.json` lands — the directory the
+    ///     agent session runs in (Claude Code discovers project-level
+    ///     MCP config from its cwd). For plan runs this is the feature
+    ///     aggregation dir (`<project>/features/<branch>`), not the
+    ///     project root.
+    ///   - projectScope: the project ROOT every signal is tagged with
+    ///     (the `project_dir` tag, see ProjectSession). Written as the
+    ///     server's `DREAMUX_PROJECT_DIR` env so the MCP bridge's
+    ///     queries and `signals_emit` auto-tags line up with the app's
+    ///     own signals. Defaults to `installDir` for the common case
+    ///     where the agent runs at the project root; pass it whenever
+    ///     the install dir is a subdirectory, or the agent's signal
+    ///     reads come back empty and its emits never surface in the
+    ///     app's Signals page.
+    ///   - force: when true, rewrites even if an existing
+    ///     entry already references a working file. The manual
+    ///     "Install MCP" / "MCP ready" button passes this so it
+    ///     upgrades a still-running `.ts`-form entry to the bundled
+    ///     binary. Auto-install at env init defaults to `false` to
+    ///     avoid `git status` churn for committed `.mcp.json` files.
     @discardableResult
-    static func installIfNeeded(at projectDir: String, force: Bool = false) -> InstallResult {
+    static func installIfNeeded(
+        at installDir: String,
+        projectScope: String? = nil,
+        force: Bool = false
+    ) -> InstallResult {
         guard let runner = resolveRunner() else {
             return .skippedNoScript
         }
-        let url = mcpFile(at: projectDir)
+        let url = mcpFile(at: installDir)
 
         var rootDict: [String: Any] = [:]
         if FileManager.default.fileExists(atPath: url.path) {
@@ -243,7 +264,7 @@ enum MCPInstaller {
 
         let desired: [String: Any]
         let installedPath: String
-        let env = ["DREAMUX_PROJECT_DIR": projectDir]
+        let env = ["DREAMUX_PROJECT_DIR": projectScope ?? installDir]
         switch runner {
         case .compiledBinary(let path):
             desired = ["command": path, "env": env]

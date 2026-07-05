@@ -74,7 +74,13 @@ final class PlanRunCoordinator {
             : PlanPrompts.runPlan(planRelativePath: pathInFeature, docsLinkName: docsLink)
 
         let session = workspaceStore.session(for: workspace)
-        MCPInstaller.installIfNeeded(at: featureDir.path)
+        // Install where the agent runs (the feature dir — Claude Code
+        // reads `.mcp.json` from its cwd) but scope signals to the
+        // project ROOT: that's what ProjectSession tags every signal
+        // with, so anything else leaves the agent reading and writing
+        // a project_dir no signal ever matches.
+        MCPInstaller.installIfNeeded(
+            at: featureDir.path, projectScope: project.rootPath.path)
         if let tab = session.openPlanAgentTab(
             at: featureDir.path,
             title: "plan: \(branchName)",
