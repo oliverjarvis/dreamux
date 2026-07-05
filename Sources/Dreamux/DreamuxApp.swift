@@ -6,6 +6,10 @@ struct DreamuxApp: App {
     @State private var projects = ProjectStore()
 
     init() {
+        // Touch the signals bus so SQLite + the emit socket come up
+        // before any project session or external MCP client needs them.
+        _ = SignalBus.shared
+
         if let socketPath = E2EMode.socketPath {
             // e2e harness launch: skip the notification permission
             // dialog (nothing can click it mid-run) and bring the
