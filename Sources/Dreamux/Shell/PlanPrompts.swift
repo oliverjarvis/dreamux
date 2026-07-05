@@ -29,12 +29,7 @@ enum PlanPrompts {
     static func runPlan(
         planRelativePath: String, docsLinkName: String, autoCommit: Bool = true
     ) -> String {
-        let autoCommitBullet = autoCommit
-            ? "\n- After finishing each task — all its checkboxes ticked — commit the work "
-            + "in every repo subfolder you touched: `git add -A && git commit` with the "
-            + "commit message set to the task's full heading text (e.g. \"Task 2: Wire the "
-            + "store\"). One commit per task per repo."
-            : ""
+        let autoCommitBullet = Self.autoCommitBullet(autoCommit)
         return """
         You're in a Dreamux feature directory (see DREAMUX.md — each \
         subfolder is a git worktree for one repo; `\(docsLinkName)/` is the \
@@ -64,12 +59,7 @@ enum PlanPrompts {
     static func resumePlan(
         planRelativePath: String, docsLinkName: String, autoCommit: Bool = true
     ) -> String {
-        let autoCommitBullet = autoCommit
-            ? "\n- After finishing each task — all its checkboxes ticked — commit the work "
-            + "in every repo subfolder you touched: `git add -A && git commit` with the "
-            + "commit message set to the task's full heading text (e.g. \"Task 2: Wire the "
-            + "store\"). One commit per task per repo."
-            : ""
+        let autoCommitBullet = Self.autoCommitBullet(autoCommit)
         return """
         You're back in a Dreamux feature directory (see DREAMUX.md; \
         `\(docsLinkName)/` is the shared project docs home). The plan at \
@@ -163,6 +153,22 @@ enum PlanPrompts {
     static func planUpdated(taskRange: String, planRelativePath: String) -> String {
         "The plan file \(planRelativePath) has been updated — new tasks were appended "
             + "(\(taskRange)). Re-read the plan and fold them into your remaining work."
+    }
+
+    /// The per-task auto-commit contract bullet shared by `runPlan` and
+    /// `resumePlan` (single source for this contract text) — empty
+    /// string when the Workflow "Commit after each task" toggle is off.
+    /// Tells the agent the backstop may have already committed for it:
+    /// without this, the "Stop and ask if a step fails" instruction
+    /// could park the agent on a `git commit` that fails with "nothing
+    /// to commit" because the app's backstop front-ran it.
+    private static func autoCommitBullet(_ enabled: Bool) -> String {
+        guard enabled else { return "" }
+        return "\n- After finishing each task — all its checkboxes ticked — commit the work "
+            + "in every repo subfolder you touched: `git add -A && git commit` with the "
+            + "commit message set to the task's full heading text (e.g. \"Task 2: Wire the "
+            + "store\"). One commit per task per repo. If the commit reports nothing to "
+            + "commit, the app's backstop already committed for you — continue, don't stop."
     }
 
     /// Collapse every run of whitespace (including newlines) to one space

@@ -72,6 +72,18 @@ final class PlanQueueController {
     /// stale events (relaunch/resume safety). In-memory only: a fresh
     /// launch re-seeds, which is exactly the conservative behavior we
     /// want for the backstop.
+    ///
+    /// A task that gets unchecked and later re-checked (a course
+    /// correction reopening it, say) deliberately re-fires
+    /// `onTaskCompleted` — the diff against `previous` sees it drop out
+    /// of the set and then reappear, and the re-completion is treated as
+    /// a real boundary worth another backstop commit, not a duplicate to
+    /// suppress. A torn read of the plan file that momentarily reports a
+    /// smaller completed set has the same observable effect (a
+    /// completion appears to repeat once the read catches up) and is
+    /// accepted for the same reason: re-firing the backstop on an
+    /// already-clean tree is a no-op (`hasUncommittedChanges` guards
+    /// it), so the only cost is a redundant check, never lost work.
     @ObservationIgnored private var observedCompletedTasks: [String: Set<String>] = [:]
 
     /// How long an unchanged, quiescent session may sit before the

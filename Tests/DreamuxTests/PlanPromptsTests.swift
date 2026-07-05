@@ -211,16 +211,22 @@ final class PlanPromptsTests: XCTestCase {
         XCTAssertTrue(on.contains("commit the work"),
                       "default (true) includes the per-task commit bullet")
         XCTAssertTrue(on.contains("full heading text"))
+        XCTAssertTrue(on.contains("nothing to commit"),
+                      "the backstop-front-run continuation sentence must be present")
         let off = PlanPrompts.runPlan(
             planRelativePath: "docs/p.md", docsLinkName: "docs", autoCommit: false)
         XCTAssertFalse(off.contains("full heading text"))
+        XCTAssertFalse(off.contains("nothing to commit"))
     }
 
     func testResumePlanAutoCommitBulletFollowsFlag() {
         let on = PlanPrompts.resumePlan(planRelativePath: "docs/p.md", docsLinkName: "docs")
         XCTAssertTrue(on.contains("full heading text"))
+        XCTAssertTrue(on.contains("nothing to commit"),
+                      "the backstop-front-run continuation sentence must be present")
         let off = PlanPrompts.resumePlan(
             planRelativePath: "docs/p.md", docsLinkName: "docs", autoCommit: false)
         XCTAssertFalse(off.contains("full heading text"))
+        XCTAssertFalse(off.contains("nothing to commit"))
     }
 }

@@ -280,6 +280,23 @@ final class ProjectSession {
     /// `featureNameForPlan` above: ledger record → feature name →
     /// workspace by name → its linked repos → each repo's worktree for
     /// that branch.
+    ///
+    /// This runs concurrently with the agent's own `git commit`, and the
+    /// following races are ACCEPTED rather than designed away:
+    /// (a) the backstop may front-run the agent's commit — its "(auto)"
+    /// message wins and the agent's subsequent `git commit` becomes a
+    /// no-op ("nothing to commit"); `PlanPrompts` tells the agent to
+    /// continue past that rather than stop. (b) a `git add -A` here,
+    /// firing within the queue's ~3s poll window, may scoop files the
+    /// agent already started editing for its NEXT task — accepted,
+    /// nothing is lost, attribution is merely coarse (those edits ride
+    /// along in this commit instead of the next one). (c) a concurrent
+    /// backstop commit and agent commit can collide on git's
+    /// `index.lock`; the loser's `git` invocation fails, is NSLog'd here,
+    /// and the queue continues undisturbed. (d) when several tasks flip
+    /// fully-checked within one poll tick, the first event's commit
+    /// sweeps every leftover, so later same-tick events find a clean
+    /// tree and simply skip (see `hasUncommittedChanges` guard below).
     private static func backstopCommit(
         message: String, planPath: String,
         docStore: DocStore?, workspaceStore: WorkspaceStore?, repoStore: RepoStore?
