@@ -222,6 +222,70 @@ final class RunnerLifecycleTests: XCTestCase {
         XCTAssertTrue(info.cwd.hasSuffix("repos/portenv-server/feat-b"), "got cwd \(info.cwd)")
     }
 
+    // MARK: - 4b. Scoped restart touches only its own branch
+
+    /// Regression test for the header popover's per-row Restart: it
+    /// must scope to the row's own branch, not `restart(_:)`'s
+    /// every-branch sweep. For a concurrent-safe (`port_env`) runner
+    /// live on two worktrees, restarting one branch's instance must
+    /// leave the sibling branch's instance running throughout — same
+    /// pid, same port, uninterrupted — while the targeted branch comes
+    /// back as a fresh process.
+    @MainActor
+    func testScopedRestartOnlyReplacesTargetBranchInstance() async throws {
+        try skipUnlessPython3Works()
+        let project = try sandbox.makeProject(named: "scoped-restart")
+        try installWorktree(app: "portenv-server", branch: "main", project: project)
+        try installWorktree(app: "portenv-server", branch: "feat-b", project: project)
+
+        let manager = makeManager(project: project, toml: portenvTOML(basePort: 4680))
+        let runner = try XCTUnwrap(manager.runners.first)
+        let mainKey = RunnerInstanceKey(runnerName: "portenv-server", branch: "main")
+        let featKey = RunnerInstanceKey(runnerName: "portenv-server", branch: "feat-b")
+
+        manager.start(runner)
+        _ = try await fetchServerInfo(port: 4680)
+        manager.setActiveBranch("feat-b", for: runner)
+        manager.start(runner)
+        _ = try await fetchServerInfo(port: 4681)
+
+        let oldMainPid = try XCTUnwrap(runningPID(of: manager, runner: "portenv-server", branch: "main"))
+        let oldFeatPid = try XCTUnwrap(runningPID(of: manager, runner: "portenv-server", branch: "feat-b"))
+
+        // Scoped restart targets main only — feat-b must never be
+        // touched.
+        await manager.restart(runner, on: "main")
+
+        try await waitUntil("the old main pid to be reaped") {
+            kill(oldMainPid, 0) != 0
+        }
+        try await waitUntil("main to come back up on a fresh pid") {
+            manager.statusByInstance[mainKey]?.isRunning == true
+        }
+
+        XCTAssertEqual(
+            kill(oldFeatPid, 0), 0,
+            "feat-b's instance must survive a main-scoped restart untouched"
+        )
+        XCTAssertEqual(
+            runningPID(of: manager, runner: "portenv-server", branch: "feat-b"), oldFeatPid,
+            "feat-b must still be its original process, not restarted"
+        )
+        XCTAssertEqual(manager.assignedPorts[featKey], 4681, "feat-b keeps its original port")
+
+        let newMainPid = try XCTUnwrap(runningPID(of: manager, runner: "portenv-server", branch: "main"))
+        XCTAssertNotEqual(newMainPid, oldMainPid, "main must be a fresh process after its restart")
+        XCTAssertEqual(manager.assignedPorts[mainKey], 4680, "main's port is reused once released")
+
+        let mainInfo = try await fetchServerInfo(port: 4680)
+        XCTAssertTrue(mainInfo.cwd.hasSuffix("repos/portenv-server/main"), "got cwd \(mainInfo.cwd)")
+        let featInfo = try await fetchServerInfo(port: 4681)
+        XCTAssertTrue(
+            featInfo.cwd.hasSuffix("repos/portenv-server/feat-b"),
+            "feat-b must keep serving its own worktree throughout, got cwd \(featInfo.cwd)"
+        )
+    }
+
     // MARK: - 5. Non-concurrent (fixed-port) runner
 
     @MainActor

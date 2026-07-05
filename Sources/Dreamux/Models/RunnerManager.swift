@@ -432,6 +432,11 @@ final class RunnerManager {
     /// We SIGTERM directly rather than running the runner's `stop`
     /// command — typical patterns there are `pkill -f 'turbo dev'`,
     /// which would also kill the replacement we spawn a moment later.
+    ///
+    /// For a single row's action (the header popover's per-row
+    /// Restart), use `restart(_:on:)` instead — this one is only
+    /// correct for the fixed-port switch path, where killing every
+    /// other branch's instance is the point.
     func restart(_ runner: ParsedRunner) async {
         let liveKeys = processes.keys.filter { $0.runnerName == runner.name }
         for key in liveKeys {
@@ -445,6 +450,25 @@ final class RunnerManager {
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
         }
+        start(runner)
+    }
+
+    /// Restart one branch's instance only — the header popover's
+    /// per-row action. Unlike `restart(_:)` (the fixed-port switch
+    /// path, which halts every live instance of the runner), this
+    /// terminates just `branch`'s process, waits for it to die, then
+    /// starts fresh pinned to the same branch. Other worktrees'
+    /// instances are untouched.
+    func restart(_ runner: ParsedRunner, on branch: String) async {
+        let key = RunnerInstanceKey(runnerName: runner.name, branch: branch)
+        if let process = processes[key], process.isRunning {
+            process.terminate()
+            let deadline = Date().addingTimeInterval(3.0)
+            while statusByInstance[key]?.isRunning == true && Date() < deadline {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+        setActiveBranch(branch, for: runner)
         start(runner)
     }
 

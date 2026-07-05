@@ -194,7 +194,7 @@ struct HeaderRunControls: View {
             if row.status.isRunning {
                 if inScope {
                     iconButton("arrow.clockwise", help: "Restart") {
-                        Task { await runners.restart(row.runner) }
+                        Task { await runners.restart(row.runner, on: row.branch) }
                     }
                 }
                 iconButton("stop.fill", help: "Stop") {
