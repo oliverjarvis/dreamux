@@ -123,10 +123,18 @@ final class WorkspaceStore {
         return workspace
     }
 
+    /// The reserved main workspace's id — a literal, deliberately NOT
+    /// derived from stableUUID(forFeature:), so no branch name can ever
+    /// hash-collide with it.
+    private static let reservedMainWorkspaceID =
+        UUID(uuidString: "D5EA0000-0000-4000-8000-000000000A11")!
+
     /// Find-or-create the reserved main-branch workspace. Deterministic
-    /// id (same trick registerFeature uses) so repeated activations and
-    /// relaunches converge on one workspace; linked repos refresh on
-    /// every call because the project's repo set can change.
+    /// id (a fixed literal, not derived from the feature-name hash) so
+    /// repeated activations and relaunches converge on one workspace;
+    /// linked repos refresh on every call because the project's repo set
+    /// can change. This only ensures the workspace exists — it does NOT
+    /// activate it; callers activate explicitly.
     @discardableResult
     func mainWorkspace(
         name: String,
@@ -137,10 +145,11 @@ final class WorkspaceStore {
             workspaces[index].name = name
             workspaces[index].linkedRepoIDs = linkedRepoIDs
             workspaces[index].workingDirectory = workingDirectory
+            sessions[workspaces[index].id]?.workspace = workspaces[index]
             return workspaces[index]
         }
         let workspace = Workspace(
-            id: Self.stableUUID(forFeature: "reserved-main-workspace"),
+            id: Self.reservedMainWorkspaceID,
             name: name,
             symbol: "arrow.triangle.branch",
             workingDirectory: workingDirectory,

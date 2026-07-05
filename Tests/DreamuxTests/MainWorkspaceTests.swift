@@ -37,6 +37,22 @@ final class MainWorkspaceTests: XCTestCase {
         XCTAssertEqual(store.workspaces.filter(\.isMain).count, 1)
     }
 
+    /// The existing-entry refresh path must keep any live session's
+    /// cached workspace in sync, or a session that's already open would
+    /// keep opening new tabs at the stale `workingDirectory`.
+    func testMainWorkspaceRefreshSyncsLiveSession() {
+        let store = makeStore()
+        let main = store.mainWorkspace(
+            name: "main", workingDirectory: "/tmp/proj", linkedRepoIDs: ["web"])
+        let session = store.session(for: main)
+        XCTAssertEqual(session.workspace.workingDirectory, "/tmp/proj")
+
+        _ = store.mainWorkspace(
+            name: "main", workingDirectory: "/tmp/proj2", linkedRepoIDs: ["web"])
+
+        XCTAssertEqual(session.workspace.workingDirectory, "/tmp/proj2")
+    }
+
     /// remove() must refuse the main workspace — nothing in the UI
     /// offers it, but the guard is the invariant, not the UI.
     func testRemoveRefusesMainWorkspace() {
