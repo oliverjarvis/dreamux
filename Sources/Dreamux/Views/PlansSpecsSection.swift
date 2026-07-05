@@ -52,6 +52,10 @@ struct PlansSpecsSection: View {
     /// The failure message of a fizzled auto-run launch for a plan
     /// relative path, if any — rendered as an orange row caption.
     let autoRunFailure: (String) -> String?
+    /// Resolve a task's recorded commits into a diff tab (or explain why
+    /// there's nothing to show) — the task row's context-menu item and
+    /// hover button both call straight through to this.
+    let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
 
     @State private var doneExpanded = false
     @State private var docsExpanded = false
@@ -76,6 +80,10 @@ struct PlansSpecsSection: View {
     /// The row a *Course correct…* was fired from, driving the sheet. One
     /// sheet behind all three entry points; the case carries the anchor.
     @State private var correcting: CorrectionTarget?
+    /// Task row currently under the pointer — drives the hover-revealed
+    /// "View changes" button (`taskRow`), keyed by the task's line so it
+    /// stays lightweight (no per-row `@State`).
+    @State private var hoveredTaskLine: Int?
 
     /// The plan + anchor + header a course correction is being filed against.
     /// Built at the clicked row (task / phase / plan), consumed on submit.
@@ -848,6 +856,21 @@ struct PlansSpecsSection: View {
                         .foregroundStyle(.tertiary)
                 }
                 Spacer(minLength: 0)
+                // Hover button only when at least one step is checked — an
+                // untouched task can't have commits yet.
+                if hoveredTaskLine == task.line, checked > 0 {
+                    Button {
+                        onViewTaskChanges(plan, task)
+                    } label: {
+                        Image(systemName: "plus.forwardslash.minus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("View this task's changes")
+                }
                 Text("\(checked)/\(total)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
@@ -859,12 +882,19 @@ struct PlansSpecsSection: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button("View changes") {
+                onViewTaskChanges(plan, task)
+            }
             Button("Course correct…") {
                 correcting = CorrectionTarget(
                     plan: plan,
                     anchor: .task(line: task.line),
                     description: task.title.isEmpty ? "this task" : task.title)
             }
+        }
+        .onHover { inside in
+            if inside { hoveredTaskLine = task.line }
+            else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
         }
     }
 
