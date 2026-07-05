@@ -21,6 +21,10 @@ struct FileTreePanel: View {
     @State private var renaming: FileNode?
     /// The create sheet's target directory and kind.
     @State private var creating: CreateTarget?
+    /// A just-created file to open once the create sheet has dismissed
+    /// — opening from inside the sheet's confirm action would interleave
+    /// tab creation with the dismissal transaction.
+    @State private var pendingOpen: URL?
 
     private var roots: [FileNode] {
         tree.roots(for: store.activeWorkspace, repositories: repoStore.repositories)
@@ -72,11 +76,14 @@ struct FileTreePanel: View {
                 if target.isDirectory {
                     try FileTreeOperations.createFolder(named: name, in: target.directory)
                 } else {
-                    let url = try FileTreeOperations.createFile(named: name, in: target.directory)
-                    onOpenFile(url)
+                    pendingOpen = try FileTreeOperations.createFile(named: name, in: target.directory)
                 }
             } onDone: {
                 reloadToken = UUID()
+                if let url = pendingOpen {
+                    pendingOpen = nil
+                    onOpenFile(url)
+                }
             }
         }
     }
