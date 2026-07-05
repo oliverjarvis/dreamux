@@ -816,7 +816,21 @@ extension GitOperations {
             guard let output = try? await runGit(
                 ["show", "\(revision):\(path)"], in: worktreeURL)
             else { return nil }
-            return output.contains("\0") ? nil : output
+            if output.contains("\0") { return nil }
+            // runGit's pipe decodes per-chunk as UTF-8 and silently
+            // drops undecodable chunks — a binary blob can therefore
+            // come back truncated or empty with no NUL byte to catch.
+            // Trust the content only when its byte count matches the
+            // blob size git reports; verified empirically that `git
+            // show rev:path` streams the raw blob byte-for-byte (with
+            // or without a trailing newline, including empty blobs),
+            // so this is an exact equality check, not a tolerance.
+            guard let sizeOutput = try? await runGit(
+                ["cat-file", "-s", "\(revision):\(path)"], in: worktreeURL),
+                  let size = Int(sizeOutput.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  output.utf8.count == size
+            else { return nil }
+            return output
         }
         let url = worktreeURL.appendingPathComponent(path)
         guard let data = try? Data(contentsOf: url) else { return nil }

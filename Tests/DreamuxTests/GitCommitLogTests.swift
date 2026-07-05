@@ -87,6 +87,20 @@ final class GitCommitLogTests: XCTestCase {
         XCTAssertEqual(onMain.count, 1, "empty range falls back to HEAD history")
     }
 
+    // MARK: - testCommitLogUnknownBaseFallsBackToHeadHistory
+
+    /// The other fallback trigger: a base branch git can't resolve
+    /// (deleted, typo) must fall back to HEAD history, not return [].
+    func testCommitLogUnknownBaseFallsBackToHeadHistory() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("v1\n", to: "app.txt", in: repoURL)
+        _ = try await commit("Main commit", in: repoURL)
+
+        let log = await GitOperations.commitLog(
+            in: repoURL, baseBranch: "no-such-branch")
+        XCTAssertFalse(log.isEmpty, "unknown base → plain HEAD history")
+    }
+
     // MARK: - testChangedFilesRangeAndWorktree
 
     /// name-status across a range, and against the working tree when
@@ -108,6 +122,26 @@ final class GitCommitLogTests: XCTestCase {
         try write("one\ntwo\nthree\nlocal-edit\n", to: "a.txt", in: repoURL)
         let dirty = await GitOperations.changedFiles(from: "HEAD", to: nil, in: repoURL)
         XCTAssertEqual(dirty.map(\.path), ["a.txt"])
+    }
+
+    // MARK: - testChangedFilesReportsRename
+
+    /// `git diff --name-status` detects renames by default (has since
+    /// git 2.9, no `-M` needed) — a plain `git mv` + commit must surface
+    /// as a single "R…" entry against the new path, not a delete+add.
+    func testChangedFilesReportsRename() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("line one\nline two\nline three\n", to: "old.txt", in: repoURL)
+        let shaA = try await commit("First commit", in: repoURL)
+
+        _ = try await GitOperations.runGit(
+            ["mv", "old.txt", "new.txt"], in: repoURL)
+        let shaB = try await commit("Rename commit", in: repoURL)
+
+        let range = await GitOperations.changedFiles(from: shaA, to: shaB, in: repoURL)
+        XCTAssertTrue(
+            range.contains { $0.status.hasPrefix("R") && $0.path == "new.txt" },
+            "expected a rename entry for new.txt, got \(range)")
     }
 
     // MARK: - testFileContentPerRevisionWorktreeMissingAndBinary
@@ -134,6 +168,42 @@ final class GitCommitLogTests: XCTestCase {
         XCTAssertNil(missing, "b.txt does not exist at shaA")
         let binary = await GitOperations.fileContent(at: "b.bin", revision: nil, in: repoURL)
         XCTAssertNil(binary, "NUL bytes → treat as binary, no diff text")
+    }
+
+    // MARK: - testFileContentRevisionBinaryBlobWithoutNUL
+
+    /// A binary blob with no NUL byte (e.g. a PNG header) must still
+    /// come back nil at a revision: `runGit`'s output pipe decodes each
+    /// chunk as UTF-8 and silently drops undecodable chunks, so a
+    /// genuinely binary blob can round-trip through `git show` with no
+    /// NUL surviving. The byte-count cross-check against `cat-file -s`
+    /// catches that the string is truncated/corrupted relative to the
+    /// real blob.
+    func testFileContentRevisionBinaryBlobWithoutNUL() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        // PNG-like magic bytes: no 0x00 anywhere, but 0xFF/0xFE/0xFA are
+        // not valid standalone UTF-8 continuation bytes, so decoding
+        // drops or mangles them.
+        let bytes = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0xFF, 0xFE, 0xFA])
+        try writeBinary(bytes, to: "img.bin", in: repoURL)
+        let sha = try await commit("Binary commit", in: repoURL)
+
+        let content = await GitOperations.fileContent(at: "img.bin", revision: sha, in: repoURL)
+        XCTAssertNil(content, "NUL-free binary must still be rejected via the byte-count check")
+    }
+
+    // MARK: - testFileContentRevisionEmptyFileIsNotBinary
+
+    /// An empty text file at a revision is legitimate content ("") and
+    /// must not be mistaken for binary/corrupted output — the
+    /// byte-count check (0 == 0) must let it through.
+    func testFileContentRevisionEmptyFileIsNotBinary() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("", to: "empty.txt", in: repoURL)
+        let sha = try await commit("Empty file commit", in: repoURL)
+
+        let content = await GitOperations.fileContent(at: "empty.txt", revision: sha, in: repoURL)
+        XCTAssertEqual(content, "", "empty file is valid text, not binary")
     }
 
     // MARK: - testRootCommitSHA
