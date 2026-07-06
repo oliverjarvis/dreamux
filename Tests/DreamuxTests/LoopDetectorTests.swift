@@ -86,13 +86,13 @@ final class LoopDetectorTests: XCTestCase {
 
     func testNonBashNeedsThreeErrors() {
         // Non-Bash signatures (Edit, Read, etc.) require ≥3 errors.
-        // Two errors is insufficient churn signal.
+        // Two errors out of 4 occurrences is insufficient churn signal.
         let window = [
-            completion("Edit", error: true), completion("Edit", error: false),
-            completion("Edit", error: true), completion("Edit", error: false),
+            completion("Edit", error: false), completion("Edit", error: true),
+            completion("Edit", error: false), completion("Edit", error: true),
         ]
         XCTAssertNil(LoopDetector.detect(window: window))
-        // Add one more error: now it qualifies.
+        // Add one more error: now it has 3 errors and qualifies.
         let window2 = window + [completion("Edit", error: true)]
         XCTAssertEqual(LoopDetector.detect(window: window2), DetectedLoop(signature: "Edit", count: 5))
     }

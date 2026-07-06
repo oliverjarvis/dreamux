@@ -18,10 +18,10 @@ struct DetectedLoop: Equatable, Sendable {
 /// completions. Real-world data (210 transcripts, 39 badge appearances)
 /// showed that tool-name-wide signatures (Edit, Read, etc.) produce
 /// 22 false positives at ≥2 errors — 11-element windows with 9 successes
-/// are common churn, not stuck loops. Bash command-specific signatures
-/// ("Bash:swift", "Bash:npm") stay stricter: measured 5 plausible detections
-/// vs 0 false at floor 3, but the floor 2 semantic holds for true Bash loops.
-/// This heuristic applies floor 2 to Bash/* only; all other tools require ≥3.
+/// are common churn, not stuck loops. Bash signatures keep the spec's ≥2
+/// floor (already narrowed to a command token, not a tool name), while Edit
+/// and others need ≥3 errors. Same data: Edit's false appearances fell
+/// 22→5 when its floor rose 2→3.
 enum LoopDetector {
     static let windowSize = 12
 
