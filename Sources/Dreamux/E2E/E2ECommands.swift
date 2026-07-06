@@ -696,7 +696,9 @@ enum E2ECommands {
     }
 
     /// Shared `Flow` → wire-dict shape for `flowsState`'s `lanes` and
-    /// `planLanes` arrays.
+    /// `planLanes` arrays. `edges` mirrors `nodes`' omit-if-nil style:
+    /// `label`/`iterations` are only present when the edge carries them
+    /// (loop edges always do; others never do).
     private static func flowLanePayload(_ flow: Flow) -> [String: Any] {
         var lane: [String: Any] = [
             "id": flow.id, "title": flow.title,
@@ -704,6 +706,12 @@ enum E2ECommands {
             "nodes": flow.nodes.map { node -> [String: Any] in
                 var wire: [String: Any] = ["id": node.id, "label": node.label, "status": node.status.rawValue]
                 if let lastActivity = node.lastActivity { wire["lastActivity"] = lastActivity }
+                return wire
+            },
+            "edges": flow.edges.map { edge -> [String: Any] in
+                var wire: [String: Any] = ["from": edge.from, "to": edge.to, "kind": edge.kind.rawValue]
+                if let label = edge.label { wire["label"] = label }
+                if let iterations = edge.iterations { wire["iterations"] = iterations }
                 return wire
             },
         ]

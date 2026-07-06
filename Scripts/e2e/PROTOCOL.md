@@ -658,6 +658,12 @@ this window).
         {"id":"session","label":"claude","status":"running"},
         {"id":"agent-e2e-a1","label":"Explore","status":"running"},
         {"id":"drain","label":"done","status":"queued"}
+      ],
+      "edges":[
+        {"from":"src","to":"session","kind":"sequence"},
+        {"from":"session","to":"agent-e2e-a1","kind":"spawn"},
+        {"from":"session","to":"drain","kind":"sequence"},
+        {"from":"session","to":"session","kind":"loop","label":"Bash:swift","iterations":3}
       ]}
    ],
    "planLanes":[
@@ -667,6 +673,10 @@ this window).
         {"id":"src","label":"plan","status":"done"},
         {"id":"phase-0","label":"tasks","status":"running"},
         {"id":"drain","label":"merge","status":"queued"}
+      ],
+      "edges":[
+        {"from":"src","to":"phase-0","kind":"sequence"},
+        {"from":"phase-0","to":"drain","kind":"sequence"}
       ]}
    ]}
 ```
@@ -708,6 +718,14 @@ Field notes:
   needs review/merge or the queue is `atGate`/`attention` on it, then
   `"drain"`. `lane.detail` (omitted unless set) carries `"queued
   #<n>"` while the plan sits in the queue unstarted.
+- `nodes[]`'s sibling `edges[]` array (both session and plan lanes)
+  mirrors `Flow.edges`: `{"from", "to", "kind"}` plus `label`/
+  `iterations`, each **omitted** unless the edge carries it. `kind` is
+  one of `"sequence" | "spawn" | "dependency" | "message" | "loop"`. A
+  lane carries at most one `"loop"` edge, always self-referential
+  (`from == to == "session"`) — its `label` is the repeating tool
+  signature (e.g. `"Bash:swift"`) and `iterations` the repeat count;
+  it disappears once the repetition breaks or the session ends.
 - `lane.sessionCwd` (omitted unless known) is the backing session's
   working directory — populated once the registry has observed the
   session at least once. `nodes[].lastActivity` (omitted unless set) is

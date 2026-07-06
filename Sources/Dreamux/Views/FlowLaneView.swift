@@ -90,7 +90,30 @@ struct FlowLaneView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            if let loopEdge = lane.flow.edges.first(where: { $0.kind == .loop }) {
+                loopBadge(loopEdge)
+            }
         }
+    }
+
+    /// A lane carries at most one `.loop` self-edge (see
+    /// `FlowStore.reconcileLoopEdge`); its presence is the entire
+    /// signal, so unlike `statusGlyph` this never pulses — a pulsing
+    /// badge would compete with the iteration count for attention when
+    /// the count itself is what's changing.
+    private func loopBadge(_ edge: FlowEdge) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.2.circlepath")
+                .font(.system(size: 10, weight: .semibold))
+            Text("\(edge.label ?? "loop") ×\(edge.iterations ?? 0)")
+                .font(.caption)
+                .lineLimit(1)
+        }
+        .foregroundStyle(FlowStatusGlyph.color(.running))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(FlowStatusGlyph.color(.running).opacity(0.12)))
+        .help("Loop detected: \(edge.label ?? "") repeated \(edge.iterations ?? 0) times")
     }
 
     private var pipeline: some View {
