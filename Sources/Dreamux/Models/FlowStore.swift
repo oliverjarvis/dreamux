@@ -149,8 +149,13 @@ final class FlowStore: ObservableObject {
     /// this, which is what makes them skip loop tracking downstream.
     private var pendingToolSignatures: [String: [String: String]] = [:]
     /// A lane's recent tool completions, capped at `LoopDetector.windowSize`
-    /// (oldest dropped first) — the window `LoopDetector.detect` runs over.
-    private var toolCompletionRings: [String: [ToolCompletion]] = [:]
+    /// (oldest dropped first) — the window `LoopDetector.detect` runs
+    /// over. Keyed by toolUseID alongside each completion so a full
+    /// transcript re-tail (zoom re-reading from byte 0) can recognize
+    /// toolUseIDs it already counted and skip re-appending them —
+    /// otherwise a replay would double (or n-times) count the same
+    /// completions.
+    private var toolCompletionRings: [String: [(id: String, completion: ToolCompletion)]] = [:]
 
     private static let skippedLinesThreshold = 50
     private static let agentFanOutCap = 6
@@ -208,12 +213,18 @@ final class FlowStore: ObservableObject {
                 // unpopped; it's swept with the rest at session end).
             } else if let signature = pendingToolSignatures[laneID]?.removeValue(forKey: toolUseID) {
                 var ring = toolCompletionRings[laneID] ?? []
-                ring.append(ToolCompletion(signature: signature, isError: isError, at: at))
-                if ring.count > LoopDetector.windowSize {
-                    ring.removeFirst(ring.count - LoopDetector.windowSize)
+                // A replayed transcript slice re-emits toolStarted/
+                // toolFinished pairs for toolUseIDs already in the
+                // window — skip re-appending so the count reflects the
+                // true last-N-unique completions, not a re-count.
+                if !ring.contains(where: { $0.id == toolUseID }) {
+                    ring.append((id: toolUseID, completion: ToolCompletion(signature: signature, isError: isError, at: at)))
+                    if ring.count > LoopDetector.windowSize {
+                        ring.removeFirst(ring.count - LoopDetector.windowSize)
+                    }
+                    toolCompletionRings[laneID] = ring
                 }
-                toolCompletionRings[laneID] = ring
-                reconcileLoopEdge(in: &lane, ring: ring)
+                reconcileLoopEdge(in: &lane, ring: ring.map(\.completion))
             }
         }
 

@@ -136,4 +136,21 @@ final class FlowStoreLoopTests: XCTestCase {
 
         XCTAssertEqual(loopEdges(store).count, 0)
     }
+
+    func testReplayReapplicationDoesNotDoubleCount() {
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        store.apply(registry: [entry()])
+
+        for i in 1...3 { fail(store, "tu\(i)") }
+        XCTAssertEqual(loopEdges(store).first?.iterations, 3)
+
+        // A full transcript re-tail (e.g. zoom re-reading from byte 0)
+        // re-emits the exact same toolStarted/toolFinished pairs — the
+        // ring must recognize the toolUseIDs it already counted and not
+        // inflate the iteration count on replay.
+        for i in 1...3 { fail(store, "tu\(i)") }
+
+        XCTAssertEqual(loopEdges(store).count, 1)
+        XCTAssertEqual(loopEdges(store).first?.iterations, 3)
+    }
 }
