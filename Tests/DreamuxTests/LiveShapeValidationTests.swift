@@ -18,6 +18,11 @@ final class LiveShapeValidationTests: XCTestCase {
     /// tuned constant.
     private static let maxSkipRatio = 0.20
 
+    /// Aggregate for the informational loop pass below: how many
+    /// windows a given loop signature would have triggered, and across
+    /// how many distinct transcripts (indices, never paths).
+    private struct LoopAggregate { var windows = 0; var transcriptIndices: Set<Int> = [] }
+
     func testRealShapeParsesCleanly() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["DREAMUX_LIVE_VALIDATION"] == "1",
@@ -42,7 +47,19 @@ final class LiveShapeValidationTests: XCTestCase {
         var metaParseFailures = 0
         var metasJoined = 0
 
-        for entry in entries {
+        // Loop-detector live pass (informational only, no assertions):
+        // per transcript, pair each toolStarted's signature with its
+        // matching toolFinished via toolUseID (agent-spawn toolUseIDs
+        // never got a pending signature, so their results are skipped
+        // here exactly as FlowStore skips them from the ring), then
+        // slide a LoopDetector.windowSize ring the same way FlowStore's
+        // `toolCompletionRings` does and count how many appends would
+        // have surfaced a loop badge.
+        var totalToolCompletions = 0
+        var loopWindowsDetected = 0
+        var loopsBySignature: [String: LoopAggregate] = [:]
+
+        for (transcriptIndex, entry) in entries.enumerated() {
             let transcriptURL = ClaudeHome.transcriptURL(home: home, cwd: entry.cwd, sessionID: entry.sessionId)
             var spawnedToolUseIDs: Set<String> = []
             if let data = try? Data(contentsOf: transcriptURL), let text = String(data: data, encoding: .utf8) {
@@ -52,10 +69,29 @@ final class LiveShapeValidationTests: XCTestCase {
                 totalLines += lines.count
                 totalSkipped += skipped
                 totalEvents += events.count
+                var pendingSignatures: [String: String] = [:]
+                var ring: [ToolCompletion] = []
                 for event in events {
-                    if case let .agentSpawned(toolUseID, _, _, _) = event {
+                    switch event {
+                    case let .agentSpawned(toolUseID, _, _, _):
                         totalSpawns += 1
                         spawnedToolUseIDs.insert(toolUseID)
+                    case let .toolStarted(toolUseID, tool, summary, _):
+                        pendingSignatures[toolUseID] = LoopDetector.signature(tool: tool, summary: summary)
+                    case let .toolFinished(toolUseID, isError, at):
+                        guard let signature = pendingSignatures.removeValue(forKey: toolUseID) else { continue }
+                        totalToolCompletions += 1
+                        ring.append(ToolCompletion(signature: signature, isError: isError, at: at))
+                        if ring.count > LoopDetector.windowSize {
+                            ring.removeFirst(ring.count - LoopDetector.windowSize)
+                        }
+                        if let loop = LoopDetector.detect(window: ring) {
+                            loopWindowsDetected += 1
+                            var agg = loopsBySignature[loop.signature] ?? LoopAggregate()
+                            agg.windows += 1
+                            agg.transcriptIndices.insert(transcriptIndex)
+                            loopsBySignature[loop.signature] = agg
+                        }
                     }
                 }
                 if !lines.isEmpty {
@@ -106,6 +142,29 @@ final class LiveShapeValidationTests: XCTestCase {
         agent meta parse failures   : \(metaParseFailures)
         ======================================
         """)
+
+        // Informational only — no assertions. Signatures are command
+        // first tokens ("Bash:swift"), never full commands, paths, or
+        // content, so they're safe to print verbatim.
+        print("""
+
+        === Loop-detector live pass (informational) ===
+        tool completions             : \(totalToolCompletions)
+        windows that would loop      : \(loopWindowsDetected)
+        by signature:
+        \(Self.formatLoopAggregates(loopsBySignature))
+        ================================================
+        """)
+    }
+
+    private static func formatLoopAggregates(_ aggregates: [String: LoopAggregate]) -> String {
+        guard !aggregates.isEmpty else { return "  (none)" }
+        return aggregates
+            .sorted { $0.key < $1.key }
+            .map { signature, agg in
+                "  \(signature) \u{2192} \(agg.windows) window(s) across \(agg.transcriptIndices.count) transcript(s)"
+            }
+            .joined(separator: "\n")
     }
 
     private static func metaFileURLs(under dir: URL) -> [URL] {
