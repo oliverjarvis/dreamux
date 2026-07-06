@@ -13,6 +13,10 @@ struct WorkspaceSidebar: View {
     @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
     @Bindable var docStore: DocStore
+    /// Live claude-session lanes, for the Flows tile's needs-you/running
+    /// badge — old-style `ObservableObject` (unlike the `@Observable`
+    /// stores above), so its own property wrapper.
+    @ObservedObject var flows: FlowStore
     let planRunner: PlanRunCoordinator
     let planQueue: PlanQueueController
     /// Non-e2e "merge and continue" gate channel — the plan queue's
@@ -202,6 +206,7 @@ struct WorkspaceSidebar: View {
             PlansSpecsSection(
                 docStore: docStore,
                 layout: layout,
+                flows: flows,
                 featureExists: { name in store.featureNames.contains(name) },
                 onOpenDoc: onOpenDoc,
                 onOpenDocAtLine: onOpenDocAtLine,
@@ -435,6 +440,15 @@ struct WorkspaceSidebar: View {
                 Text(tile.label)
                     .font(.callout)
                     .foregroundStyle(.primary)
+                if tile == .flows {
+                    let agg = flows.aggregates
+                    if agg.needsYouCount > 0 {
+                        badgeText("!\(agg.needsYouCount)", color: FlowStatusGlyph.color(.waiting))
+                    }
+                    if agg.runningCount > 0 {
+                        badgeText("●\(agg.runningCount)", color: FlowStatusGlyph.color(.running))
+                    }
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
@@ -454,6 +468,16 @@ struct WorkspaceSidebar: View {
             if hovering { hoveredTile = tile }
             else if hoveredTile == tile { hoveredTile = nil }
         }
+    }
+
+    /// Small capsule used by the Flows tile's needs-you/running counts.
+    private func badgeText(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.12)))
     }
 
     private static let browserHomepage = URL(string: "https://www.google.com")!

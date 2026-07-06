@@ -124,6 +124,7 @@ struct ContentView: View {
                         layout: layout,
                         sidebarMode: $sidebarMode,
                         docStore: docStore,
+                        flows: session.flows,
                         planRunner: planRunner,
                         planQueue: planQueue,
                         gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,

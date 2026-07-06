@@ -11,6 +11,10 @@ import UniformTypeIdentifiers
 struct PlansSpecsSection: View {
     @Bindable var docStore: DocStore
     @Bindable var layout: SidebarLayoutStore
+    /// Live claude-session lanes, for the plan row's live status dot — old-style
+    /// `ObservableObject` (unlike the `@Observable` stores above), so its own
+    /// property wrapper.
+    @ObservedObject var flows: FlowStore
     let featureExists: (String) -> Bool
     let onOpenDoc: (URL) -> Void
     /// Open a doc jumped to a 1-based line — phase/task rows open the
@@ -641,6 +645,20 @@ struct PlansSpecsSection: View {
         }
     }
 
+    /// Live claude-session status for this plan's workspace: ! waiting
+    /// (needs you), ● running. Nothing when no live session lane exists.
+    @ViewBuilder
+    private func liveFlowDot(for workspace: Workspace?) -> some View {
+        if let ws = workspace,
+           let lane = flows.flows.first(where: { $0.workspaceID == ws.id && $0.kind == .adhoc }),
+           lane.status == .waiting || lane.status == .running {
+            Image(systemName: FlowStatusGlyph.symbol(lane.status))
+                .font(.system(size: 8, weight: .bold))
+                .foregroundStyle(FlowStatusGlyph.color(lane.status))
+                .help(lane.status == .waiting ? (lane.detail ?? "Waiting on you") : "claude busy")
+        }
+    }
+
     private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {
         let name = featureName(plan)
         let openableFeature = PlanWorkspacePresence.workspaceToOpen(
@@ -728,6 +746,7 @@ struct PlansSpecsSection: View {
                             Text(plan.title)
                                 .font(.callout.weight(.medium))
                                 .lineLimit(1).truncationMode(.tail)
+                            liveFlowDot(for: workspace)
                             if showUnread {
                                 Circle().fill(Color.red).frame(width: 5, height: 5)
                             }
