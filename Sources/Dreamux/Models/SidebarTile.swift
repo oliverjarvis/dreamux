@@ -5,6 +5,7 @@ import SwiftUI
 enum SidebarTile: String, Codable, CaseIterable, Identifiable {
     case signals
     case browser
+    case flows
     case library
 
     var id: String { rawValue }
@@ -13,6 +14,7 @@ enum SidebarTile: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .signals: return "waveform.path.ecg"
         case .browser: return "globe"
+        case .flows: return "point.3.connected.trianglepath.dotted"
         case .library: return "puzzlepiece.extension"
         }
     }
@@ -21,6 +23,7 @@ enum SidebarTile: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .signals: return .purple
         case .browser: return .blue
+        case .flows: return .orange
         case .library: return .teal
         }
     }
@@ -29,6 +32,7 @@ enum SidebarTile: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .signals: return "Signals"
         case .browser: return "Browser"
+        case .flows: return "Flows"
         case .library: return "Skills & MCPs"
         }
     }

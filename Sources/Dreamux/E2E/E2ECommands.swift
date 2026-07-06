@@ -263,6 +263,7 @@ enum E2ECommands {
         case .workspace: return "workspace"
         case .run: return "run"
         case .signals: return "signals"
+        case .flows: return "flows"
         case .library: return "library"
         }
     }
@@ -447,6 +448,10 @@ enum E2ECommands {
             handles.bridge.pendingSidebarMode = .workspace
         case "signals":
             handles.bridge.pendingSidebarMode = .signals
+        case "flows":
+            handles.bridge.pendingSidebarMode = .flows
+        case "library":
+            handles.bridge.pendingSidebarMode = .library
         case "run":
             let workspace: Workspace?
             if let name = request["workspace"] as? String {
@@ -460,7 +465,7 @@ enum E2ECommands {
             store.activate(workspace.id)
             handles.bridge.pendingSidebarMode = .run(workspaceID: workspace.id)
         default:
-            throw CommandError(message: "mode must be \"workspace\", \"run\", or \"signals\"")
+            throw CommandError(message: "mode must be \"workspace\", \"run\", \"signals\", \"flows\", or \"library\"")
         }
         return ["ok": true]
     }

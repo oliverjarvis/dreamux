@@ -286,6 +286,8 @@ struct ContentView: View {
             )
         case .signals:
             SignalsView(signals: signals, runners: runners, projectDir: repoStore.project.rootPath.path)
+        case .flows:
+            Color.clear // Flows pane lands in Task 6
         case .library:
             LibraryView(projectRoot: repoStore.project.rootPath)
         }
@@ -659,12 +661,13 @@ struct ContentView: View {
 /// Detail-pane swap inside a project window. `.workspace` shows the
 /// terminal pane for the active feature; `.run` shows the Run page scoped
 /// to a specific workspace (its play button was clicked); `.signals`
-/// shows the project-wide log stream; `.library` shows the Skills & MCPs
-/// inventory page.
+/// shows the project-wide log stream; `.flows` shows the Flows overview
+/// board; `.library` shows the Skills & MCPs inventory page.
 enum SidebarMode: Hashable {
     case workspace
     case run(workspaceID: UUID)
     case signals
+    case flows
     case library
 }
 

@@ -422,6 +422,7 @@ struct WorkspaceSidebar: View {
     /// icon, callout label, hover highlight, tinted while selected.
     private func tileRow(_ tile: SidebarTile) -> some View {
         let selected = (tile == .signals && sidebarMode == .signals)
+            || (tile == .flows && sidebarMode == .flows)
             || (tile == .library && sidebarMode == .library)
         return Button {
             handleTileTap(tile)
@@ -463,6 +464,8 @@ struct WorkspaceSidebar: View {
             sidebarMode = .signals
         case .browser:
             openBrowserTab()
+        case .flows:
+            sidebarMode = .flows
         case .library:
             sidebarMode = .library
         }
@@ -742,6 +745,7 @@ struct WorkspaceSidebar: View {
         case .workspace: return true
         case .run(let id): return id == workspace.id
         case .signals: return false
+        case .flows: return false
         case .library: return false
         }
     }

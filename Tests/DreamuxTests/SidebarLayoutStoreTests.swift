@@ -56,7 +56,7 @@ final class SidebarLayoutStoreTests: XCTestCase {
         first.tiles = [.browser, .signals]
         first.persistTiles()
         let reloaded = SidebarLayoutStore(project: project)
-        XCTAssertEqual(reloaded.tiles, [.browser, .signals, .library])
+        XCTAssertEqual(reloaded.tiles, [.browser, .signals, .flows, .library])
     }
 
     @MainActor func testMissingTilesAreReconciledOnLoad() {
@@ -67,7 +67,7 @@ final class SidebarLayoutStoreTests: XCTestCase {
         try? json.write(to: dir.appendingPathComponent("sidebar.json"), atomically: true, encoding: .utf8)
 
         let store = SidebarLayoutStore(project: project)
-        XCTAssertEqual(store.tiles, [.signals, .browser, .library])
+        XCTAssertEqual(store.tiles, [.signals, .browser, .flows, .library])
     }
 
     /// sidebar.json written before a tile case existed must still show
