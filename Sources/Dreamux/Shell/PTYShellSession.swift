@@ -136,6 +136,10 @@ final class PTYShellSession: @unchecked Sendable {
             env["DREAMUX_BIN"] = bin
         }
 
+        // Flow hooks (dreamux-hook flow) find the app's signal socket
+        // through this; unset outside Dreamux, so the hook no-ops.
+        env["DREAMUX_EMIT_SOCKET"] = SignalEmitSocketServer.defaultSocketPath()
+
         // Naive PATH prepend loses to Homebrew / nvm / asdf rc-file
         // gymnastics. For zsh we point ZDOTDIR at a bundled rc set that
         // sources the user's normal startup files and *then* re-prepends

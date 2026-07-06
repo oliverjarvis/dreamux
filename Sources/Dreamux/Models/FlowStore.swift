@@ -182,3 +182,30 @@ final class FlowStore: ObservableObject {
         aggregates = next
     }
 }
+
+/// Pure helpers for wiring FlowStore into a project. Kept off the
+/// store so they're testable without MainActor hops.
+enum FlowWiring {
+    /// Match a session cwd to a workspace: the feature aggregation dir
+    /// (`features/<name>/`) or any per-repo worktree
+    /// (`<root>/repos/<repo>/<name>/`), boundary-safe.
+    static func workspaceID(forCwd cwd: String, workspaces: [Workspace], projectRoot: URL) -> UUID? {
+        for workspace in workspaces {
+            var candidates: [String] = []
+            if let wd = workspace.workingDirectory, !wd.isEmpty { candidates.append(wd) }
+            for repo in workspace.linkedRepoIDs {
+                candidates.append(
+                    projectRoot
+                        .appendingPathComponent("repos", isDirectory: true)
+                        .appendingPathComponent(repo, isDirectory: true)
+                        .appendingPathComponent(workspace.name, isDirectory: true)
+                        .path
+                )
+            }
+            for candidate in candidates {
+                if cwd == candidate || cwd.hasPrefix(candidate + "/") { return workspace.id }
+            }
+        }
+        return nil
+    }
+}

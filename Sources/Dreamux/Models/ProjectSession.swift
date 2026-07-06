@@ -28,6 +28,7 @@ final class ProjectSession {
     let planRunner: PlanRunCoordinator
     let planQueue: PlanQueueController
     let nudgeCenter: PlanNudgeCenter
+    let flows: FlowStore
 
     /// Non-e2e channel for the plan queue's "merge and continue" gate
     /// action: `WorkspaceSidebar` owns the merge sheet's presentation
@@ -64,6 +65,14 @@ final class ProjectSession {
     /// project's Signals page). Held so it isn't torn down the moment
     /// `wireSignalPersistence` returns.
     @ObservationIgnored private var busSubscription: AnyCancellable?
+
+    /// Flows spine: live signal feed into `flows`. Held for the same
+    /// reason as `busSubscription`; no explicit teardown exists for
+    /// either (this bundle has no `deinit`) — both cancel via ARC when
+    /// the bundle is released, and `ClaudeRegistryPoller` additionally
+    /// cancels its own polling `Task` in its own `deinit`.
+    @ObservationIgnored private var flowBusSubscription: AnyCancellable?
+    @ObservationIgnored private var registryPoller: ClaudeRegistryPoller?
 
     init(project: Project) {
         self.project = project
@@ -169,6 +178,17 @@ final class ProjectSession {
 
         let nudgeCenter = PlanNudgeCenter()
 
+        // Flows spine: cwd→workspace lookup goes through `store` (weakly
+        // captured — the store outlives this closure for the bundle's
+        // whole life, but the closure must not be what keeps it alive).
+        let projectRoot = project.rootPath
+        let flows = FlowStore(workspaceForCwd: { [weak store] cwd in
+            guard let store else { return nil }
+            return FlowWiring.workspaceID(
+                forCwd: cwd, workspaces: store.workspaces, projectRoot: projectRoot
+            )
+        })
+
         self.store = store
         self.repoStore = repoStore
         self.layout = layout
@@ -180,6 +200,7 @@ final class ProjectSession {
         self.planRunner = planRunner
         self.planQueue = planQueue
         self.nudgeCenter = nudgeCenter
+        self.flows = flows
 
         // Needs `self` for the gate channel, so it's wired after the
         // stored properties. Weak: the queue is owned by this bundle and
@@ -342,6 +363,7 @@ final class ProjectSession {
         let projectDir = project.rootPath.path
         let bus = SignalBus.shared
         let uiStore = signals
+        let flows = self.flows
 
         // 1. Hydrate the ring with recent history for this project.
         if let disk = bus.store {
@@ -391,6 +413,50 @@ final class ProjectSession {
                     "current": .string(Self.statusWord(new)),
                 ])))
         }
+
+        // 4. Flows spine: live flow signals → adapter → store, launch
+        // replay from history, and a registry poll for session liveness.
+        // `isInProject` doubles as the workspace matcher *and* a
+        // project-root fallback so a session running at the project root
+        // itself (no workspace match) still counts.
+        let isInProject: (String) -> Bool = { [weak self] cwd in
+            guard let self else { return false }
+            return FlowWiring.workspaceID(
+                forCwd: cwd, workspaces: self.store.workspaces, projectRoot: self.project.rootPath
+            ) != nil || cwd.hasPrefix(self.project.rootPath.path)
+        }
+        flowBusSubscription = bus.publisher
+            .filter { SignalKind.flowKinds.contains($0.kind) }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak flows] signal in
+                guard let event = ClaudeFlowAdapter.event(from: signal),
+                      let cwd = event.cwd, isInProject(cwd) else { return }
+                flows?.apply(event: event)
+            }
+
+        if let sqlite = bus.store {
+            Task { @MainActor [weak flows] in
+                let events = await FlowReplayLoader.events(store: sqlite)
+                guard let flows else { return }
+                for event in events where event.cwd.map(isInProject) == true {
+                    flows.apply(event: event)
+                }
+            }
+        }
+
+        let home = ClaudeHome.root()
+        let poller = ClaudeRegistryPoller(
+            // Built fresh per poll rather than captured: `home: URL` is
+            // Sendable, but `ClaudeSessionRegistryReader` itself isn't
+            // (its `isAlive` closure isn't `@Sendable`), so capturing an
+            // instance would fail the poller's `@Sendable` `read` closure.
+            read: { ClaudeSessionRegistryReader(home: home).entries() },
+            onSnapshot: { [weak flows] entries in
+                flows?.apply(registry: entries.filter { isInProject($0.cwd) })
+            }
+        )
+        registryPoller = poller
+        poller.startPolling()
     }
 
     private func installSignalForwarding(projectDir: String, bus: SignalBus) {
