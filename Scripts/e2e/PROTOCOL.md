@@ -277,13 +277,19 @@ is store-level and unchanged.
 ### `setSidebarMode`
 
 Switch the project window's main pane. `mode` is `"workspace"`,
-`"run"`, or `"signals"`. The optional `"workspace"` parameter (a
-feature name) selects which workspace to activate (for `workspace`
-mode) or to scope the Run pane to (for `run` mode; defaults to the
-active workspace, then the first one — fails if there are none).
+`"run"`, `"signals"`, `"flows"`, or `"library"` — `flows` shows the
+Flows observatory (see `flowsState`) and `library` the Skills & MCPs
+inventory page. The optional `"workspace"` parameter (a feature name)
+selects which workspace to activate (for `workspace` mode) or to scope
+the Run pane to (for `run` mode; defaults to the active workspace,
+then the first one — fails if there are none). `flows` and `library`
+ignore `workspace` — both panes are project-wide, not per-workspace.
 
 ```
 → {"cmd":"setSidebarMode","mode":"run","workspace":"feature-x"}
+← {"ok":true}
+
+→ {"cmd":"setSidebarMode","mode":"flows"}
 ← {"ok":true}
 ```
 
@@ -627,6 +633,55 @@ advances the queue past it does it drop out of `entries`.
 ← {"ok":true,"state":"atGate","entries":["docs/plans/2026-07-02-x.md"],
    "current":"docs/plans/2026-07-02-x.md"}
 ```
+
+### `flowsState`
+
+Snapshot of the Flows pane's session lanes (`FlowStore`) — live claude
+sessions and their subagents/tasks, fed by the `<claude-home>/sessions/`
+registry (3s poll) and hook signals delivered over the emit socket
+(`SignalEmitSocketServer`, `agent.started`/`agent.stopped`/
+`task.created`/`task.completed`/`session.stopped`/
+`session.notification`). Plan lanes are omitted deliberately — they're
+derived in the view from state already assertable via
+`queueState`/`listDocs`.
+
+```
+→ {"cmd":"flowsState"}
+← {"ok":true,"running":1,"needsYou":0,
+   "lanes":[
+     {"id":"session-e2e-session-1","title":"flows-demo","kind":"adhoc",
+      "status":"running",
+      "nodes":[
+        {"id":"src","label":"prompt","status":"done"},
+        {"id":"session","label":"claude","status":"running"},
+        {"id":"agent-e2e-a1","label":"Explore","status":"running"},
+        {"id":"drain","label":"done","status":"queued"}
+      ]}
+   ]}
+```
+
+Field notes:
+
+- `lanes[].id` is `"session-<sessionId>"` (from the registry entry or
+  the hook signal's `session_id`). `kind` is `"adhoc"` (interactive),
+  `"scheduled"` (registry `kind: "bg"`), or `"plan"` (never emitted
+  here). `status` is derived from the lane's nodes —
+  `waiting` beats `running` beats `failed` beats `queued`, else `done`
+  — so a lane reads "needs you" the instant any node is waiting.
+- `nodes[].id` follows the source: `"src"`/`"session"`/`"drain"` are the
+  fixed skeleton every session lane starts with; hook-derived nodes are
+  `"agent-<agent_id>"` or `"task-<task_id>"`.
+- `lane.detail` (omitted unless set) carries the last
+  `session.notification` message; it's cleared whenever the lane
+  leaves the waiting state.
+- `running`/`needsYou` are the same aggregates the sidebar tile and the
+  pane header badge show: counts of lanes whose derived `status` is
+  `running` / `waiting`, respectively.
+- A lane only appears here if its cwd (registry entry `cwd`, or the
+  hook signal's `tags.cwd`) resolves to a real workspace — the feature
+  aggregation dir or a per-repo worktree path (`FlowWiring.workspaceID`)
+  — or the project root itself; otherwise the app's `isInProject`
+  scoping drops it silently.
 
 ### `courseCorrect`
 

@@ -62,4 +62,17 @@ export E2E_PROJECT_NAME="$PROJECT_NAME"
 export DREAMUX_CLAUDE_BIN="$ROOT/Tests/Fixtures/bin/claude"
 export DREAMUX_GH_BIN="$ROOT/Tests/Fixtures/bin/gh"
 
+# Synthetic Claude Code home: scenario_flows writes a session-registry
+# entry under here instead of touching the user's real ~/.claude.
+export DREAMUX_CLAUDE_HOME="$SANDBOX/claude-home"
+mkdir -p "$DREAMUX_CLAUDE_HOME/sessions"
+
+# The hook-signal emit socket lives at a fixed, bundle-id-derived path
+# (SignalEmitSocketServer.defaultSocketPath()) rather than anywhere
+# under $SANDBOX/$SOCKET — it's always-on, independent of the e2e
+# automation socket. Read the id straight from the built bundle so the
+# driver never hardcodes it.
+BUNDLE_ID="$(defaults read "$ROOT/Dreamux.app/Contents/Info" CFBundleIdentifier)"
+export E2E_EMIT_SOCKET="/tmp/dreamux-emit-$BUNDLE_ID.sock"
+
 exec python3 "$ROOT/Scripts/e2e/driver.py"

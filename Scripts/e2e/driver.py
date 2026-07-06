@@ -18,9 +18,16 @@ Environment contract (set by run-e2e.sh):
   E2E_SEED_DIR         dir containing the seeded portenv-server /
                        fixedport-server git repos
   E2E_PROJECT_NAME     project folder name under the projects root
+  E2E_EMIT_SOCKET      bundle-id-derived path for the always-on hook
+                       signal socket (SignalEmitSocketServer), used by
+                       scenario_flows to emit agent/notification
+                       signals the same way a real claude hook does
   ARTIFACTS            screenshot/log output dir (wiped by run-e2e.sh)
   DREAMUX_CLAUDE_BIN the fake claude shim (forwarded to the app)
   DREAMUX_GH_BIN     the fake gh shim (forwarded to the app)
+  DREAMUX_CLAUDE_HOME synthetic ~/.claude root (forwarded to the app);
+                       scenario_flows writes session-registry entries
+                       under its sessions/ dir
 
 Exit status: 0 only when every scenario passed.
 """
@@ -47,6 +54,8 @@ PROJECT_NAME = os.environ.get("E2E_PROJECT_NAME", "demo-project")
 ARTIFACTS = os.environ["ARTIFACTS"]
 CLAUDE_BIN = os.environ["DREAMUX_CLAUDE_BIN"]
 GH_BIN = os.environ["DREAMUX_GH_BIN"]
+CLAUDE_HOME = os.environ["DREAMUX_CLAUDE_HOME"]
+EMIT_SOCKET_PATH = os.environ["E2E_EMIT_SOCKET"]
 
 PROJECTS_ROOT = os.path.join(SANDBOX, "projects")
 STATE_DIR = os.path.join(SANDBOX, "state")
@@ -111,6 +120,7 @@ class Driver:
             "DREAMUX_STATE_DIR": STATE_DIR,
             "DREAMUX_CLAUDE_BIN": CLAUDE_BIN,
             "DREAMUX_GH_BIN": GH_BIN,
+            "DREAMUX_CLAUDE_HOME": CLAUDE_HOME,
         })
         if extra_env:
             env.update(extra_env)
@@ -875,6 +885,93 @@ def scenario_publish_pr(d):
     d.screenshot("after-pr-cleanup")
 
 
+def scenario_flows(d):
+    """Flows pane: a synthetic registry session plus real emit-socket
+    signals render a running lane, then a notification flips it to
+    needs-you.
+
+    The lane's cwd must resolve to a real workspace or FlowStore's
+    isInProject scoping drops it (see FlowWiring.workspaceID) — so this
+    creates its own feature (flows-demo, on the portenv-server repo
+    already imported by scenario_repos_and_feature) rather than reusing
+    a raw sandbox path."""
+    resp = d.cmd("createFeature", name="flows-demo", repos=["portenv-server"])
+    cwd = resp["featureDirectory"]
+
+    session_id = "e2e-session-1"
+    registry_path = os.path.join(CLAUDE_HOME, "sessions", f"{os.getpid()}.json")
+
+    def write_registry_entry(status):
+        # pid = this driver process, alive for the whole scenario, so
+        # the app's liveness probe (kill(pid, 0)) keeps the entry live.
+        with open(registry_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "pid": os.getpid(), "sessionId": session_id, "cwd": cwd,
+                "status": status, "kind": "interactive", "name": "flows-demo",
+            }, f)
+
+    def emit(kind, payload):
+        """Send one envelope over the real hook-signal socket — the
+        same wire a `claude` hook uses."""
+        envelope = {"action": "emit", "signal": {
+            "kind": kind, "source": "claude.hooks", "severity": "info",
+            "tags": {"cwd": cwd}, "payload": payload,
+        }}
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(EMIT_SOCKET_PATH)
+        s.sendall((json.dumps(envelope) + "\n").encode("utf-8"))
+        s.recv(256)
+        s.close()
+
+    # 1. A live "busy" claude session in the registry.
+    write_registry_entry("busy")
+
+    # 2. A subagent start over the emit socket.
+    emit("agent.started", {
+        "session_id": session_id, "agent_id": "e2e-a1", "agent_type": "Explore",
+    })
+
+    # 3. Wait for the 3s registry poll (which names the lane "flows-demo"
+    # from the entry, not just its session id) AND the live signal (the
+    # agent node) to both land.
+    def lane_named_with_agent():
+        state = d.cmd("flowsState")
+        lane = next((l for l in state["lanes"] if l["id"] == f"session-{session_id}"), None)
+        if (lane and lane["title"] == "flows-demo"
+                and any(n["id"] == "agent-e2e-a1" for n in lane["nodes"])):
+            return state
+        return None
+
+    state = d.wait_until(lane_named_with_agent, 10.0,
+                          "flows-demo lane with an agent-e2e-a1 node in flowsState")
+    lane = next(l for l in state["lanes"] if l["id"] == f"session-{session_id}")
+    require(lane["status"] == "running", f"lane should be running, got {lane['status']}")
+    require(any(n["id"] == "agent-e2e-a1" and n["status"] == "running" for n in lane["nodes"]),
+            "agent node missing or not running")
+    require(state["running"] >= 1, "running aggregate should count the lane")
+
+    d.cmd("setSidebarMode", mode="flows")
+    time.sleep(1.0)
+    d.screenshot("flows-overview")
+
+    # 4. Needs-you: flip the registry entry to waiting + a notification.
+    write_registry_entry("waiting")
+    emit("session.notification", {
+        "session_id": session_id, "message": "Claude needs permission to run npm",
+    })
+
+    def needs_you():
+        state = d.cmd("flowsState")
+        return state if state.get("needsYou", 0) >= 1 else None
+
+    state = d.wait_until(needs_you, 10.0, "needsYou aggregate to rise")
+    lane = next(l for l in state["lanes"] if l["id"] == f"session-{session_id}")
+    require(lane.get("detail") == "Claude needs permission to run npm",
+            "notification detail missing")
+    time.sleep(1.0)
+    d.screenshot("flows-needs-you")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -890,6 +987,7 @@ SCENARIOS = [
     ("conflict-and-isolate", scenario_conflict_and_isolate),
     ("merge-and-cleanup", scenario_merge_and_cleanup),
     ("publish-pr", scenario_publish_pr),
+    ("flows", scenario_flows),
     ("quit", scenario_quit),
 ]
 
