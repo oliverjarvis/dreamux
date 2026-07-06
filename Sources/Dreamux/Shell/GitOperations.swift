@@ -684,6 +684,45 @@ extension GitOperations {
     }
 }
 
+// MARK: - Gate card diff stat
+
+/// Committed branch-vs-base totals for the Flows gate card: everything
+/// a merge of this branch would bring, summed from the merge-base fork
+/// point to HEAD. Working-tree changes are deliberately excluded (the
+/// merge flow merges commits; `GitHeadStatus` covers the dirty tree).
+struct GitBranchDiffStat: Equatable, Sendable {
+    var insertions: Int
+    var deletions: Int
+    var filesChanged: Int
+}
+
+extension GitOperations {
+    /// `git diff --numstat <mergeBase> HEAD` summed. Nil when the base
+    /// doesn't resolve (deleted branch, unrelated histories) — the card
+    /// then omits its stat line rather than showing zeros it can't
+    /// stand behind. On the base branch itself the diff is empty and
+    /// the result is a true all-zeros.
+    static func branchDiffStat(vs baseBranch: String, in worktreeURL: URL) async -> GitBranchDiffStat? {
+        guard let base = await mergeBase(of: baseBranch, in: worktreeURL),
+              let numstat = try? await runGit(
+                ["diff", "--numstat", base, "HEAD"], in: worktreeURL)
+        else { return nil }
+        var insertions = 0
+        var deletions = 0
+        var files = 0
+        for line in numstat.split(separator: "\n") {
+            let parts = line.split(separator: "\t")
+            guard parts.count >= 2 else { continue }
+            files += 1
+            // Binary files report "-" for both counts; Int() skips them
+            // but the file still changed.
+            insertions += Int(parts[0]) ?? 0
+            deletions += Int(parts[1]) ?? 0
+        }
+        return GitBranchDiffStat(insertions: insertions, deletions: deletions, filesChanged: files)
+    }
+}
+
 // MARK: - Commit log and diff content
 
 /// One commit in a worktree's trail — the commit-trail popover's row

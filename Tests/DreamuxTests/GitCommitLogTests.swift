@@ -1,10 +1,10 @@
 import XCTest
 @testable import Dreamux
 
-/// The commit-trail popover and task diffs are built on these three
-/// primitives; each test drives real git in a sandbox repo because
-/// parsing (--numstat tabs, binary "-" lines, rename statuses) is
-/// exactly where hand-rolled git plumbing goes wrong.
+/// The commit-trail popover, task diffs, and flow gate cards are built
+/// on primitives that parse git output; each test drives real git in a
+/// sandbox repo because parsing (--numstat tabs, binary "-" lines, rename
+/// statuses) is exactly where hand-rolled git plumbing goes wrong.
 final class GitCommitLogTests: XCTestCase {
     private var sandbox: TestSandbox!
 
@@ -267,6 +267,81 @@ final class GitCommitLogTests: XCTestCase {
 
         let base = await GitOperations.mergeBase(of: "main", in: featWorktree)
         XCTAssertEqual(base, forkPoint, "must be the fork point, not main's new tip")
+    }
+
+    // MARK: - testBranchDiffStatTotalsAcrossCommitsAndFiles
+
+    /// The gate card's stat must span the WHOLE branch (merge-base →
+    /// HEAD), not just HEAD's own diff, and count a binary change as a
+    /// changed file without poisoning the line totals.
+    func testBranchDiffStatTotalsAcrossCommitsAndFiles() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("one\ntwo\nthree\n", to: "a.txt", in: repoURL)
+        _ = try await commit("Main commit", in: repoURL)
+
+        let featWorktree = sandbox.root.appendingPathComponent("repo-feat", isDirectory: true)
+        _ = try await GitOperations.runGit(
+            ["worktree", "add", "-b", "feat", featWorktree.path], in: repoURL)
+        // Two commits: modify a.txt (+1 −1), then add b.txt (+2) and a
+        // binary (a changed file with no countable lines).
+        try write("one\nTWO\nthree\n", to: "a.txt", in: featWorktree)
+        _ = try await commit("Feat commit 1", in: featWorktree)
+        try write("b1\nb2\n", to: "b.txt", in: featWorktree)
+        try writeBinary(Data([0, 1, 2]), to: "c.bin", in: featWorktree)
+        _ = try await commit("Feat commit 2", in: featWorktree)
+
+        let maybe = await GitOperations.branchDiffStat(vs: "main", in: featWorktree)
+        let stat = try XCTUnwrap(maybe)
+        XCTAssertEqual(stat.insertions, 3)   // 1 in a.txt + 2 in b.txt
+        XCTAssertEqual(stat.deletions, 1)
+        XCTAssertEqual(stat.filesChanged, 3) // a.txt, b.txt, c.bin
+    }
+
+    // MARK: - testBranchDiffStatIgnoresUncommittedAndBaseDrift
+
+    /// Two exclusions in one fixture: a dirty (uncommitted) edit in the
+    /// feature worktree must not count — the merge flow merges commits —
+    /// and a base branch that moved on after the fork must not reverse
+    /// its own commits into the stat (fork point, not base tip).
+    func testBranchDiffStatIgnoresUncommittedAndBaseDrift() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("v1\n", to: "app.txt", in: repoURL)
+        _ = try await commit("Main commit", in: repoURL)
+
+        let featWorktree = sandbox.root.appendingPathComponent("repo-feat", isDirectory: true)
+        _ = try await GitOperations.runGit(
+            ["worktree", "add", "-b", "feat", featWorktree.path], in: repoURL)
+        try write("f1\n", to: "f1.txt", in: featWorktree)
+        _ = try await commit("Feat commit", in: featWorktree)
+
+        // Dirty edit on the branch + main moving on after the fork.
+        try write("f1\nlocal-uncommitted\n", to: "f1.txt", in: featWorktree)
+        try write("v2\nv2b\n", to: "app.txt", in: repoURL)
+        _ = try await commit("Main commit after fork", in: repoURL)
+
+        let maybe = await GitOperations.branchDiffStat(vs: "main", in: featWorktree)
+        let stat = try XCTUnwrap(maybe)
+        XCTAssertEqual(stat.insertions, 1, "committed f1.txt line only")
+        XCTAssertEqual(stat.deletions, 0)
+        XCTAssertEqual(stat.filesChanged, 1)
+    }
+
+    // MARK: - testBranchDiffStatUnknownBaseAndOnBaseItself
+
+    /// Unresolvable base → nil (the card shows no stat line rather than
+    /// lying); sitting ON the base branch → an all-zeros stat, not nil
+    /// (merge-base of HEAD with itself is HEAD — an empty diff is a
+    /// true answer, and multi-repo callers sum stats per repo).
+    func testBranchDiffStatUnknownBaseAndOnBaseItself() async throws {
+        let repoURL = try await makeRepo(named: "repo")
+        try write("v1\n", to: "app.txt", in: repoURL)
+        _ = try await commit("Main commit", in: repoURL)
+
+        let unknown = await GitOperations.branchDiffStat(vs: "no-such-branch", in: repoURL)
+        XCTAssertNil(unknown)
+
+        let onBase = await GitOperations.branchDiffStat(vs: "main", in: repoURL)
+        XCTAssertEqual(onBase, GitBranchDiffStat(insertions: 0, deletions: 0, filesChanged: 0))
     }
 
     // MARK: - Helpers
