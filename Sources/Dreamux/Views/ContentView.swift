@@ -19,6 +19,11 @@ struct ContentView: View {
 
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
+    /// Flows pane zoom state: the lane id currently drilled into, or
+    /// `nil` for the overview. Lifted here (not `FlowsOverviewView`
+    /// `@State`) so the e2e `zoomFlow` command can drive it the same
+    /// way `pendingSidebarMode` drives `sidebarMode`.
+    @State private var flowsZoomLaneID: String?
     /// Owned by `ProjectWindow` — it must survive the id-keyed subtree
     /// rebuild a project switch triggers, or the collapsed rail snaps
     /// open whenever a stub glyph is clicked.
@@ -269,6 +274,9 @@ struct ContentView: View {
                 showFileTree = visible
             }
         }
+        .onChange(of: e2eBridge?.pendingFlowsZoomLaneID) { _, _ in
+            consumePendingFlowsZoomIfAny()
+        }
     }
 
     @ViewBuilder
@@ -291,12 +299,20 @@ struct ContentView: View {
             FlowsOverviewView(
                 flows: session.flows,
                 planLaneInputs: planLaneInputs,
+                zoomedLaneID: $flowsZoomLaneID,
                 onJumpToTerminal: { workspaceID in
                     // Same activation shape as WorkspaceSidebar.selectWorkspace:
                     // flip back to the terminal view before activating, so
                     // the switch isn't silent.
                     sidebarMode = .workspace
                     store.activate(workspaceID)
+                },
+                onOpenTranscript: { sessionID in openTranscript(sessionID: sessionID) },
+                onZoomBegin: { sessionID in
+                    session.beginFlowsZoom(sessionID: sessionID, cwd: sessionCwd(forSessionID: sessionID))
+                },
+                onZoomEnd: { sessionID in
+                    session.endFlowsZoom(sessionID: sessionID)
                 }
             )
         case .library:
@@ -643,6 +659,27 @@ struct ContentView: View {
         PlanLaneAssembler.inputs(docStore: docStore, queue: planQueue, store: store)
     }
 
+    /// A live session's cwd, from `FlowStore`'s own record of it — the
+    /// zoom seam and "open transcript" both need this, and neither is
+    /// handed the lane directly (they only get a bare `sessionID`), so
+    /// both re-resolve it here rather than threading `Flow` itself
+    /// through `FlowsOverviewView`'s closures.
+    private func sessionCwd(forSessionID sessionID: String) -> String? {
+        session.flows.flows.first(where: { $0.sessionID == sessionID })?.sessionCwd
+    }
+
+    /// Open a zoomed lane's session transcript as a Monaco tab — same
+    /// `openFile` glue as the file tree, just resolving the path via
+    /// `ClaudeHome` instead of a tree click. Falls back to the project
+    /// root when the lane's cwd isn't known yet (shouldn't happen once
+    /// a session lane is old enough to be zoomable, but degrades to a
+    /// plausible path rather than crashing on a force-unwrap).
+    private func openTranscript(sessionID: String) {
+        let cwd = sessionCwd(forSessionID: sessionID) ?? session.project.rootPath.path
+        let url = ClaudeHome.transcriptURL(home: ClaudeHome.root(), cwd: cwd, sessionID: sessionID)
+        openFile(url)
+    }
+
     /// Open a file (clicked in the tree) as a Monaco tab in the active
     /// feature's pane. Flips to the terminal/tab view so the new tab is
     /// visible, mirroring `openBrowserTab`'s behavior. `line` jumps the
@@ -680,6 +717,17 @@ struct ContentView: View {
         guard let bridge = e2eBridge, let mode = bridge.pendingSidebarMode else { return }
         bridge.pendingSidebarMode = nil
         sidebarMode = mode
+    }
+
+    /// Same consume-and-clear shape as `consumePendingSidebarModeIfAny`,
+    /// but with an extra wrinkle: `nil` is itself a valid target value
+    /// (clear the zoom), so the bridge can't use `nil` as its own
+    /// "nothing pending" marker — it uses the empty string as that
+    /// sentinel instead (see `E2EBridge.pendingFlowsZoomLaneID`).
+    private func consumePendingFlowsZoomIfAny() {
+        guard let bridge = e2eBridge, let laneID = bridge.pendingFlowsZoomLaneID else { return }
+        bridge.pendingFlowsZoomLaneID = nil
+        flowsZoomLaneID = laneID.isEmpty ? nil : laneID
     }
 }
 

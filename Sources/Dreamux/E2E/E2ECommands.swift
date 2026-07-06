@@ -109,6 +109,8 @@ enum E2ECommands {
             return handleQueueState()
         case "flowsState":
             return try flowsState(request: request)
+        case "zoomFlow":
+            return try zoomFlow(request: request)
         case "quit":
             return ["ok": true]
         default:
@@ -699,11 +701,27 @@ enum E2ECommands {
         var lane: [String: Any] = [
             "id": flow.id, "title": flow.title,
             "kind": flow.kind.rawValue, "status": flow.status.rawValue,
-            "nodes": flow.nodes.map { ["id": $0.id, "label": $0.label, "status": $0.status.rawValue] },
+            "nodes": flow.nodes.map { node -> [String: Any] in
+                var wire: [String: Any] = ["id": node.id, "label": node.label, "status": node.status.rawValue]
+                if let lastActivity = node.lastActivity { wire["lastActivity"] = lastActivity }
+                return wire
+            },
         ]
         if let detail = flow.detail { lane["detail"] = detail }
         if flow.detailUnavailable { lane["detailUnavailable"] = true }
+        if let sessionCwd = flow.sessionCwd { lane["sessionCwd"] = sessionCwd }
         return lane
+    }
+
+    /// Zoom the Flows pane into a lane (or clear the zoom with a `null`/
+    /// absent `laneID`) — parks the request on the bridge for
+    /// `ContentView` to adopt, same consume-and-clear shape as
+    /// `setSidebarMode`. See `E2EBridge.pendingFlowsZoomLaneID` for why
+    /// "clear" is the empty-string sentinel rather than `nil` itself.
+    private static func zoomFlow(request: [String: Any]) throws -> [String: Any] {
+        let (handles, _, _) = try projectStores()
+        handles.bridge.pendingFlowsZoomLaneID = (request["laneID"] as? String) ?? ""
+        return ["ok": true]
     }
 
     /// Play semantics — worktree-centric, never a question. Flexible

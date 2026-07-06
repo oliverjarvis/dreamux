@@ -708,6 +708,38 @@ Field notes:
   needs review/merge or the queue is `atGate`/`attention` on it, then
   `"drain"`. `lane.detail` (omitted unless set) carries `"queued
   #<n>"` while the plan sits in the queue unstarted.
+- `lane.sessionCwd` (omitted unless known) is the backing session's
+  working directory — populated once the registry has observed the
+  session at least once. `nodes[].lastActivity` (omitted unless set) is
+  a one-line summary of that node's most recent transcript activity
+  (tool call summary for the session node, subagent meta description
+  for an agent node) — the same text the zoom detail view's inspector
+  shows.
+
+### `zoomFlow`
+
+Zoom the Flows pane into one lane's DAG detail view (`FlowDetailView`),
+or clear the zoom back to the overview. `laneID` is a `flowsState`
+lane id (`"session-<sessionId>"` or `"plan-<planPath>"`); omit it or
+pass `null` to clear. Parked on the bridge and adopted by `ContentView`
+the same consume-and-clear way `setSidebarMode` is — call `flowsState`
+afterward (or just wait) to confirm the zoom landed before screenshotting,
+since adoption happens on the next SwiftUI update pass. Zooming into a
+lane with a `sessionID` triggers a one-time full replay of that
+session's transcript (`ProjectSession.beginFlowsZoom`, the pool's
+`ensureLazyTail`) — the hot-tail path (used while a session is merely
+`running`/`waiting`) only ever reads from the point it started
+watching, so a transcript written to disk before the session first
+entered the hot set is otherwise never read at all; zooming is the only
+way to pull that history in.
+
+```
+→ {"cmd":"zoomFlow","laneID":"session-e2e-session-1"}
+← {"ok":true}
+
+→ {"cmd":"zoomFlow","laneID":null}
+← {"ok":true}
+```
 
 ### `courseCorrect`
 

@@ -32,14 +32,29 @@ enum FlowStatusGlyph {
 struct FlowLaneView: View {
     let lane: FlowsBoard.Lane
     var onJumpToTerminal: ((UUID) -> Void)?
+    /// Zoom into this lane's DAG detail view. `nil` (e.g. a future
+    /// preview/read-only context) just makes the row inert.
+    var onZoom: (() -> Void)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            header
-            pipeline
+            // A plain tap gesture rather than wrapping header+pipeline in
+            // a Button: `pipeline` is itself a horizontal ScrollView, and
+            // nesting a scrollable view inside a Button's label risks the
+            // button eating short scroll drags as taps. The needs-you
+            // chip below is a SIBLING (its own Button, jump to terminal),
+            // not nested inside this tap area, so the two actions never
+            // both fire for the same tap.
+            VStack(alignment: .leading, spacing: 6) {
+                header
+                pipeline
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { onZoom?() }
+
             if lane.effectiveStatus == .waiting, let detail = lane.flow.detail {
                 needsYouChip(detail)
             }

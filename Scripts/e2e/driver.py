@@ -27,7 +27,9 @@ Environment contract (set by run-e2e.sh):
   DREAMUX_GH_BIN     the fake gh shim (forwarded to the app)
   DREAMUX_CLAUDE_HOME synthetic ~/.claude root (forwarded to the app);
                        scenario_flows writes session-registry entries
-                       under its sessions/ dir
+                       under its sessions/ dir, and a synthetic
+                       transcript + subagent meta under projects/<slug>/
+                       for the zoomFlow lazy-replay step
 
 Exit status: 0 only when every scenario passed.
 """
@@ -888,7 +890,8 @@ def scenario_publish_pr(d):
 def scenario_flows(d):
     """Flows pane: a synthetic registry session plus real emit-socket
     signals render a running lane, then a notification flips it to
-    needs-you.
+    needs-you, then a synthetic transcript + subagent meta on disk let
+    zoomFlow exercise the lazy full-replay tailer.
 
     The lane's cwd must resolve to a real workspace or FlowStore's
     isInProject scoping drops it (see FlowWiring.workspaceID) — so this
@@ -970,6 +973,102 @@ def scenario_flows(d):
             "notification detail missing")
     time.sleep(1.0)
     d.screenshot("flows-needs-you")
+
+    # 5. Zoom: exercise the lazy FULL-REPLAY tailer + subagent-meta join —
+    # paths the hot-tail steps above never touch. This session's hot
+    # tailer started (step 1, EOF-seek) before any transcript file
+    # existed on disk, retried once, then went dormant (see
+    # ClaudeTranscriptTailer's one-retry-then-dormant policy); only
+    # `zoomFlow`'s lazy tail (`FlowTailerPool.ensureLazyTail`,
+    # `start(replayExisting: true)`) ever opens it. `slug` mirrors
+    # `ClaudeHome.projectSlug`'s non-alphanumeric→dash rule so the file
+    # lands exactly where the app's tailer pool will look for it.
+    slug = "".join(ch if ch.isalnum() else "-" for ch in cwd)
+    project_dir = os.path.join(CLAUDE_HOME, "projects", slug)
+    os.makedirs(project_dir, exist_ok=True)
+    transcript_path = os.path.join(project_dir, f"{session_id}.jsonl")
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+    transcript_lines = [
+        # Agent/Task tool_use -> .agentSpawned, joined to agent-e2e-a1
+        # (already on the lane from step 2's hook emit) via the subagent
+        # meta's toolUseId below.
+        {
+            "type": "assistant", "timestamp": ts,
+            "message": {"content": [{
+                "type": "tool_use", "id": "toolu-e2e-agent1", "name": "Task",
+                "input": {"subagent_type": "Explore", "description": "Explore the codebase"},
+            }]},
+        },
+        # Plain tool_use -> .toolStarted, sets the SESSION node's
+        # lastActivity — the one signal in this scenario that only a
+        # transcript replay can produce (none of the emit-socket hooks
+        # above ever touch it).
+        {
+            "type": "assistant", "timestamp": ts,
+            "message": {"content": [{
+                "type": "tool_use", "id": "toolu-e2e-bash1", "name": "Bash",
+                "input": {"command": "npm test"},
+            }]},
+        },
+        {
+            "type": "user", "timestamp": ts,
+            "message": {"content": [{
+                "type": "tool_result", "tool_use_id": "toolu-e2e-bash1", "is_error": False,
+            }]},
+        },
+    ]
+    with open(transcript_path, "w", encoding="utf-8") as f:
+        for line in transcript_lines:
+            f.write(json.dumps(line) + "\n")
+
+    subagents_dir = os.path.join(project_dir, session_id, "subagents")
+    os.makedirs(subagents_dir, exist_ok=True)
+    with open(os.path.join(subagents_dir, "agent-e2e-a1.meta.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "agentType": "Explore", "description": "Exploring the repository",
+            "toolUseId": "toolu-e2e-agent1", "spawnDepth": 1,
+        }, f)
+
+    write_registry_entry("busy")
+
+    # Smoke-test Monaco/openFileTab against an absolute path OUTSIDE the
+    # project (the transcript lives under DREAMUX_CLAUDE_HOME, not the
+    # feature worktree) — the same `openFileTab` call the zoom detail
+    # view's "Open transcript" button makes.
+    resp = d.cmd("openFile", path=transcript_path)
+    require(resp.get("ok"), "openFile should accept an absolute path outside the project")
+
+    d.cmd("zoomFlow", laneID=f"session-{session_id}")
+
+    def zoomed_and_enriched():
+        state = d.cmd("flowsState")
+        lane = next((l for l in state["lanes"] if l["id"] == f"session-{session_id}"), None)
+        if not lane:
+            return None
+        session_node = next((n for n in lane["nodes"] if n["id"] == "session"), None)
+        agent_node = next((n for n in lane["nodes"] if n["id"] == "agent-e2e-a1"), None)
+        # Also wait for the 3s registry poll to catch up to the "busy"
+        # flip above — otherwise the screenshot below can land between
+        # polls and still show the stale "waiting" status.
+        if (lane.get("status") == "running"
+                and session_node and session_node.get("lastActivity")
+                and agent_node and agent_node.get("label") == "Explore"):
+            return lane
+        return None
+
+    lane = d.wait_until(
+        zoomed_and_enriched, 15.0,
+        "lane running + session lastActivity + agent-e2e-a1 label enriched after zoomFlow's full transcript replay")
+    require(lane.get("detailUnavailable") is not True,
+            "lane detail should still be trustworthy after the zoom replay")
+    node_ids = {n["id"] for n in lane["nodes"]}
+    require({"src", "session", "agent-e2e-a1", "drain"} <= node_ids,
+            f"expected DAG nodes missing, got {node_ids}")
+
+    time.sleep(1.0)
+    d.screenshot("flows-zoom")
+
+    d.cmd("zoomFlow", laneID=None)
 
 
 def scenario_quit(d):
