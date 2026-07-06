@@ -148,6 +148,16 @@ final class FlowStore: ObservableObject {
     private var pendingSpawns: [String: [String: (type: String?, desc: String?)]] = [:]
     private var skippedByLane: [String: Int] = [:]
 
+    /// toolUseID → loop signature, keyed by lane, from `toolStarted` to
+    /// its matching `toolFinished`. Populated for every tool call (even
+    /// ones that turn out to join an agent) since the agent/tool call
+    /// isn't known until completion; scheduled lanes never populate
+    /// this, which is what makes them skip loop tracking downstream.
+    private var pendingToolSignatures: [String: [String: String]] = [:]
+    /// A lane's recent tool completions, capped at `LoopDetector.windowSize`
+    /// (oldest dropped first) — the window `LoopDetector.detect` runs over.
+    private var toolCompletionRings: [String: [ToolCompletion]] = [:]
+
     private static let skippedLinesThreshold = 50
     private static let agentFanOutCap = 6
     private static let collapsedAgentNodeID = "agents-collapsed"
@@ -175,6 +185,12 @@ final class FlowStore: ObservableObject {
             if agentIDByToolUse[laneID]?[toolUseID] == nil && pendingSpawns[laneID]?[toolUseID] == nil {
                 setNode(in: &lane, id: "session") { $0.lastActivity = summary ?? tool }
             }
+            // Scheduled lanes skip loop tracking entirely; not recording
+            // a pending signature here is what makes toolFinished below
+            // a no-op for them.
+            if lane.kind != .scheduled {
+                pendingToolSignatures[laneID, default: [:]][toolUseID] = LoopDetector.signature(tool: tool, summary: summary)
+            }
         case let .agentSpawned(toolUseID, agentType, description, _):
             if let agentID = agentIDByToolUse[laneID]?[toolUseID] {
                 setNode(in: &lane, id: "agent-\(agentID)") { node in
@@ -195,6 +211,17 @@ final class FlowStore: ObservableObject {
                     node.status = isError ? .failed : .done
                     node.endedAt = at
                 }
+                // Agent results aren't commands — never fed into the
+                // loop ring (and their pending signature is simply left
+                // unpopped; it's swept with the rest at session end).
+            } else if let signature = pendingToolSignatures[laneID]?.removeValue(forKey: toolUseID) {
+                var ring = toolCompletionRings[laneID] ?? []
+                ring.append(ToolCompletion(signature: signature, isError: isError, at: at))
+                if ring.count > LoopDetector.windowSize {
+                    ring.removeFirst(ring.count - LoopDetector.windowSize)
+                }
+                toolCompletionRings[laneID] = ring
+                reconcileLoopEdge(in: &lane, ring: ring)
             }
         }
 
@@ -288,6 +315,24 @@ final class FlowStore: ObservableObject {
         }
     }
 
+    /// Replace/insert/remove the lane's single `.loop` self-edge to
+    /// match what `LoopDetector.detect` says about its current ring.
+    /// Never creates a second edge; only mutates `lane.edges` when the
+    /// edge's content actually changed (or it's removed/added).
+    private func reconcileLoopEdge(in lane: inout Flow, ring: [ToolCompletion]) {
+        let index = lane.edges.firstIndex { $0.kind == .loop && $0.from == "session" && $0.to == "session" }
+        guard let detected = LoopDetector.detect(window: ring) else {
+            if let index { lane.edges.remove(at: index) }
+            return
+        }
+        let edge = FlowEdge(from: "session", to: "session", kind: .loop, label: detected.signature, iterations: detected.count)
+        if let index {
+            if lane.edges[index] != edge { lane.edges[index] = edge }
+        } else {
+            lane.edges.append(edge)
+        }
+    }
+
     // MARK: - Internals
 
     private func makeSessionLane(laneID: String, sessionID: String, kind: FlowKind, cwd: String?, startedAt: Date) -> Flow {
@@ -332,6 +377,10 @@ final class FlowStore: ObservableObject {
         pendingSpawns[lane.id] = nil
         agentIDByToolUse[lane.id] = nil
         skippedByLane[lane.id] = nil
+        pendingToolSignatures[lane.id] = nil
+        toolCompletionRings[lane.id] = nil
+        // A finished session isn't looping.
+        lane.edges.removeAll { $0.kind == .loop && $0.from == "session" && $0.to == "session" }
     }
 
     /// Mutate one node by id. A missing node is ignored silently —
