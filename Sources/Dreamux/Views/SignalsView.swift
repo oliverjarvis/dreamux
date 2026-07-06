@@ -234,7 +234,7 @@ struct SignalsView: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             } else {
-                FlowLayout(spacing: 4) {
+                SignalFlowLayout(spacing: 4) {
                     ForEach(items, id: \.self) { item in
                         Chip(
                             label: label(item),
@@ -439,12 +439,12 @@ private struct Chip: View {
     }
 }
 
-// MARK: - FlowLayout
+// MARK: - SignalFlowLayout
 
 /// Minimal flow layout for the chip row — wraps to the next line when
 /// the container width is exceeded. SwiftUI's HStack doesn't wrap, so we
 /// roll our own via the Layout protocol.
-private struct FlowLayout: Layout {
+private struct SignalFlowLayout: Layout {
     var spacing: CGFloat = 4
 
     func sizeThatFits(
