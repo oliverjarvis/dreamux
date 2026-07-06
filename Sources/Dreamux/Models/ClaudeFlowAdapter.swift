@@ -1,5 +1,32 @@
 import Foundation
 
+struct SubagentMeta: Equatable, Sendable {
+    let agentID: String
+    let agentType: String?
+    let description: String?
+    let toolUseID: String?
+    let spawnDepth: Int?
+
+    /// Filename convention: agent-<id>.meta.json. Tolerant of unknown
+    /// keys (team-member metas carry extras) and missing fields.
+    static func parse(url: URL) -> SubagentMeta? {
+        let name = url.lastPathComponent
+        guard name.hasPrefix("agent-"), name.hasSuffix(".meta.json") else { return nil }
+        let agentID = String(name.dropFirst("agent-".count).dropLast(".meta.json".count))
+        guard !agentID.isEmpty,
+              let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return SubagentMeta(
+            agentID: agentID,
+            agentType: obj["agentType"] as? String,
+            description: obj["description"] as? String,
+            toolUseID: obj["toolUseId"] as? String,
+            spawnDepth: obj["spawnDepth"] as? Int
+        )
+    }
+}
+
 /// A tool-agnostic lifecycle event consumed by FlowStore. Adapters
 /// produce these; nothing downstream knows where they came from.
 enum FlowEvent: Equatable, Sendable {
@@ -164,5 +191,15 @@ extension ClaudeFlowAdapter {
         guard let raw, !raw.isEmpty else { return nil }
         let firstLine = raw.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? raw
         return firstLine.count > 120 ? String(firstLine.prefix(120)) + "…" : firstLine
+    }
+
+    /// Last-activity summary from a subagent transcript's appended lines:
+    /// the most recent toolStarted summary, if any.
+    static func lastActivity(fromAgentLines lines: [String]) -> String? {
+        let (events, _) = transcriptEvents(fromLines: lines)
+        for event in events.reversed() {
+            if case let .toolStarted(_, _, summary, _) = event, let summary { return summary }
+        }
+        return nil
     }
 }
