@@ -21,14 +21,14 @@ enum FlowStatusGlyph {
         case .queued: return .secondary
         case .done: return .green
         case .failed: return .red
-        case .waiting: return Color(nsColor: .systemOrange)
+        case .waiting: return .orange
         }
     }
 }
 
 /// One lane: header row (glyph, title, elapsed, session chip) above a
 /// horizontal source→drain pipeline of node chips. Scheduled lanes get
-/// the compact single-row treatment with a ↺ marker.
+/// a recurrence marker in the header.
 struct FlowLaneView: View {
     let lane: FlowsBoard.Lane
     var onJumpToTerminal: ((UUID) -> Void)?
@@ -55,7 +55,7 @@ struct FlowLaneView: View {
     private var header: some View {
         HStack(spacing: 8) {
             if lane.flow.kind == .scheduled {
-                Image(systemName: "arrow.trianglehead.2.counterclockwise")
+                Image(systemName: "arrow.2.circlepath")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
@@ -110,7 +110,7 @@ struct FlowLaneView: View {
         .background(
             Capsule().fill(FlowStatusGlyph.color(node.status).opacity(node.status == .queued ? 0.06 : 0.12))
         )
-        .help("\(node.label) — \(String(describing: node.status))")
+        .help("\(node.label) — \(node.status.rawValue)")
     }
 
     private func needsYouChip(_ detail: String) -> some View {
