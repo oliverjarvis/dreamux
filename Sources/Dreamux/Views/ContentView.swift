@@ -287,7 +287,17 @@ struct ContentView: View {
         case .signals:
             SignalsView(signals: signals, runners: runners, projectDir: repoStore.project.rootPath.path)
         case .flows:
-            Color.clear // Flows pane lands in Task 6
+            FlowsOverviewView(
+                flows: session.flows,
+                planLaneInputs: planLaneInputs,
+                onJumpToTerminal: { workspaceID in
+                    // Same activation shape as WorkspaceSidebar.selectWorkspace:
+                    // flip back to the terminal view before activating, so
+                    // the switch isn't silent.
+                    sidebarMode = .workspace
+                    store.activate(workspaceID)
+                }
+            )
         case .library:
             LibraryView(projectRoot: repoStore.project.rootPath)
         }
@@ -616,6 +626,46 @@ struct ContentView: View {
             return plan.title
         }
         return workspace.name
+    }
+
+    // MARK: - Flows
+
+    /// Assemble PlanLaneInputs from the same state `PlansSpecsSection`
+    /// renders: DocStore plans, derived PlanStatus, PlanPhases groups,
+    /// queue position, ledger start time, live workspace. `docStore`,
+    /// `planQueue`, and `store` are all `@Observable`, and this is called
+    /// from `FlowsOverviewView.board` during its own `body` evaluation, so
+    /// these reads register as that view's dependencies — a plan-state
+    /// change (checkbox ticked, queue advances, workspace appears)
+    /// re-renders the Flows pane on its own, with no reliance on
+    /// `FlowStore`'s next publish.
+    private func planLaneInputs() -> [PlanLaneInput] {
+        docStore.plans.map { plan in
+            let path = docStore.relativePath(of: plan)
+            let status = docStore.status(for: plan) { name in store.featureNames.contains(name) }
+            // Mirrors PlansSpecsSection.renderableTasks: a heading with no
+            // checkbox steps (e.g. `### Notes`) isn't a row worth counting.
+            let tasks = plan.tasks.filter { !$0.steps.isEmpty }
+            let groups = PlanPhases.shouldGroup(tasks) ? PlanPhases.groups(tasks) : []
+            let record = docStore.ledger.recordForPlan(path)
+            let feature = AdHocWorkspaces.featureName(for: plan) { doc in
+                docStore.ledger.recordForPlan(docStore.relativePath(of: doc))
+            }
+            let workspace = store.featureWorkspace(named: feature)
+            return PlanLaneInput(
+                planPath: path,
+                title: plan.title,
+                status: status,
+                phases: groups.map {
+                    PlanPhaseSummary(title: $0.phase ?? "Steps", checkedSteps: $0.checkedSteps, totalSteps: $0.totalSteps)
+                },
+                queueOrdinal: planQueue.entries.firstIndex(of: path).map { $0 + 1 },
+                isCurrentQueuePlan: planQueue.currentPlanPath == path,
+                queueState: planQueue.state,
+                workspaceID: workspace?.id,
+                startedAt: record?.startedAt
+            )
+        }
     }
 
     /// Open a file (clicked in the tree) as a Monaco tab in the active
