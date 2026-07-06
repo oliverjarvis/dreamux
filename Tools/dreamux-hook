@@ -82,9 +82,17 @@ def read_stdin_json() -> Optional[dict]:
     if not raw.strip():
         return None
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except Exception:
         return None
+    if not isinstance(parsed, dict):
+        # Every caller treats the result as a dict (.get(...) chains in
+        # flow_handler/notify_handler/emit_signal); a top-level JSON
+        # array/string/number would otherwise raise AttributeError and
+        # crash the hook. Guarded centrally so every handler stays silent.
+        log("stdin_skip", reason="not_a_dict", type=type(parsed).__name__)
+        return None
+    return parsed
 
 
 # ---------------------------------------------------------------------------

@@ -116,6 +116,14 @@ final class DreamuxHookFlowTests: XCTestCase {
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 0)
     }
+
+    func testNonDictStdinJSONIsSilentlyFine() throws {
+        // Top-level JSON array (or any non-dict) → every handler's
+        // payload.get(...) chain would AttributeError without the
+        // isinstance(dict) guard in read_stdin_json(). exit 0 either way.
+        try runHook(args: ["flow"], stdin: "[1,2,3]")
+        try runHook(args: ["notify"], stdin: "[1,2,3]")
+    }
 }
 
 /// Lock-boxed Signal for cross-queue capture in expectations.
