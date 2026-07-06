@@ -21,27 +21,40 @@ final class FlowLayoutEngineTests: XCTestCase {
 
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // y(rank) = margin + rank * (nodeSize.height + rankGap) + nodeSize.height/2
-        // margin = 24, nodeSize.height = 44, rankGap = 56
-        // rank 0: y = 24 + 0 * (44 + 56) + 22 = 46
-        // rank 1: y = 24 + 1 * (44 + 56) + 22 = 146
-        // rank 2: y = 24 + 2 * (44 + 56) + 22 = 246
-        let expectedY0 = CGFloat(24 + 0 * (44 + 56) + 22)  // 46
-        let expectedY1 = CGFloat(24 + 1 * (44 + 56) + 22)  // 146
-        let expectedY2 = CGFloat(24 + 2 * (44 + 56) + 22)  // 246
+        // Coordinate derivation: y(rank) = margin + rank * (nodeSize.height + rankGap) + nodeSize.height/2
+        // With margin = 24, nodeSize.height = 44, rankGap = 56:
+        // rank 0: y = 24 + 0 * 100 + 22 = 46
+        // rank 1: y = 24 + 1 * 100 + 22 = 146
+        // rank 2: y = 24 + 2 * 100 + 22 = 246
+        //
+        // Single column (1 node per rank): maxColumn = 0, columnSpacing = 168
+        // contentWidth = 0 * 168 + 150 = 150
+        // canvasWidth = 150 + 2*24 = 198, centerX = 99
+        // x(all) = 99 - 0*168/2 + 0*168 = 99
+        //
+        // canvasHeight = 2*24 + 2*100 + 44 = 292
+
+        let expectedX = CGFloat(99)
+        let expectedY0 = CGFloat(46)
+        let expectedY1 = CGFloat(146)
+        let expectedY2 = CGFloat(246)
+        let expectedSize = CGSize(width: 198, height: 292)
 
         let srcPos = layout.positions["src"]!
         let aPos = layout.positions["a"]!
         let drainPos = layout.positions["drain"]!
 
-        // All three should have same x (centered)
-        XCTAssertEqual(srcPos.x, aPos.x)
-        XCTAssertEqual(aPos.x, drainPos.x)
+        // Exact x and y coordinates
+        XCTAssertEqual(srcPos.x, expectedX)
+        XCTAssertEqual(aPos.x, expectedX)
+        XCTAssertEqual(drainPos.x, expectedX)
 
-        // Y should match rank-based formula
         XCTAssertEqual(srcPos.y, expectedY0)
         XCTAssertEqual(aPos.y, expectedY1)
         XCTAssertEqual(drainPos.y, expectedY2)
+
+        // Symmetric 24px margins top and bottom
+        XCTAssertEqual(layout.size, expectedSize)
     }
 
     // MARK: Test 2 — Fan-out src→{a,b,c}→drain: a,b,c share rank, ordered by id
@@ -64,10 +77,22 @@ final class FlowLayoutEngineTests: XCTestCase {
 
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // y(rank) formulas
-        let expectedY0 = CGFloat(24 + 0 * (44 + 56) + 22)  // 46
-        let expectedY1 = CGFloat(24 + 1 * (44 + 56) + 22)  // 146
-        let expectedY2 = CGFloat(24 + 2 * (44 + 56) + 22)  // 246
+        // Coordinate derivation: 3 columns (a, b, c at indices 0, 1, 2)
+        // maxColumn = 2, columnSpacing = 168
+        // contentWidth = 2 * 168 + 150 = 486
+        // canvasWidth = 486 + 2*24 = 534, centerX = 267
+        // startX = 267 - 2*168/2 = 99
+        // x(a) = 99 + 0*168 = 99
+        // x(b) = 99 + 1*168 = 267
+        // x(c) = 99 + 2*168 = 435
+        // x(src) at rank 0 (single node): 99
+        // x(drain) at rank 2 (single node): 99
+        //
+        // y-coordinates: rank 0: 46, rank 1: 146, rank 2: 246
+
+        let expectedY0 = CGFloat(46)
+        let expectedY1 = CGFloat(146)
+        let expectedY2 = CGFloat(246)
 
         let srcPos = layout.positions["src"]!
         let aPos = layout.positions["a"]!
@@ -75,20 +100,26 @@ final class FlowLayoutEngineTests: XCTestCase {
         let cPos = layout.positions["c"]!
         let drainPos = layout.positions["drain"]!
 
-        // src at rank 0
+        // Y coordinates by rank
         XCTAssertEqual(srcPos.y, expectedY0)
-
-        // a, b, c at same rank (rank 1)
         XCTAssertEqual(aPos.y, expectedY1)
         XCTAssertEqual(bPos.y, expectedY1)
         XCTAssertEqual(cPos.y, expectedY1)
-
-        // drain at rank 2
         XCTAssertEqual(drainPos.y, expectedY2)
 
-        // a, b, c should be ordered by id and spread horizontally
-        // Check they don't overlap: pairwise distance >= nodeSize.width + siblingGap
-        let minDistance: CGFloat = 150 + 18  // nodeSize.width + siblingGap = 168
+        // X coordinates: exact values and ordering
+        XCTAssertEqual(aPos.x, 99)
+        XCTAssertEqual(bPos.x, 267)
+        XCTAssertEqual(cPos.x, 435)
+        XCTAssertEqual(srcPos.x, 99)
+        XCTAssertEqual(drainPos.x, 99)
+
+        // Verify ordering a < b < c
+        XCTAssertLessThan(aPos.x, bPos.x)
+        XCTAssertLessThan(bPos.x, cPos.x)
+
+        // Verify no overlaps: min distance >= nodeSize.width + siblingGap
+        let minDistance: CGFloat = 150 + 18  // 168
         XCTAssertGreaterThanOrEqual(abs(bPos.x - aPos.x), minDistance)
         XCTAssertGreaterThanOrEqual(abs(cPos.x - bPos.x), minDistance)
     }
@@ -162,7 +193,7 @@ final class FlowLayoutEngineTests: XCTestCase {
         XCTAssertEqual(layout.size, CGSize(width: 0, height: 0))
     }
 
-    // MARK: Test 6 — Size calculation and no overlaps
+    // MARK: Test 6 — Size calculation and symmetric margins
     func testSizeAndOverlaps() {
         let nodes = [
             FlowNode(id: "src", kind: .source, label: "source", status: .done),
@@ -179,15 +210,26 @@ final class FlowLayoutEngineTests: XCTestCase {
 
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // Size should be max extent + one nodeSize margin (nodeSize = 150x44)
-        // Height: max y + nodeSize.height/2 + 24 margin
-        // Width: calculated based on node positions
-        XCTAssertGreaterThan(layout.size.width, 0)
-        XCTAssertGreaterThan(layout.size.height, 0)
+        // 2 columns (a, b at indices 0, 1): maxColumn = 1, columnSpacing = 168
+        // contentWidth = 1 * 168 + 150 = 318
+        // canvasWidth = 318 + 2*24 = 366, centerX = 183
+        // Node extents: leftmost at (99 - 75 = 24), rightmost at (267 + 75 = 342)
+        // Layout height: 3 ranks with max rank = 2
+        // canvasHeight = 2*24 + 2*100 + 44 = 292
 
-        // Verify no overlaps: pairwise distance >= nodeSize.width + siblingGap for same rank
-        let aPos = layout.positions["a"]!
-        let bPos = layout.positions["b"]!
+        let expectedSize = CGSize(width: 366, height: 292)
+        XCTAssertEqual(layout.size, expectedSize)
+
+        // Verify exact margin symmetry: left and right edges at 24px from canvas edges
+        let aPos = layout.positions["a"]!  // x = 99
+        let bPos = layout.positions["b"]!  // x = 267
+
+        // Left edge of node a: 99 - 75 = 24
+        XCTAssertEqual(aPos.x - 75, 24)
+        // Right edge of node b: 267 + 75 = 342, should be canvasWidth - 24 = 342
+        XCTAssertEqual(bPos.x + 75, layout.size.width - 24)
+
+        // Verify no overlaps: pairwise distance >= nodeSize.width + siblingGap
         let minDistance: CGFloat = 150 + 18
         XCTAssertGreaterThanOrEqual(abs(bPos.x - aPos.x), minDistance)
     }

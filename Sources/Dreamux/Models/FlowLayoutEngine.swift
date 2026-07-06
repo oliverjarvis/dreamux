@@ -115,12 +115,17 @@ enum FlowLayoutEngine {
 
         // Calculate dimensions
         let maxRank = rankGroups.keys.max() ?? 0
-        let maxY = margin + CGFloat(maxRank) * (nodeHeight + rankGap) + nodeHeight / 2
-        let canvasHeight = maxY + margin
-
         let maxColumn = columns.values.max() ?? 0
         let columnSpacing = nodeWidth + siblingGap
-        let contentWidth = CGFloat(maxColumn + 1) * columnSpacing - siblingGap + nodeWidth
+
+        // Canvas height: top margin + node centers + bottom margin
+        // bottommost center y = margin + maxRank * (nodeHeight + rankGap) + nodeHeight/2
+        // bottommost node extends nodeHeight/2 below its center
+        let canvasHeight = 2 * margin + CGFloat(maxRank) * (nodeHeight + rankGap) + nodeHeight
+
+        // Canvas width: left/right margins + node spans
+        // contentWidth spans from leftmost node left edge to rightmost node right edge
+        let contentWidth = CGFloat(maxColumn) * columnSpacing + nodeWidth
         let canvasWidth = contentWidth + 2 * margin
 
         let centerX = canvasWidth / 2
