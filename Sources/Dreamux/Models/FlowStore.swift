@@ -74,23 +74,17 @@ final class FlowStore: ObservableObject {
     // MARK: - Event feed (live signals + replay)
 
     func apply(event: FlowEvent) {
-        let laneID: String
+        let sessionID: String
         switch event {
-        case let .agentStarted(sessionID, _, _, _, _, _),
-             let .agentStopped(sessionID, _, _, _),
-             let .taskCreated(sessionID, _, _, _, _),
-             let .taskCompleted(sessionID, _, _, _),
-             let .sessionStopped(sessionID, _, _),
-             let .notification(sessionID, _, _, _):
-            laneID = "session-\(sessionID)"
+        case let .agentStarted(id, _, _, _, _, _),
+             let .agentStopped(id, _, _, _),
+             let .taskCreated(id, _, _, _, _),
+             let .taskCompleted(id, _, _, _),
+             let .sessionStopped(id, _, _),
+             let .notification(id, _, _, _):
+            sessionID = id
         }
-        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
-            laneID: laneID,
-            sessionID: String(laneID.dropFirst("session-".count)),
-            kind: .adhoc,
-            cwd: event.cwd,
-            startedAt: event.at
-        )
+        var lane = fetchOrMakeLane(sessionID: sessionID, cwd: event.cwd, at: event.at)
 
         switch event {
         case let .agentStarted(_, agentID, agentType, description, _, at):
@@ -173,9 +167,7 @@ final class FlowStore: ObservableObject {
 
     func apply(transcript event: TranscriptEvent, sessionID: String) {
         let laneID = "session-\(sessionID)"
-        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
-            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: transcriptAt(event) ?? Date()
-        )
+        var lane = fetchOrMakeLane(sessionID: sessionID, cwd: nil, at: transcriptAt(event) ?? Date())
 
         switch event {
         case let .toolStarted(toolUseID, tool, summary, _):
@@ -232,9 +224,7 @@ final class FlowStore: ObservableObject {
 
     func apply(meta: SubagentMeta, sessionID: String) {
         let laneID = "session-\(sessionID)"
-        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
-            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: Date()
-        )
+        var lane = fetchOrMakeLane(sessionID: sessionID, cwd: nil, at: Date())
 
         var pending: (type: String?, desc: String?)?
         if let toolUseID = meta.toolUseID {
@@ -252,10 +242,7 @@ final class FlowStore: ObservableObject {
     }
 
     func apply(agentActivity: String, agentID: String, sessionID: String) {
-        let laneID = "session-\(sessionID)"
-        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
-            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: Date()
-        )
+        var lane = fetchOrMakeLane(sessionID: sessionID, cwd: nil, at: Date())
         setNode(in: &lane, id: "agent-\(agentID)") { $0.lastActivity = agentActivity }
         upsert(lane)
         recomputeAggregates()
@@ -266,9 +253,7 @@ final class FlowStore: ObservableObject {
     /// lane says so instead of silently showing a partial picture.
     func noteSkippedLines(_ count: Int, sessionID: String) {
         let laneID = "session-\(sessionID)"
-        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
-            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: Date()
-        )
+        var lane = fetchOrMakeLane(sessionID: sessionID, cwd: nil, at: Date())
         skippedByLane[laneID, default: 0] += count
         if skippedByLane[laneID]! >= Self.skippedLinesThreshold {
             lane.detailUnavailable = true
@@ -334,6 +319,18 @@ final class FlowStore: ObservableObject {
     }
 
     // MARK: - Internals
+
+    /// Fetch existing lane or create new .adhoc session lane.
+    private func fetchOrMakeLane(sessionID: String, cwd: String?, at: Date) -> Flow {
+        let laneID = "session-\(sessionID)"
+        return flows.first { $0.id == laneID } ?? makeSessionLane(
+            laneID: laneID,
+            sessionID: sessionID,
+            kind: .adhoc,
+            cwd: cwd,
+            startedAt: at
+        )
+    }
 
     private func makeSessionLane(laneID: String, sessionID: String, kind: FlowKind, cwd: String?, startedAt: Date) -> Flow {
         Flow(

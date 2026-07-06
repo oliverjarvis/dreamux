@@ -31,39 +31,47 @@ struct FlowsOverviewView: View {
 
     var body: some View {
         let board = self.board
-        if let zoomedLaneID, let lane = lane(forID: zoomedLaneID, in: board) {
-            FlowDetailView(
-                lane: lane,
-                onBack: { self.zoomedLaneID = nil },
-                onJumpToTerminal: onJumpToTerminal,
-                onOpenTranscript: onOpenTranscript
-            )
-            // Without this, zooming straight from one lane to another
-            // (non-nil -> different non-nil, e.g. a second zoomFlow before
-            // clearing the first) reuses the same view identity — SwiftUI
-            // sees "still a FlowDetailView here" and never fires
-            // onDisappear/onAppear, so the old lane's lazy tail never
-            // releases and the new lane's never begins.
-            .id(zoomedLaneID)
-            .onAppear {
-                if let sessionID = lane.flow.sessionID { onZoomBegin(sessionID) }
-            }
-            .onDisappear {
-                if let sessionID = lane.flow.sessionID { onZoomEnd(sessionID) }
-            }
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14, pinnedViews: []) {
-                    headerRow(board)
-                    if board.sections.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(board.sections) { section in
-                            sectionView(section)
+        return Group {
+            if let zoomedLaneID, let lane = lane(forID: zoomedLaneID, in: board) {
+                FlowDetailView(
+                    lane: lane,
+                    onBack: { self.zoomedLaneID = nil },
+                    onJumpToTerminal: onJumpToTerminal,
+                    onOpenTranscript: onOpenTranscript
+                )
+                // Without this, zooming straight from one lane to another
+                // (non-nil -> different non-nil, e.g. a second zoomFlow before
+                // clearing the first) reuses the same view identity — SwiftUI
+                // sees "still a FlowDetailView here" and never fires
+                // onDisappear/onAppear, so the old lane's lazy tail never
+                // releases and the new lane's never begins.
+                .id(zoomedLaneID)
+                .onAppear {
+                    if let sessionID = lane.flow.sessionID { onZoomBegin(sessionID) }
+                }
+                .onDisappear {
+                    if let sessionID = lane.flow.sessionID { onZoomEnd(sessionID) }
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14, pinnedViews: []) {
+                        headerRow(board)
+                        if board.sections.isEmpty {
+                            emptyState
+                        } else {
+                            ForEach(board.sections) { section in
+                                sectionView(section)
+                            }
                         }
                     }
+                    .padding(16)
                 }
-                .padding(16)
+            }
+        }
+        .onChange(of: board) { oldBoard, newBoard in
+            // Clear zoom binding if the zoomed lane no longer exists in the board
+            if zoomedLaneID != nil && lane(forID: zoomedLaneID!, in: newBoard) == nil {
+                zoomedLaneID = nil
             }
         }
     }

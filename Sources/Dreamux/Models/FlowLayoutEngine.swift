@@ -134,7 +134,7 @@ enum FlowLayoutEngine {
             let rank = ranks[nodeId]!
             let y = margin + CGFloat(rank) * (nodeHeight + rankGap) + nodeHeight / 2
 
-            // Position columns symmetrically around center
+            // Position columns globally centered by widest rank; single-node ranks start at the widest rank's left edge
             let columnCount = maxColumn + 1
             let startX = centerX - (CGFloat(columnCount - 1) * columnSpacing) / 2
             let x = startX + CGFloat(column) * columnSpacing
