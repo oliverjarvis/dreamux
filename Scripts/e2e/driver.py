@@ -1178,6 +1178,103 @@ def scenario_flows(d):
     d.wait_until(loop_edge_cleared, 15.0, "loop edge to disappear from flowsState after a success pair")
 
 
+def scenario_plan_gate(d):
+    """Drive a real plan through the queue to atGate and verify the
+    Flows gate card: plan lane's gate node waiting in flowsState, the
+    expanded card in the overview, and the gate-preselected inspector
+    in zoom. Buttons aren't clickable from the harness — their channels
+    are unit/scenario-covered elsewhere; this pins the rendered state."""
+    plans_dir = os.path.join(PROJECT_DIR, "docs", "plans")
+    os.makedirs(plans_dir, exist_ok=True)
+    plan_rel = "docs/plans/2026-07-06-gate-demo.md"
+    plan_abs = os.path.join(PROJECT_DIR, plan_rel)
+
+    def write_plan(checked):
+        mark = "x" if checked else " "
+        with open(plan_abs, "w", encoding="utf-8") as f:
+            f.write(
+                "# Gate Demo\n\n"
+                "### Task 1: Do the work\n\n"
+                f"- [{mark}] Step one\n"
+                f"- [{mark}] Step two\n")
+
+    write_plan(checked=False)
+    docs = d.cmd("listDocs")
+    entry = next((doc for doc in docs["docs"] if doc["path"] == plan_rel), None)
+    require(entry is not None and entry["status"] == "ready",
+            f"gate-demo plan should be ready, got {entry}")
+
+    d.cmd("enqueuePlan", path=plan_rel)
+    d.cmd("startQueue")
+
+    # runPlan provisions worktrees on every repo (branch = filename
+    # minus date prefix -> gate-demo) and types the fake claude; wait
+    # for the launch to land.
+    def queue_running():
+        qs = d.cmd("queueState")
+        return qs if qs["state"] == "running" and qs.get("current") == plan_rel else None
+    d.wait_until(queue_running, 30.0, "queue running the gate-demo plan")
+
+    # `queue.state`/`current` above flip SYNCHRONOUSLY inside start()/
+    # launch(), before the queue's own async Task even begins awaiting
+    # runPlan (FeatureProvisioner.provision -> ledger.record). So
+    # queue_running() alone races the actual worktree creation — confirmed
+    # by a real run that failed writing into the not-yet-provisioned
+    # worktree. Wait for the doc's status to leave "ready", which only
+    # happens once PlanRunCoordinator.runPlan has awaited provisioning and
+    # written the ledger record (docStore.status derives "running" from
+    # hasRun + featureExists), before touching the worktree on disk.
+    def plan_provisioned():
+        docs = d.cmd("listDocs")
+        entry = next((doc for doc in docs["docs"] if doc["path"] == plan_rel), None)
+        return entry if entry and entry["status"] != "ready" else None
+    d.wait_until(plan_provisioned, 30.0,
+                 "gate-demo plan status to leave ready (worktree provisioned + ledger recorded)")
+
+    # Real committed work on the feature branch so the card's diff stat
+    # has true numbers (+2 -0, 1 file; the other repos' gate-demo
+    # branches have no commits and contribute zeros).
+    wt = worktree("portenv-server", "gate-demo")
+    with open(os.path.join(wt, "GATE-NOTES.md"), "w", encoding="utf-8") as f:
+        f.write("gate card payload\nsecond line\n")
+    git("add", "-A", cwd=wt)
+    git("commit", "-m", "gate-demo: payload", cwd=wt)
+
+    # All boxes checked -> statusForPlan (which refreshes DocStore
+    # itself) reads awaitingReview -> queueState's synchronous tick
+    # flips running -> atGate.
+    write_plan(checked=True)
+    def at_gate():
+        qs = d.cmd("queueState")
+        return qs if qs["state"] == "atGate" else None
+    d.wait_until(at_gate, 15.0, "queue to reach atGate")
+
+    # The card's data condition + the unified badge count.
+    state = d.cmd("flowsState")
+    plan_lane_id = f"plan-{plan_rel}"
+    lane = next((l for l in state["planLanes"] if l["id"] == plan_lane_id), None)
+    require(lane is not None,
+            f"plan lane {plan_lane_id} missing from planLanes")
+    gate = next((n for n in lane["nodes"] if n["id"] == "gate"), None)
+    require(gate is not None and gate["status"] == "waiting",
+            f"gate node should be waiting, got {gate}")
+    require(state.get("boardNeedsYou", 0) >= 1,
+            "board needs-you should count the waiting gate")
+
+    # Overview: the expanded card under the gate-demo lane.
+    d.cmd("setSidebarMode", mode="flows")
+    time.sleep(1.5)  # render + the card's one-shot diff-stat fetch
+    d.screenshot("flows-gate-card")
+
+    # Zoom: gate node preselected -> inspector carries the same card.
+    d.cmd("zoomFlow", laneID=plan_lane_id)
+    time.sleep(1.5)
+    d.screenshot("flows-gate-zoom")
+    d.cmd("zoomFlow", laneID=None)
+
+    d.cmd("stopQueue")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -1194,6 +1291,7 @@ SCENARIOS = [
     ("merge-and-cleanup", scenario_merge_and_cleanup),
     ("publish-pr", scenario_publish_pr),
     ("flows", scenario_flows),
+    ("plan-gate", scenario_plan_gate),
     ("quit", scenario_quit),
 ]
 
