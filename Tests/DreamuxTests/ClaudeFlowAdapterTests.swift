@@ -92,4 +92,9 @@ final class ClaudeFlowAdapterTests: XCTestCase {
             XCTAssertNotNil(ClaudeFlowAdapter.event(from: s), "kind \(kind) does not map — flowKinds and the adapter switch have drifted")
         }
     }
+
+    func testIsFlowSignalPredicate() {
+        XCTAssertTrue(SignalKind.isFlowSignal(signal(kind: SignalKind.agentStarted, payload: [:])))
+        XCTAssertFalse(SignalKind.isFlowSignal(signal(kind: SignalKind.terminalLine, payload: [:])))
+    }
 }

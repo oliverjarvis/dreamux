@@ -81,6 +81,17 @@ enum SignalKind {
         agentStarted, agentStopped, taskCreated,
         taskCompleted, sessionStopped, sessionNotification,
     ]
+
+    /// Pre-hop Combine predicate. MUST be passed by function reference
+    /// (`.filter(SignalKind.isFlowSignal)`) — a closure literal formed in
+    /// a @MainActor context is MainActor-isolated under Swift 6 even when
+    /// it touches nothing isolated, and Combine invokes filters
+    /// synchronously on the upstream queue (this exact shape trapped at
+    /// runtime in Group 2). A nonisolated named function has no isolation
+    /// to violate.
+    nonisolated static func isFlowSignal(_ signal: Signal) -> Bool {
+        flowKinds.contains(signal.kind)
+    }
 }
 
 /// Type-erased JSON value used for `payload`. Lets us round-trip

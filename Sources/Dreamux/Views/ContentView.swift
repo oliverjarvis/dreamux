@@ -647,7 +647,18 @@ struct ContentView: View {
             // Mirrors PlansSpecsSection.renderableTasks: a heading with no
             // checkbox steps (e.g. `### Notes`) isn't a row worth counting.
             let tasks = plan.tasks.filter { !$0.steps.isEmpty }
-            let groups = PlanPhases.shouldGroup(tasks) ? PlanPhases.groups(tasks) : []
+            let phaseSummaries: [PlanPhaseSummary]
+            if PlanPhases.shouldGroup(tasks) {
+                phaseSummaries = PlanPhases.groups(tasks).map {
+                    PlanPhaseSummary(title: $0.phase ?? "Steps", checkedSteps: $0.checkedSteps, totalSteps: $0.totalSteps)
+                }
+            } else {
+                let checked = tasks.reduce(0) { $0 + $1.steps.filter(\.checked).count }
+                let total = tasks.reduce(0) { $0 + $1.steps.count }
+                phaseSummaries = total > 0
+                    ? [PlanPhaseSummary(title: "tasks", checkedSteps: checked, totalSteps: total)]
+                    : []
+            }
             let record = docStore.ledger.recordForPlan(path)
             let feature = AdHocWorkspaces.featureName(for: plan) { doc in
                 docStore.ledger.recordForPlan(docStore.relativePath(of: doc))
@@ -657,9 +668,7 @@ struct ContentView: View {
                 planPath: path,
                 title: plan.title,
                 status: status,
-                phases: groups.map {
-                    PlanPhaseSummary(title: $0.phase ?? "Steps", checkedSteps: $0.checkedSteps, totalSteps: $0.totalSteps)
-                },
+                phases: phaseSummaries,
                 queueOrdinal: planQueue.entries.firstIndex(of: path).map { $0 + 1 },
                 isCurrentQueuePlan: planQueue.currentPlanPath == path,
                 queueState: planQueue.state,

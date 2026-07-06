@@ -64,7 +64,7 @@ struct FlowLaneView: View {
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
             Spacer(minLength: 8)
-            if let startedAt = lane.flow.startedAt, lane.effectiveStatus == .running {
+            if let startedAt = lane.flow.startedAt, lane.effectiveStatus == .running || lane.effectiveStatus == .waiting {
                 Text(startedAt, style: .relative)
                     .font(.caption)
                     .foregroundStyle(.secondary)
