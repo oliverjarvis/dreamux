@@ -87,6 +87,101 @@ def read_stdin_json() -> Optional[dict]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Signal sink — mirror hook lifecycle events onto Dreamux's signal bus.
+#
+# Transport: one JSON line to the Unix socket in $DREAMUX_EMIT_SOCKET
+# (set by Dreamux's PTY sessions; absent outside Dreamux → no-op).
+# Failures are ALWAYS silent (log-only): a hook must never break or
+# slow the user's claude session.
+# ---------------------------------------------------------------------------
+
+# Fields copied verbatim from the hook's stdin JSON into the signal
+# payload. Whitelist, not passthrough: hook payloads can contain large
+# prompts/transcript excerpts we don't want in signals.db.
+PAYLOAD_FIELDS = (
+    "session_id",
+    "agent_id",
+    "agent_type",
+    "description",
+    "task_id",
+    "subject",
+    "message",
+    "hook_event_name",
+)
+
+HOOK_EVENT_KINDS = {
+    "SubagentStart": "agent.started",
+    "SubagentStop": "agent.stopped",
+    "TaskCreated": "task.created",
+    "TaskCompleted": "task.completed",
+}
+
+
+def emit_signal(kind: str, stdin_payload: Optional[dict], message: Optional[str] = None) -> None:
+    sock_path = os.environ.get("DREAMUX_EMIT_SOCKET", "")
+    if not sock_path:
+        log("signal_skip", reason="no_socket_env", kind=kind)
+        return
+    payload: dict = {}
+    if stdin_payload:
+        for field in PAYLOAD_FIELDS:
+            value = stdin_payload.get(field)
+            if isinstance(value, str) and value:
+                payload[field] = value
+    if message and "message" not in payload:
+        payload["message"] = message
+    if not payload.get("session_id"):
+        log("signal_skip", reason="no_session_id", kind=kind)
+        return
+    cwd = ""
+    if stdin_payload and isinstance(stdin_payload.get("cwd"), str):
+        cwd = stdin_payload["cwd"]
+    envelope = {
+        "action": "emit",
+        "signal": {
+            "kind": kind,
+            "source": "claude.hooks",
+            "severity": "info",
+            "tags": {"cwd": cwd},
+            "payload": payload,
+        },
+    }
+    try:
+        import socket as socketlib
+
+        s = socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM)
+        s.settimeout(0.5)
+        try:
+            s.connect(sock_path)
+            s.sendall((json.dumps(envelope) + "\n").encode("utf-8"))
+            try:
+                s.recv(256)  # ack; best-effort
+            except Exception:
+                pass
+        finally:
+            s.close()
+        log("signal_sent", kind=kind)
+    except Exception as exc:
+        log("signal_fail", kind=kind, error=str(exc))
+
+
+def flow_handler() -> None:
+    """`dreamux-hook flow` — generic lifecycle relay. The event name
+    comes from stdin's hook_event_name, so one settings entry covers
+    all four lifecycle hooks."""
+    payload = read_stdin_json()
+    if not payload:
+        log("flow_skip", reason="no_stdin_json")
+        return
+    event = payload.get("hook_event_name") or ""
+    kind = HOOK_EVENT_KINDS.get(event)
+    if not kind:
+        log("flow_skip", reason="unknown_event", hook_event_name=event)
+        return
+    emit_signal(kind, payload)
+
+
 def scan_transcript(
     transcript_path: str,
 ) -> Tuple[int, Optional[dict], int]:
@@ -145,6 +240,8 @@ def stop_handler() -> None:
         log("stop_skip", reason="no_stdin_json")
         return
 
+    emit_signal("session.stopped", payload)
+
     transcript_path = payload.get("transcript_path") or ""
     if not transcript_path or not os.path.exists(transcript_path):
         log("stop_skip", reason="no_transcript", path=transcript_path)
@@ -199,11 +296,18 @@ def stop_handler() -> None:
 
 
 def notify_handler() -> None:
-    message = (
-        sys.argv[2]
-        if len(sys.argv) > 2
-        else os.environ.get("CLAUDE_NOTIFICATION_MESSAGE", "Agent is waiting on you")
-    )
+    payload = read_stdin_json()
+    message = None
+    if payload and isinstance(payload.get("message"), str):
+        message = payload["message"]
+    if not message:
+        message = (
+            sys.argv[2]
+            if len(sys.argv) > 2
+            else os.environ.get("CLAUDE_NOTIFICATION_MESSAGE", "Agent is waiting on you")
+        )
+    if payload:
+        emit_signal("session.notification", payload, message=message)
     if not message:
         return
     emit(message)
@@ -223,6 +327,8 @@ def main() -> None:
         notify_handler()
     elif cmd == "idle":
         idle_handler()
+    elif cmd == "flow":
+        flow_handler()
     elif cmd:
         emit(" ".join(sys.argv[1:]))
     else:
