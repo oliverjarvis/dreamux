@@ -79,3 +79,96 @@ enum ClaudeFlowAdapter {
         return nil
     }
 }
+
+enum TranscriptEvent: Equatable, Sendable {
+    case toolStarted(toolUseID: String, tool: String, summary: String?, at: Date?)
+    case toolFinished(toolUseID: String, isError: Bool, at: Date?)
+    case agentSpawned(toolUseID: String, agentType: String?, description: String?, at: Date?)
+    // NOTE deliberately no agentReturned case: the parser cannot know
+    // whether a tool_result closes an agent — FlowStore's toolUse→agent
+    // join map makes that call when it applies toolFinished.
+}
+
+extension ClaudeFlowAdapter {
+    /// Line cap: a single transcript line (huge pastes, base64 images)
+    /// must never balloon parsing. Spec guardrail.
+    private static let maxLineBytes = 1_048_576
+    private static let agentToolNames: Set<String> = ["Agent", "Task"]
+    /// Entry types we understand but produce no events for — silent skips.
+    private static let knownQuietTypes: Set<String> = [
+        "system", "attachment", "summary", "ai-title", "last-prompt", "mode",
+        "permission-mode", "file-history-snapshot", "queue-operation",
+        "worktree-state", "relocated",
+    ]
+
+    static func transcriptEvents(fromLines lines: [String]) -> (events: [TranscriptEvent], skipped: Int) {
+        var events: [TranscriptEvent] = []
+        var skipped = 0
+        let isoParser = ISO8601DateFormatter()
+        isoParser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+
+        for line in lines {
+            if line.isEmpty { continue }
+            guard line.utf8.count <= maxLineBytes,
+                  let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String
+            else { skipped += 1; continue }
+
+            let at = (obj["timestamp"] as? String).flatMap { isoParser.date(from: $0) ?? isoPlain.date(from: $0) }
+
+            switch type {
+            case "assistant":
+                guard let message = obj["message"] as? [String: Any],
+                      let content = message["content"] as? [[String: Any]] else { continue }
+                for block in content where (block["type"] as? String) == "tool_use" {
+                    guard let id = block["id"] as? String,
+                          let name = block["name"] as? String else { continue }
+                    let input = block["input"] as? [String: Any] ?? [:]
+                    if agentToolNames.contains(name) {
+                        events.append(.agentSpawned(
+                            toolUseID: id,
+                            agentType: input["subagent_type"] as? String,
+                            description: input["description"] as? String,
+                            at: at
+                        ))
+                    } else {
+                        events.append(.toolStarted(
+                            toolUseID: id, tool: name, summary: toolSummary(name: name, input: input), at: at
+                        ))
+                    }
+                }
+            case "user":
+                guard let message = obj["message"] as? [String: Any],
+                      let content = message["content"] as? [[String: Any]] else { continue }
+                for block in content where (block["type"] as? String) == "tool_result" {
+                    guard let id = block["tool_use_id"] as? String else { continue }
+                    let isError = (block["is_error"] as? Bool) ?? false
+                    // The store decides agent-vs-tool via its toolUse→agent
+                    // join map when applying this event.
+                    events.append(.toolFinished(toolUseID: id, isError: isError, at: at))
+                }
+            default:
+                // Known-quiet and unknown NEW types alike: silent skip,
+                // not an error — forward compat. `skipped` counts only
+                // lines that failed to parse at all.
+                break
+            }
+        }
+        return (events, skipped)
+    }
+
+    /// One-line human summary for the inspector's "last activity".
+    private static func toolSummary(name: String, input: [String: Any]) -> String? {
+        let raw: String?
+        switch name {
+        case "Bash": raw = input["command"] as? String
+        case "Read", "Write", "Edit": raw = input["file_path"] as? String
+        default: raw = input["description"] as? String ?? input["prompt"] as? String
+        }
+        guard let raw, !raw.isEmpty else { return nil }
+        let firstLine = raw.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? raw
+        return firstLine.count > 120 ? String(firstLine.prefix(120)) + "…" : firstLine
+    }
+}
