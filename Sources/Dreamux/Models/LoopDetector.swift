@@ -19,15 +19,20 @@ struct DetectedLoop: Equatable, Sendable {
 enum LoopDetector {
     static let windowSize = 12
 
-    /// Bash commands loop by their leading token ("Bash:swift"); every
-    /// other tool loops by name alone — file paths vary per iteration,
-    /// commands don't.
+    /// Bash commands loop by their leading token ("Bash:swift"); a
+    /// path-invoked command normalizes to its basename instead
+    /// ("Bash:foo" for "/Users/x/bin/foo …" or "~/bin/foo …") so a
+    /// signature never leaks a full path into a print or UI surface.
+    /// Every other tool loops by name alone — file paths vary per
+    /// iteration, commands don't.
     static func signature(tool: String, summary: String?) -> String {
         guard tool == "Bash",
               let first = summary?.split(whereSeparator: \.isWhitespace).first,
               !first.isEmpty
         else { return tool }
-        return "Bash:\(first)"
+        let token = String(first)
+        guard token.contains("/") || token.hasPrefix("~") else { return "Bash:\(token)" }
+        return "Bash:\((token as NSString).lastPathComponent)"
     }
 
     static func detect(window: [ToolCompletion]) -> DetectedLoop? {

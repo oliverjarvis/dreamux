@@ -54,7 +54,12 @@ final class LiveShapeValidationTests: XCTestCase {
         // here exactly as FlowStore skips them from the ring), then
         // slide a LoopDetector.windowSize ring the same way FlowStore's
         // `toolCompletionRings` does and count how many appends would
-        // have surfaced a loop badge.
+        // have surfaced a loop badge. Deliberate divergence from
+        // FlowStore: the ring here is a bare `[ToolCompletion]` with no
+        // toolUseID dedup — this is a single, one-shot pass over each
+        // transcript's already-materialized events, so no toolUseID can
+        // ever recur (unlike the live tailer, which can replay the same
+        // bytes from a zoom re-tail).
         var totalToolCompletions = 0
         var loopWindowsDetected = 0
         var loopsBySignature: [String: LoopAggregate] = [:]
@@ -144,8 +149,10 @@ final class LiveShapeValidationTests: XCTestCase {
         """)
 
         // Informational only — no assertions. Signatures are command
-        // first tokens ("Bash:swift"), never full commands, paths, or
-        // content, so they're safe to print verbatim.
+        // first tokens, basename-normalized by `LoopDetector.signature`
+        // for any path-invoked command ("Bash:foo", never
+        // "Bash:/Users/x/bin/foo"), so they're safe to print verbatim:
+        // never a full command, a path, or other content.
         print("""
 
         === Loop-detector live pass (informational) ===

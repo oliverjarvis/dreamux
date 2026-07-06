@@ -14,6 +14,12 @@ final class LoopDetectorTests: XCTestCase {
         XCTAssertEqual(LoopDetector.signature(tool: "Read", summary: "whatever"), "Read")
     }
 
+    func testSignatureNormalizesPathInvokedCommandsToBasename() {
+        XCTAssertEqual(LoopDetector.signature(tool: "Bash", summary: "/Users/x/bin/foo --flag"), "Bash:foo")
+        XCTAssertEqual(LoopDetector.signature(tool: "Bash", summary: "~/bin/run.sh go"), "Bash:run.sh")
+        XCTAssertEqual(LoopDetector.signature(tool: "Bash", summary: "swift test"), "Bash:swift")
+    }
+
     func testEditTestLoopDetectsDespiteInterleaving() {
         // edit → test(fail) → edit → test(fail) → edit → test(fail)
         let window = [
