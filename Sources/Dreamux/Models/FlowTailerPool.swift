@@ -48,7 +48,14 @@ import Darwin
 ///    `stat` of every agent file it finds (see `scanDirectoryOffMain`),
 ///    so a file that keeps growing rises in rank and one that goes
 ///    quiet falls — and so re-promotion is a real, reachable path, not
-///    just a bookkeeping possibility. Anything that drops out of that
+///    just a bookkeeping possibility. That refresh, though, only runs
+///    when a scan does — gated on a DIRECTORY-level watch event (a
+///    file appearing, disappearing, or being renamed), not on
+///    content-only growth of an already-known file — so a demoted
+///    tailer whose file grows in isolation re-promotes only once some
+///    other directory event next triggers a scan (bounded: offset
+///    preservation means nothing already written is lost, just
+///    delayed). Anything that drops out of that
 ///    ranking gets `stop()`ed (fds released) but keeps its
 ///    `agentTailers` entry; if it's later re-promoted,
 ///    `enforceAgentTailerCap` resumes it from the offset that entry
@@ -318,9 +325,14 @@ final class FlowTailerPool: @unchecked Sendable {
             return existing
         }
         let url = ClaudeHome.transcriptURL(home: home, cwd: cwd, sessionID: sessionID)
+        let linesCallback = Self.transcriptCallback(pool: self, sessionID: sessionID)
         let tailer = ClaudeTranscriptTailer(
             url: url, deliveryQueue: deliveryQueue,
-            onLines: Self.transcriptCallback(pool: self, sessionID: sessionID)
+            onLines: linesCallback,
+            // Agent tailers (`applyScanResults`, below) don't get this —
+            // there's no existing skip-accounting path for agent lines
+            // to piggyback on (see `droppedBytesCallback`'s doc).
+            onDroppedBytes: Self.droppedBytesCallback(linesCallback: linesCallback)
         )
         let state = SessionState(sessionID: sessionID, cwd: cwd, transcriptTailer: tailer)
         sessions[sessionID] = state
@@ -388,6 +400,31 @@ final class FlowTailerPool: @unchecked Sendable {
             Task { @MainActor in pool.handleAgentLines(sessionID: sessionID, agentID: agentID, lines: lines) }
         }
     }
+
+    /// Coarse mapping from a tailer's byte-level cap overflow onto the
+    /// EXISTING line-level skip accounting, instead of adding a second
+    /// callback contract (and a second wiring site in `ProjectSession`)
+    /// just for this: `ClaudeFlowAdapter.transcriptEvents` already
+    /// counts any line it can't parse as JSON towards `skipped`, which
+    /// `ProjectSession`'s `onTranscriptLines` wiring forwards to
+    /// `FlowStore.noteSkippedLines`. One drop event is represented here
+    /// as exactly one synthetic, deliberately unparseable "line" fed
+    /// through that same `linesCallback` — the real dropped BYTE COUNT
+    /// is discarded, so this only ever contributes 1 to `skipped`,
+    /// matching the granularity every other malformed line already
+    /// gets.
+    nonisolated private static func droppedBytesCallback(
+        linesCallback: @escaping ([String]) -> Void
+    ) -> (Int) -> Void {
+        { _ in linesCallback([droppedBytesSentinelLine]) }
+    }
+
+    /// Not valid transcript JSON (a lone control character) — guaranteed
+    /// to fail `ClaudeFlowAdapter.transcriptEvents`'s parse and so count
+    /// as one `skipped` line (see `droppedBytesCallback`). Must be
+    /// non-empty: `transcriptEvents` silently ignores an empty line
+    /// without counting it as skipped.
+    nonisolated private static let droppedBytesSentinelLine = "\u{0}"
 
     // MARK: - Subagents dir
 

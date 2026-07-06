@@ -17,6 +17,11 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     private let url: URL
     private let deliveryQueue: DispatchQueue
     private let onLines: ([String]) -> Void
+    /// Fires once per `partialCapBytes` overflow, with the byte count
+    /// of the newline-less remainder that was dropped (see
+    /// `readAvailable`). `nil` by default so existing callers are
+    /// unaffected; delivered on `deliveryQueue` exactly like `onLines`.
+    private let onDroppedBytes: ((Int) -> Void)?
 
     /// All mutable state below is confined to this serial queue. Public
     /// `start`/`stop` calls dispatch onto it (synchronously, so a test
@@ -54,20 +59,27 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         case preserveCurrent
     }
 
-    /// `onLines` isn't required to be `@Sendable` by this class's public
-    /// signature, but handing it to `deliveryQueue.async` crosses a
-    /// concurrency-domain boundary the compiler wants proof of safety
-    /// for. This class already asserts that safety via `@unchecked
-    /// Sendable`; boxing the closure carries that same assertion down
-    /// to this one call site instead of loosening the public `init`.
-    private struct Box: @unchecked Sendable {
-        let f: ([String]) -> Void
+    /// `onLines`/`onDroppedBytes` aren't required to be `@Sendable` by
+    /// this class's public signature, but handing either to
+    /// `deliveryQueue.async` crosses a concurrency-domain boundary the
+    /// compiler wants proof of safety for. This class already asserts
+    /// that safety via `@unchecked Sendable`; boxing the closure
+    /// carries that same assertion down to each call site instead of
+    /// loosening the public `init`. Generic so both callback shapes
+    /// share one box type.
+    private struct Box<T>: @unchecked Sendable {
+        let f: (T) -> Void
     }
 
-    init(url: URL, deliveryQueue: DispatchQueue, onLines: @escaping ([String]) -> Void) {
+    init(
+        url: URL, deliveryQueue: DispatchQueue,
+        onLines: @escaping ([String]) -> Void,
+        onDroppedBytes: ((Int) -> Void)? = nil
+    ) {
         self.url = url
         self.deliveryQueue = deliveryQueue
         self.onLines = onLines
+        self.onDroppedBytes = onDroppedBytes
         self.queue = DispatchQueue(label: "com.dreamux.claude.transcript-tailer")
     }
 
@@ -274,24 +286,43 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     }
 
     /// Reads from `offset` to EOF in `chunkSize` chunks, splitting on
-    /// `\n`. Buffers a trailing partial line across wakes (dropped with
-    /// the buffer reset if it grows past `partialCapBytes`). Delivers
-    /// at most `lineBatchCap` lines per call; if more were already
-    /// buffered or on disk, re-arms immediately (via the queue, not a
-    /// real kqueue wake) so the backlog drains without waiting for
-    /// another write.
+    /// `\n`. Buffers a trailing partial line across wakes. Every
+    /// complete line already in `partial` is drained into `batch`
+    /// BEFORE the cap check below runs — only the newline-less
+    /// REMAINDER (the start of a line still being written) ever counts
+    /// against `partialCapBytes`, so a single complete line bigger than
+    /// the cap, or complete lines that land in the same chunk as one,
+    /// are still delivered whole rather than discarded along with an
+    /// unrelated overflow. Only that remainder is dropped — reporting
+    /// its size via `onDroppedBytes` — if it grows past the cap.
+    /// Delivers at most `lineBatchCap` lines per call; if more were
+    /// already buffered or on disk, re-arms immediately (via the
+    /// queue, not a real kqueue wake) so the backlog drains without
+    /// waiting for another write.
     private func readAvailable() {
         guard !isStopped, let handle = readHandle else { return }
         var batch: [String] = []
 
-        readLoop: while true {
+        // Extracts every complete line currently in `partial`,
+        // returning `true` (and leaving any remaining complete lines
+        // for the next call) the moment `batch` hits `lineBatchCap`.
+        // Called both before the first read this call (drains anything
+        // left over from a prior batch-cap break) and again right
+        // after every chunk append (drains whatever that chunk just
+        // completed) — see this method's doc comment for why the
+        // second call site is what makes the cap check below safe.
+        func drainCompleteLines() -> Bool {
             while let newlineIndex = partial.firstIndex(of: 0x0A) {
-                if batch.count >= Self.lineBatchCap { break readLoop }
+                if batch.count >= Self.lineBatchCap { return true }
                 let lineData = partial[partial.startIndex..<newlineIndex]
                 batch.append(String(decoding: lineData, as: UTF8.self))
                 partial.removeSubrange(partial.startIndex...newlineIndex)
             }
-            if batch.count >= Self.lineBatchCap { break }
+            return false
+        }
+
+        readLoop: while true {
+            if drainCompleteLines() { break readLoop }
 
             try? handle.seek(toOffset: offset)
             guard let chunk = try? handle.read(upToCount: Self.chunkSize), !chunk.isEmpty else {
@@ -299,8 +330,16 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
             }
             offset += UInt64(chunk.count)
             partial.append(chunk)
+
+            if drainCompleteLines() { break readLoop }
+
             if partial.count > Self.partialCapBytes {
+                let droppedBytes = partial.count
                 partial.removeAll(keepingCapacity: false)
+                if let onDroppedBytes {
+                    let box = Box(f: onDroppedBytes)
+                    deliveryQueue.async { box.f(droppedBytes) }
+                }
             }
         }
 
@@ -319,12 +358,13 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     }
 }
 
-// Accepted race: `readAvailable()` hands a batch to `deliveryQueue`
-// via `.async` before returning. If `stop()` runs (on `queue`) after
-// that hand-off but before the delivery queue executes it, the
-// already-queued `onLines` call still fires once — its captured
-// `lines`/`box` don't depend on any tailer state, so this is safe,
-// just an extra delivery after the logical stop point. Same
+// Accepted race: `readAvailable()` hands a batch (or a drop's byte
+// count) to `deliveryQueue` via `.async` before returning. If `stop()`
+// runs (on `queue`) after that hand-off but before the delivery queue
+// executes it, the already-queued `onLines`/`onDroppedBytes` call
+// still fires once — its captured `lines`/`droppedBytes`/`box` don't
+// depend on any tailer state, so this is safe, just an extra delivery
+// after the logical stop point. Same
 // accepted-race shape as `ClaudeRegistryPoller`'s callers: teardown of
 // the consumer (not a callback guard here) is what makes this fine to
 // leave unclosed rather than adding synchronization overhead for a

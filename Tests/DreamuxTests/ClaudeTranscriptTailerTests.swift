@@ -265,4 +265,82 @@ final class ClaudeTranscriptTailerTests: XCTestCase {
 
         tailer.stop()
     }
+
+    /// A single line whose content is over 1 MB doesn't get its own
+    /// terminating `\n` until several `chunkSize` reads in — so the
+    /// still-accumulating, newline-less prefix crosses the
+    /// partial-buffer cap before that `\n` is ever seen, exactly the
+    /// overflow `readAvailable` must recover from. It must not take
+    /// down the complete lines that follow the eventual terminator in
+    /// the same on-disk content: only the dropped, still-growing
+    /// remainder counts against the cap, reported once via
+    /// `onDroppedBytes`. Everything here is written to disk before the
+    /// tailer's single wake fires, so one `readAvailable()` call must
+    /// cross the cap, recover, and still deliver the normal lines that
+    /// come after — proving the reset leaves a clean buffer rather than
+    /// wedging the tailer.
+    func testCapOverflowDropsRemainderNotCompleteLines() throws {
+        let url = sandbox.root.appendingPathComponent("transcript.jsonl")
+        // Comfortably over the 1 MB cap, but not by so much that a
+        // second overflow could occur before its own terminator is
+        // reached (see `readAvailable`'s doc comment on cap accounting).
+        let giantUnterminatedLine = String(repeating: "x", count: 1_200_000)
+        try append(giantUnterminatedLine + "\nnormal1\nnormal2\n", to: url)
+
+        var received: [String] = []
+        var droppedCounts: [Int] = []
+        let lock = NSLock()
+        var onDeliver: (() -> Void)?
+        let queue = DispatchQueue(label: "test.tailer.delivery.cap-overflow")
+        let tailer = ClaudeTranscriptTailer(
+            url: url, deliveryQueue: queue,
+            onLines: { lines in
+                lock.lock()
+                received.append(contentsOf: lines)
+                lock.unlock()
+                onDeliver?()
+            },
+            onDroppedBytes: { count in
+                lock.lock()
+                droppedCounts.append(count)
+                lock.unlock()
+                onDeliver?()
+            }
+        )
+
+        let gotNormalLines = expectation(description: "normal lines after the overflow arrive")
+        onDeliver = {
+            lock.lock()
+            let hasBoth = received.contains("normal1") && received.contains("normal2")
+            lock.unlock()
+            if hasBoth { gotNormalLines.fulfill() }
+        }
+        tailer.start(replayExisting: true)
+        defer { tailer.stop() }
+
+        wait(for: [gotNormalLines], timeout: 2)
+
+        lock.lock()
+        XCTAssertTrue(received.contains("normal1"))
+        XCTAssertTrue(received.contains("normal2"))
+        XCTAssertEqual(droppedCounts.count, 1)
+        XCTAssertGreaterThan(droppedCounts.first ?? 0, 0)
+        lock.unlock()
+
+        // Buffer reset was clean: a later, ordinary append still
+        // delivers correctly.
+        let gotFollowUp = expectation(description: "post-overflow append still delivered")
+        onDeliver = {
+            lock.lock()
+            let has = received.contains("after-overflow")
+            lock.unlock()
+            if has { gotFollowUp.fulfill() }
+        }
+        try append("after-overflow\n", to: url)
+        wait(for: [gotFollowUp], timeout: 2)
+
+        lock.lock()
+        XCTAssertEqual(droppedCounts.count, 1) // still exactly once
+        lock.unlock()
+    }
 }
