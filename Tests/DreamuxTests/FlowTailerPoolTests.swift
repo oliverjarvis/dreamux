@@ -301,8 +301,11 @@ final class FlowTailerPoolTests: XCTestCase {
     /// Stages `cap + 4` agent files with deterministic, strictly
     /// increasing mtimes and confirms: (1) live tailers are capped at
     /// 24, (2) the live set is exactly the 24 newest-by-mtime files,
-    /// and (3) meta parsing/emission — NOT subject to the cap — still
-    /// covers every file.
+    /// (3) meta parsing/emission — NOT subject to the cap — still
+    /// covers every file, and (4) a demoted tailer is actually
+    /// `stop()`ped — not merely excluded from `liveAgentTailerIDs` by
+    /// set bookkeeping alone, which would let a missing `stop()` call
+    /// pass undetected.
     func testAgentTailerLiveCountIsCappedToNewestByMTimeWhileMetaCoversAll() throws {
         let cwd = "/Users/x/proj"
         let sessionID = "s1"
@@ -314,6 +317,7 @@ final class FlowTailerPoolTests: XCTestCase {
         let totalAgents = cap + 4
         let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
         var expectedLiveIDs = Set<String>()
+        var jsonlURLsByID: [String: URL] = [:]
         for i in 0..<totalAgents {
             let agentID = "a\(i)"
             let jsonlURL = subagentsDir.appendingPathComponent("agent-\(agentID).jsonl")
@@ -325,6 +329,7 @@ final class FlowTailerPoolTests: XCTestCase {
             try FileManager.default.setAttributes(
                 [.modificationDate: baseDate.addingTimeInterval(TimeInterval(i))],
                 ofItemAtPath: jsonlURL.path)
+            jsonlURLsByID[agentID] = jsonlURL
 
             let metaURL = subagentsDir.appendingPathComponent("agent-\(agentID).meta.json")
             try #"{"agentType":"Explore","description":"d","toolUseId":"tu-\#(i)","spawnDepth":1}"#
@@ -334,10 +339,16 @@ final class FlowTailerPoolTests: XCTestCase {
         }
 
         var receivedMetaIDs: Set<String> = []
-        let pool = makePool(onMeta: { sid, meta in
-            guard sid == sessionID else { return }
-            receivedMetaIDs.insert(meta.agentID)
-        })
+        var receivedAgentLineIDs: Set<String> = []
+        let pool = makePool(
+            onAgentLines: { sid, agentID, _ in
+                guard sid == sessionID else { return }
+                receivedAgentLineIDs.insert(agentID)
+            },
+            onMeta: { sid, meta in
+                guard sid == sessionID else { return }
+                receivedMetaIDs.insert(meta.agentID)
+            })
 
         // The initial subagents-dir scan (triggered synchronously from
         // `reconcile` -> `activateHot` -> `ensureSubagentsWatcher`) runs
@@ -350,6 +361,19 @@ final class FlowTailerPoolTests: XCTestCase {
         let liveIDs = pool.liveAgentTailerIDs(sessionID: sessionID)
         XCTAssertEqual(liveIDs.count, cap)
         XCTAssertEqual(liveIDs, expectedLiveIDs, "must keep exactly the cap-count newest-by-mtime files live")
+
+        // "a0" is the oldest file, demoted by the cap. Append to it and
+        // confirm nothing arrives — if `enforceAgentTailerCap` only
+        // updated `liveAgentTailerIDs` without actually calling
+        // `stop()`, this delivery would still fire.
+        try append("late\n", to: jsonlURLsByID["a0"]!)
+
+        let settled = expectation(description: "settle window elapsed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { settled.fulfill() }
+        wait(for: [settled], timeout: 1)
+
+        XCTAssertFalse(receivedAgentLineIDs.contains("a0"),
+            "demoted tailer must actually be stopped, not merely excluded from bookkeeping")
     }
 
     // MARK: - Post-stop watcher resurrection guard

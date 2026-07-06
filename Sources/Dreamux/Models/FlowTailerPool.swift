@@ -42,14 +42,20 @@ import Darwin
 ///    doc), so a newly-discovered agent file is always registered in
 ///    `SessionState.agentTailers` but only actually started if it
 ///    ranks among the most-recently-modified `maxAgentTailersPerSession`
-///    files once `enforceAgentTailerCap` re-ranks everything this
-///    session has ever discovered. Anything that drops out of that
-///    ranking gets `stop()`ed (fds released) but keeps its
-///    `agentTailers` entry, so its read offset survives. Because
-///    nothing is started until it's already ranked, an outlier session
-///    directory with far more subagents than the cap never transiently
-///    exceeds it mid-scan — see `maxAgentTailersPerSession`'s doc for
-///    the concrete fd math.
+///    files once `enforceAgentTailerCap` ranks everything this session
+///    has ever discovered (today that ranking is effectively frozen at
+///    discovery time — `agentFileModDates` isn't refreshed afterward —
+///    but Group 4's mtime-refresh work will make re-ranking, and so
+///    re-promotion, live). Anything that drops out of that ranking
+///    gets `stop()`ed (fds released) but keeps its `agentTailers`
+///    entry; if it's later re-promoted, `enforceAgentTailerCap` resumes
+///    it from the offset that entry preserved rather than re-seeking
+///    to a fresh EOF (which would silently drop everything written
+///    during the demotion gap) — see `everStartedAgentTailerIDs`.
+///    Because nothing is started until it's already ranked, an outlier
+///    session directory with far more subagents than the cap never
+///    transiently exceeds it mid-scan — see `maxAgentTailersPerSession`'s
+///    doc for the concrete fd math.
 /// `@unchecked Sendable`: every stored property is only ever touched
 /// from the main actor (this class's own isolation). The `[weak pool]`
 /// captures in `transcriptCallback`/`agentCallback`/`replayFullHistory`
@@ -415,17 +421,27 @@ final class FlowTailerPool: @unchecked Sendable {
         return date
     }
 
-    /// Re-ranks every agent file this session has ever discovered by
-    /// mtime (newest first) and keeps only the top
-    /// `maxAgentTailersPerSession` live: anything newly in that top
-    /// rank gets started (EOF-seek if hot, full replay if lazy — same
-    /// per-tailer choice `scanSubagentsDir` used to make inline);
-    /// anything that drops out gets `stop()`ed. `SessionState
-    /// .agentTailers` entries are never removed either way, so a
-    /// stopped tailer's read offset survives. Called only from
-    /// `scanSubagentsDir`, after new candidates are registered — see
-    /// decision 3 in the type doc comment for why registration and
-    /// starting are split like this.
+    /// Ranks every agent file this session has ever discovered by mtime
+    /// (newest first — though today `agentFileModDates` is captured
+    /// once, at discovery, and never refreshed, so this ranking is
+    /// effectively frozen until Group 4's mtime-refresh work lands) and
+    /// keeps only the top `maxAgentTailersPerSession` live. Anything
+    /// newly promoted into that top rank gets started: under `isLazy`,
+    /// always a full replay from zero (same choice `ensureLazyTail`
+    /// already makes for every live agent tailer); otherwise a FIRST
+    /// promotion (never started before) gets `start(replayExisting:
+    /// false)` — a fresh EOF-seek is correct, nothing was ever read
+    /// from it — while a RE-promotion (this agentID was live before,
+    /// then demoted) gets `resume()` instead, so it picks up from the
+    /// offset preserved across that demotion instead of silently
+    /// dropping everything written during the gap (the same
+    /// offset-preserving contract `activateHot` relies on `resume()`
+    /// for on the session transcript tailer). Anything that drops rank
+    /// gets `stop()`ed (fds released) but keeps its `SessionState
+    /// .agentTailers` entry, so its offset is there to resume from
+    /// later. Called only from `scanSubagentsDir`, after new candidates
+    /// are registered — see decision 3 in the type doc comment for why
+    /// registration and starting are split like this.
     private func enforceAgentTailerCap(_ state: SessionState) {
         let rankedNewestFirst = state.agentTailers.keys.sorted { lhs, rhs in
             let lhsDate = state.agentFileModDates[lhs] ?? .distantPast
@@ -441,9 +457,12 @@ final class FlowTailerPool: @unchecked Sendable {
             guard let tailer = state.agentTailers[agentID] else { continue }
             if state.isLazy {
                 Self.replayFullHistory(pool: self, sessionID: state.sessionID, tailer: tailer)
+            } else if state.everStartedAgentTailerIDs.contains(agentID) {
+                tailer.resume()  // re-promotion: continue from the offset the prior demotion's stop() preserved
             } else {
-                tailer.start(replayExisting: false)  // hot only: EOF-seek, bounded (decision 1)
+                tailer.start(replayExisting: false)  // first promotion, hot only: EOF-seek, bounded (decision 1)
             }
+            state.everStartedAgentTailerIDs.insert(agentID)
         }
         state.liveAgentTailerIDs = wantLive
     }
@@ -467,12 +486,17 @@ private final class SessionState {
     var subagentsWatcher: DispatchSourceFileSystemObject?
     /// Every agent tailer this pool has ever constructed for this
     /// session — entries are NEVER removed, even once capped out by
-    /// `FlowTailerPool.enforceAgentTailerCap` or the session stops, so
-    /// a stopped tailer's read offset survives for whenever it might
-    /// matter again.
+    /// `FlowTailerPool.enforceAgentTailerCap` or the session stops. The
+    /// object itself (and so its internal read offset) is never
+    /// discarded; whether that offset actually gets REUSED on a later
+    /// re-promotion — instead of a fresh `start()` silently dropping
+    /// everything written during the demotion gap — depends on
+    /// `everStartedAgentTailerIDs` below.
     var agentTailers: [String: ClaudeTranscriptTailer] = [:]
     /// Mtime of each agent file at discovery time — the recency signal
-    /// `enforceAgentTailerCap` ranks `agentTailers` by.
+    /// `enforceAgentTailerCap` ranks `agentTailers` by. Captured once,
+    /// at discovery, and never refreshed — so today a file's rank is
+    /// effectively frozen (see `enforceAgentTailerCap`'s doc).
     var agentFileModDates: [String: Date] = [:]
     /// Subset of `agentTailers.keys` currently holding a live fd pair,
     /// bounded by `FlowTailerPool.maxAgentTailersPerSession`. Every
@@ -482,6 +506,15 @@ private final class SessionState {
     /// `enforceAgentTailerCap` ranking (triggered by newly-discovered
     /// files) puts it back in.
     var liveAgentTailerIDs: Set<String> = []
+    /// Agent IDs `enforceAgentTailerCap` has ever called `start()` (or
+    /// `replayFullHistory`, which itself calls `start()`) on at least
+    /// once. Lets it tell a first-time promotion (no established
+    /// offset yet — a fresh `start(replayExisting: false)` is correct)
+    /// from a RE-promotion (previously live, then demoted by the cap —
+    /// must `resume()` to continue from the offset that demotion's
+    /// `stop()` preserved, rather than re-seeking to a fresh EOF and
+    /// silently dropping the demotion-gap's lines).
+    var everStartedAgentTailerIDs: Set<String> = []
 
     init(sessionID: String, cwd: String, transcriptTailer: ClaudeTranscriptTailer) {
         self.sessionID = sessionID
