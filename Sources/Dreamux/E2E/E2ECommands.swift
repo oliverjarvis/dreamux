@@ -666,29 +666,43 @@ enum E2ECommands {
         return payload
     }
 
-    /// Snapshot of the Flows pane's session lanes. Plan lanes are
-    /// omitted deliberately — they're derived in the view from plan
-    /// state the e2e can already assert via `queueState`/`listDocs`.
+    /// Snapshot of the Flows pane's session lanes plus, since Task 3,
+    /// its plan lanes — both built by `flowLanePayload` from `Flow`
+    /// values, session lanes from live `FlowStore.flows` and plan lanes
+    /// from `PlanFlowBuilder.lanes(from:)` fed by the same
+    /// `PlanLaneAssembler` the Flows pane itself calls, so this can't
+    /// drift from what's on screen.
     private static func flowsState(request: [String: Any]) throws -> [String: Any] {
-        let (handles, _, _) = try projectStores()
+        let (handles, store, _) = try projectStores()
         guard let flows = handles.flows else {
             throw CommandError(message: "flows store not registered")
         }
-        let lanes: [[String: Any]] = flows.flows.map { flow in
-            var lane: [String: Any] = [
-                "id": flow.id, "title": flow.title,
-                "kind": flow.kind.rawValue, "status": flow.status.rawValue,
-                "nodes": flow.nodes.map { ["id": $0.id, "label": $0.label, "status": $0.status.rawValue] },
-            ]
-            if let detail = flow.detail { lane["detail"] = detail }
-            return lane
+        let lanes = flows.flows.map(flowLanePayload)
+        var planLanes: [[String: Any]] = []
+        if let docStore = handles.docStore, let queue = handles.planQueue {
+            planLanes = PlanFlowBuilder.lanes(
+                from: PlanLaneAssembler.inputs(docStore: docStore, queue: queue, store: store)
+            ).map(flowLanePayload)
         }
         return [
             "ok": true,
             "lanes": lanes,
+            "planLanes": planLanes,
             "running": flows.aggregates.runningCount,
             "needsYou": flows.aggregates.needsYouCount,
         ]
+    }
+
+    /// Shared `Flow` → wire-dict shape for `flowsState`'s `lanes` and
+    /// `planLanes` arrays.
+    private static func flowLanePayload(_ flow: Flow) -> [String: Any] {
+        var lane: [String: Any] = [
+            "id": flow.id, "title": flow.title,
+            "kind": flow.kind.rawValue, "status": flow.status.rawValue,
+            "nodes": flow.nodes.map { ["id": $0.id, "label": $0.label, "status": $0.status.rawValue] },
+        ]
+        if let detail = flow.detail { lane["detail"] = detail }
+        return lane
     }
 
     /// Play semantics — worktree-centric, never a question. Flexible

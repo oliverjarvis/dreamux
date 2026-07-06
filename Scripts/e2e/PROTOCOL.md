@@ -641,9 +641,11 @@ sessions and their subagents/tasks, fed by the `<claude-home>/sessions/`
 registry (3s poll) and hook signals delivered over the emit socket
 (`SignalEmitSocketServer`, `agent.started`/`agent.stopped`/
 `task.created`/`task.completed`/`session.stopped`/
-`session.notification`). Plan lanes are omitted deliberately — they're
-derived in the view from state already assertable via
-`queueState`/`listDocs`.
+`session.notification`) — plus `planLanes`, one per non-`specOnly` plan,
+built by the same `PlanLaneAssembler` + `PlanFlowBuilder` the Flows pane
+itself calls, so this can't drift from what's on screen (`planLanes` is
+`[]` if the Docs section or plan queue haven't come on screen yet in
+this window).
 
 ```
 → {"cmd":"flowsState"}
@@ -656,6 +658,15 @@ derived in the view from state already assertable via
         {"id":"session","label":"claude","status":"running"},
         {"id":"agent-e2e-a1","label":"Explore","status":"running"},
         {"id":"drain","label":"done","status":"queued"}
+      ]}
+   ],
+   "planLanes":[
+     {"id":"plan-docs/plans/2026-07-02-x.md","title":"X Implementation Plan",
+      "kind":"plan","status":"running",
+      "nodes":[
+        {"id":"src","label":"plan","status":"done"},
+        {"id":"phase-0","label":"tasks","status":"running"},
+        {"id":"drain","label":"merge","status":"queued"}
       ]}
    ]}
 ```
@@ -686,6 +697,13 @@ Field notes:
   aggregation dir or a per-repo worktree path (`FlowWiring.workspaceID`)
   — or the project root itself; otherwise the app's `isInProject`
   scoping drops it silently.
+- `planLanes[].id` is `"plan-<planPath>"` (project-relative path, same
+  string `listDocs`/`state` report). `nodes[].id` follows
+  `PlanFlowBuilder`'s fixed skeleton: `"src"`, `"phase-<n>"` (one per
+  summarized phase or task group), an optional `"gate"` when the plan
+  needs review/merge or the queue is `atGate`/`attention` on it, then
+  `"drain"`. `lane.detail` (omitted unless set) carries `"queued
+  #<n>"` while the plan sits in the queue unstarted.
 
 ### `courseCorrect`
 
