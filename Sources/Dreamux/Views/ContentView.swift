@@ -267,6 +267,11 @@ struct ContentView: View {
         }
         .onChange(of: sidebarMode) { _, newValue in
             e2eBridge?.currentSidebarMode = newValue
+            // Leaving the Flows pane resets any zoom: a predictable
+            // return-to-overview next visit, and it avoids paying for a
+            // full transcript replay (the zoom lazy-tail seam) on every
+            // pane round-trip rather than only while actually zoomed in.
+            if newValue != .flows { flowsZoomLaneID = nil }
         }
         .onChange(of: e2eBridge?.pendingFileTreeVisible) { _, _ in
             if let bridge = e2eBridge, let visible = bridge.pendingFileTreeVisible {

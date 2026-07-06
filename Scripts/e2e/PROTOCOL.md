@@ -733,6 +733,10 @@ watching, so a transcript written to disk before the session first
 entered the hot set is otherwise never read at all; zooming is the only
 way to pull that history in.
 
+Leaving the Flows pane (`setSidebarMode` to anything else) clears the
+zoom — re-entering `flows` always lands back on the overview, never a
+stale zoomed lane; re-zoom explicitly if needed.
+
 ```
 → {"cmd":"zoomFlow","laneID":"session-e2e-session-1"}
 ← {"ok":true}

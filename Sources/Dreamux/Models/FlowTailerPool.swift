@@ -81,7 +81,9 @@ final class FlowTailerPool: @unchecked Sendable {
     // MARK: - Hot set
 
     /// Start tailing every entry not already hot; stop tailing (but
-    /// keep, for their offsets) every session that dropped out.
+    /// keep, for their offsets) every session that dropped out; revive
+    /// any already-hot session's tailer that went dormant (see
+    /// `reviveDormantTailers`).
     func reconcile(hot: [ClaudeSessionEntry]) {
         var hotByID: [String: ClaudeSessionEntry] = [:]
         for entry in hot { hotByID[entry.sessionId] = entry }
@@ -91,6 +93,40 @@ final class FlowTailerPool: @unchecked Sendable {
         }
         for (sessionID, state) in sessions where state.isHot && hotByID[sessionID] == nil {
             deactivateHot(state)
+        }
+        // Deliberately excludes sessions just activated above — those
+        // already got their own `start()`/`resume()` this very poll, so
+        // re-checking them here would only interrupt their own
+        // just-scheduled retry for no benefit.
+        for (_, state) in sessions where state.isHot && hotByID[state.sessionID] != nil {
+            reviveDormantTailers(state)
+        }
+    }
+
+    /// A session that's been in the hot set since a PRIOR poll (not
+    /// freshly activated this one) whose transcript — or an agent's —
+    /// tailer never got a live fd: most commonly, its transcript file
+    /// didn't exist yet when the session first went hot, so
+    /// `activateHot`'s `start(replayExisting: false)` exhausted
+    /// `ClaudeTranscriptTailer`'s one reopen retry and went dormant (see
+    /// its `isDormant` doc comment) — nothing would otherwise ever
+    /// re-open that file. `resume()` is safe to call even on a tailer
+    /// that's merely mid-retry, not fully dormant yet (it always tears
+    /// down and retries immediately), so this doesn't need to
+    /// distinguish the two.
+    ///
+    /// Agent tailers are far less likely to hit this (`scanSubagentsDir`
+    /// only ever constructs one after listing the file from disk, so its
+    /// first `start()` almost always succeeds), but a `.delete`/
+    /// `.rename` mid-tail (log rotation) can dormant one the same way —
+    /// so they get the same revival pass here, at the cost of one cheap
+    /// in-memory read per agent tailer per poll.
+    private func reviveDormantTailers(_ state: SessionState) {
+        if state.hasStartedTranscript, state.transcriptTailer.isDormant {
+            state.transcriptTailer.resume()
+        }
+        for agentTailer in state.agentTailers.values where agentTailer.isDormant {
+            agentTailer.resume()
         }
     }
 

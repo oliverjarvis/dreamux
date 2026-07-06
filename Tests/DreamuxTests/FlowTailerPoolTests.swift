@@ -132,6 +132,49 @@ final class FlowTailerPoolTests: XCTestCase {
         XCTAssertEqual(receivedLines, ["once"])
     }
 
+    // MARK: - Dormant tailer revival
+
+    /// A session can appear in the registry (and so enter the hot set)
+    /// before claude has flushed its transcript file to disk — the
+    /// tailer's first `start()` finds nothing to open, exhausts its one
+    /// reopen retry, and goes dormant (`ClaudeTranscriptTailer.isDormant`).
+    /// Without `reconcile` reviving it, that session's activity would
+    /// never be tailed for the rest of its life even once the file
+    /// shows up. This is a steady-state poll (same entry, already hot)
+    /// — not a fresh activation — so it exercises the exact case
+    /// `testSteadyStateReconcileDoesNotRestartAlreadyHotSession` must
+    /// keep passing unmodified: only a dormant tailer gets kicked, a
+    /// healthy one is left alone.
+    func testDormantTailerRevivesOnNextReconcileOnceFileExists() throws {
+        let cwd = "/Users/x/proj"
+        let sessionID = "s1"
+        // No transcript file yet — `sessionState(for:cwd:)` still builds
+        // a tailer against the path it WOULD live at.
+
+        var receivedLines: [String] = []
+        let exp = expectation(description: "line arrives once the file exists and reconcile revives the tailer")
+        let pool = makePool(onTranscriptLines: { sid, lines in
+            guard sid == sessionID else { return }
+            receivedLines.append(contentsOf: lines)
+            exp.fulfill()
+        })
+
+        pool.reconcile(hot: [entry(session: sessionID, cwd: cwd)])
+        XCTAssertTrue(pool.activeSessionIDs.contains(sessionID))
+
+        // The file appears only now — the real-world equivalent of
+        // claude not having flushed it yet when the session first
+        // showed up in the registry.
+        try writeTranscript(["hello"], cwd: cwd, sessionID: sessionID)
+
+        // Same hot set, same session — a steady-state poll, not a fresh
+        // activation — must still revive the dormant tailer.
+        pool.reconcile(hot: [entry(session: sessionID, cwd: cwd)])
+
+        wait(for: [exp], timeout: 3)
+        XCTAssertEqual(receivedLines, ["hello"])
+    }
+
     // MARK: - Subagent metas + agent tailers
 
     func testMetaFileDroppedIntoSubagentsDirFiresOnMeta() throws {

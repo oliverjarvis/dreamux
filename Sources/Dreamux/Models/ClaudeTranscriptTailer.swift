@@ -109,6 +109,26 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         queue.sync { self.resumeOnQueue() }
     }
 
+    /// True when this tailer believes it should be watching (`start()`/
+    /// `resume()` was called and `stop()` hasn't been since) but
+    /// currently has no live kqueue source — either mid-wait for its one
+    /// reopen retry, or fully given up after that retry also failed (see
+    /// `retryOnceOrGoDormant`). Both cases are the same thing to a
+    /// caller: nothing will re-attempt opening the file until an
+    /// explicit `resume()` (safe to call in either sub-state — it always
+    /// tears down and retries immediately, so it can only help, never
+    /// duplicate work). `FlowTailerPool.reconcile` reads this on every
+    /// poll to revive an already-hot session's tailer that never got a
+    /// live fd (its transcript file didn't exist yet when the session
+    /// first went hot). Same not-on-queue precondition family as
+    /// `start`/`stop`/`resume` above — this is a read, not a mutation,
+    /// but it still must not run ON the tailer's own serial queue (that
+    /// would deadlock `queue.sync` the same way a nested `start()` would).
+    var isDormant: Bool {
+        dispatchPrecondition(condition: .notOnQueue(queue))
+        return queue.sync { !isStopped && source == nil }
+    }
+
     deinit {
         // No other strong reference can exist once deinit runs (every
         // closure captures `self` weakly), so touching the

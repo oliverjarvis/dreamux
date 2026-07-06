@@ -38,6 +38,13 @@ struct FlowsOverviewView: View {
                 onJumpToTerminal: onJumpToTerminal,
                 onOpenTranscript: onOpenTranscript
             )
+            // Without this, zooming straight from one lane to another
+            // (non-nil -> different non-nil, e.g. a second zoomFlow before
+            // clearing the first) reuses the same view identity — SwiftUI
+            // sees "still a FlowDetailView here" and never fires
+            // onDisappear/onAppear, so the old lane's lazy tail never
+            // releases and the new lane's never begins.
+            .id(zoomedLaneID)
             .onAppear {
                 if let sessionID = lane.flow.sessionID { onZoomBegin(sessionID) }
             }
