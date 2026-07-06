@@ -17,6 +17,29 @@ enum ClaudeHome {
     }
 }
 
+extension ClaudeHome {
+    /// claude's project-directory naming convention: every
+    /// non-alphanumeric character in the cwd becomes `-`.
+    static func projectSlug(forCwd cwd: String) -> String {
+        String(cwd.map { $0.isLetter || $0.isNumber ? $0 : "-" })
+    }
+
+    /// `<home>/projects/<slug>/<sessionID>.jsonl`
+    static func transcriptURL(home: URL, cwd: String, sessionID: String) -> URL {
+        home.appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(projectSlug(forCwd: cwd), isDirectory: true)
+            .appendingPathComponent("\(sessionID).jsonl", isDirectory: false)
+    }
+
+    /// `<home>/projects/<slug>/<sessionID>/subagents`
+    static func subagentsDirURL(home: URL, cwd: String, sessionID: String) -> URL {
+        home.appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(projectSlug(forCwd: cwd), isDirectory: true)
+            .appendingPathComponent(sessionID, isDirectory: true)
+            .appendingPathComponent("subagents", isDirectory: true)
+    }
+}
+
 /// One running claude process, as advertised in
 /// `<claude-home>/sessions/<pid>.json`. Untrusted, evolving input:
 /// we decode only the fields we use and skip files that don't parse.

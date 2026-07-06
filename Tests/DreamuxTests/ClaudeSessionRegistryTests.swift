@@ -62,4 +62,20 @@ final class ClaudeSessionRegistryTests: XCTestCase {
         let reader = ClaudeSessionRegistryReader(home: home, isAlive: { _ in true })
         XCTAssertEqual(reader.entries(), [])
     }
+
+    func testProjectSlugReplacesEveryNonAlphanumericCharacter() {
+        XCTAssertEqual(ClaudeHome.projectSlug(forCwd: "/Users/x/dev.app/y"), "-Users-x-dev-app-y")
+    }
+
+    func testTranscriptURLComposesHomeSlugAndSession() {
+        let fakeHome = URL(fileURLWithPath: "/fake/home", isDirectory: true)
+        let url = ClaudeHome.transcriptURL(home: fakeHome, cwd: "/Users/x/proj", sessionID: "sess-1")
+        XCTAssertEqual(url.path, "/fake/home/projects/-Users-x-proj/sess-1.jsonl")
+    }
+
+    func testSubagentsDirURLComposesHomeSlugAndSession() {
+        let fakeHome = URL(fileURLWithPath: "/fake/home", isDirectory: true)
+        let url = ClaudeHome.subagentsDirURL(home: fakeHome, cwd: "/Users/x/proj", sessionID: "sess-1")
+        XCTAssertEqual(url.path, "/fake/home/projects/-Users-x-proj/sess-1/subagents")
+    }
 }

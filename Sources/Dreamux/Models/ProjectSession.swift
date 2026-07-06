@@ -73,6 +73,10 @@ final class ProjectSession {
     /// cancels its own polling `Task` in its own `deinit`.
     @ObservationIgnored private var flowBusSubscription: AnyCancellable?
     @ObservationIgnored private var registryPoller: ClaudeRegistryPoller?
+    /// Hot-set + zoom transcript tailing for `flows`. Held for the same
+    /// ARC-teardown reason as `registryPoller`; `startPolling`'s
+    /// `onSnapshot` reconciles it on every poll.
+    @ObservationIgnored private var flowTailerPool: FlowTailerPool?
 
     init(project: Project) {
         self.project = project
@@ -463,14 +467,42 @@ final class ProjectSession {
         }
 
         let home = ClaudeHome.root()
+
+        // 5. Hot-set tailer pool: transcript/meta/agent-activity events
+        // route straight into the adapter then the store, same shape as
+        // the wiring sketch's callbacks — no separate subscription
+        // layer needed since the pool already hops to `@MainActor`
+        // before invoking any of these.
+        let pool = FlowTailerPool(
+            home: home,
+            onTranscriptLines: { [weak flows] sessionID, lines in
+                let (events, skipped) = ClaudeFlowAdapter.transcriptEvents(fromLines: lines)
+                for event in events { flows?.apply(transcript: event, sessionID: sessionID) }
+                if skipped > 0 { flows?.noteSkippedLines(skipped, sessionID: sessionID) }
+            },
+            onAgentLines: { [weak flows] sessionID, agentID, lines in
+                if let activity = ClaudeFlowAdapter.lastActivity(fromAgentLines: lines) {
+                    flows?.apply(agentActivity: activity, agentID: agentID, sessionID: sessionID)
+                }
+            },
+            onMeta: { [weak flows] sessionID, meta in
+                flows?.apply(meta: meta, sessionID: sessionID)
+            }
+        )
+        flowTailerPool = pool
+
         let poller = ClaudeRegistryPoller(
             // Built fresh per poll rather than captured: `home: URL` is
             // Sendable, but `ClaudeSessionRegistryReader` itself isn't
             // (its `isAlive` closure isn't `@Sendable`), so capturing an
             // instance would fail the poller's `@Sendable` `read` closure.
             read: { ClaudeSessionRegistryReader(home: home).entries() },
-            onSnapshot: { [weak flows] entries in
-                flows?.apply(registry: entries.filter { isInProject($0.cwd) })
+            onSnapshot: { [weak flows, weak pool] entries in
+                let projectEntries = entries.filter { isInProject($0.cwd) }
+                flows?.apply(registry: projectEntries)
+                pool?.reconcile(hot: projectEntries.filter {
+                    $0.flowStatus == .running || $0.flowStatus == .waiting
+                })
             }
         )
         registryPoller = poller
