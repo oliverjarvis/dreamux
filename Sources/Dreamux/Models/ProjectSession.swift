@@ -421,9 +421,11 @@ final class ProjectSession {
         // itself (no workspace match) still counts.
         let isInProject: (String) -> Bool = { [weak self] cwd in
             guard let self else { return false }
-            return FlowWiring.workspaceID(
+            if FlowWiring.workspaceID(
                 forCwd: cwd, workspaces: self.store.workspaces, projectRoot: self.project.rootPath
-            ) != nil || cwd.hasPrefix(self.project.rootPath.path)
+            ) != nil { return true }
+            let root = self.project.rootPath.path
+            return cwd == root || cwd.hasPrefix(root + "/")
         }
         flowBusSubscription = bus.publisher
             .filter { SignalKind.flowKinds.contains($0.kind) }
