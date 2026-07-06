@@ -43,19 +43,40 @@ import Darwin
 ///    `SessionState.agentTailers` but only actually started if it
 ///    ranks among the most-recently-modified `maxAgentTailersPerSession`
 ///    files once `enforceAgentTailerCap` ranks everything this session
-///    has ever discovered (today that ranking is effectively frozen at
-///    discovery time — `agentFileModDates` isn't refreshed afterward —
-///    but Group 4's mtime-refresh work will make re-ranking, and so
-///    re-promotion, live). Anything that drops out of that ranking
-///    gets `stop()`ed (fds released) but keeps its `agentTailers`
-///    entry; if it's later re-promoted, `enforceAgentTailerCap` resumes
-///    it from the offset that entry preserved rather than re-seeking
-///    to a fresh EOF (which would silently drop everything written
-///    during the demotion gap) — see `everStartedAgentTailerIDs`.
-///    Because nothing is started until it's already ranked, an outlier
-///    session directory with far more subagents than the cap never
-///    transiently exceeds it mid-scan — see `maxAgentTailersPerSession`'s
-///    doc for the concrete fd math.
+///    has ever discovered. That ranking is LIVE, not frozen at
+///    discovery: every scan refreshes `agentFileModDates` from a fresh
+///    `stat` of every agent file it finds (see `scanDirectoryOffMain`),
+///    so a file that keeps growing rises in rank and one that goes
+///    quiet falls — and so re-promotion is a real, reachable path, not
+///    just a bookkeeping possibility. Anything that drops out of that
+///    ranking gets `stop()`ed (fds released) but keeps its
+///    `agentTailers` entry; if it's later re-promoted,
+///    `enforceAgentTailerCap` resumes it from the offset that entry
+///    preserved rather than re-seeking to a fresh EOF (which would
+///    silently drop everything written during the demotion gap) — see
+///    `everStartedAgentTailerIDs`. Because nothing is started until
+///    it's already ranked, an outlier session directory with far more
+///    subagents than the cap never transiently exceeds it mid-scan —
+///    see `maxAgentTailersPerSession`'s doc for the concrete fd math.
+/// 4. `scanSubagentsDir`'s directory listing, per-file `stat`, and
+///    conditional meta JSON parse all run off the main actor, on
+///    `deliveryQueue` (mirroring how `ClaudeTranscriptTailer` already
+///    does its own off-main work before handing back to
+///    `transcriptCallback`/`agentCallback`'s `Task { @MainActor in }`
+///    hop — this uses the same hop) — a real session directory has been
+///    observed with 219 meta files, and parsing all of them inline on
+///    main per dir event would be an O(N^2) hitch across a burst of
+///    events. Only a new-or-changed meta file is actually re-parsed
+///    (`SessionState.metaCache`, gated by mtime); `onMeta` still fires
+///    for every cached entry on every scan regardless (the
+///    join-resweep design predates this change — see
+///    `scanDirectoryOffMain`'s comment). A single `Task { @MainActor
+///    in }` hop delivers the whole scan's results — cache update,
+///    `onMeta` batch, `agentFileModDates` refresh, new-tailer
+///    registration, and `enforceAgentTailerCap` — as one atomic unit
+///    (`applyScanResults`), re-validating `isHot || isLazy` first (same
+///    guard shape as `handleTranscriptLines`'s) since the session may
+///    have been stopped while this scan was in flight off-main.
 /// `@unchecked Sendable`: every stored property is only ever touched
 /// from the main actor (this class's own isolation). The `[weak pool]`
 /// captures in `transcriptCallback`/`agentCallback`/`replayFullHistory`
@@ -89,6 +110,25 @@ final class FlowTailerPool: @unchecked Sendable {
     /// parsing/emission in `scanSubagentsDir` costs no fds and is NOT
     /// subject to this cap — only tailers are.
     private static let maxAgentTailersPerSession = 24
+
+    /// Test seam (Group 4 item 4c): incremented once per meta file
+    /// `scanDirectoryOffMain` actually re-parses — mtime changed, or no
+    /// cache entry yet — NOT once per scan and NOT once per `onMeta`
+    /// emission (every cached entry is still re-emitted on every scan;
+    /// see `ScanResult.metaEmissionOrder`'s doc). Lets a test confirm
+    /// the mtime gate is working: rescanning an unchanged directory
+    /// must grow `onMeta` emission count without growing this.
+    private(set) var metaParseCount = 0
+
+    /// Test seam: how many scans dispatched by `scanSubagentsDir` (see
+    /// decision 4 in the type doc comment) have not yet been applied
+    /// back on main via `applyScanResults`. A dir-event-triggered scan
+    /// is asynchronous with no other completion signal a test can
+    /// observe directly, so a test that triggers one (directly, or via
+    /// a real dir event like creating a file) needs to poll this down
+    /// to 0 before trusting any state the scan would affect —
+    /// otherwise it's checking state from before the scan landed.
+    private(set) var pendingScanCount = 0
 
     private var sessions: [String: SessionState] = [:]
 
@@ -377,12 +417,66 @@ final class FlowTailerPool: @unchecked Sendable {
         scanSubagentsDir(sessionID: sessionID)  // catch anything already there
     }
 
+    /// Dir-event handler entry point — just snapshots what the off-main
+    /// pass needs and schedules it; see decision 4 in the type doc
+    /// comment for why the real work (listing, `stat`, conditional
+    /// parse) doesn't happen here, on the main actor.
     private func scanSubagentsDir(sessionID: String) {
         guard let state = sessions[sessionID] else { return }
         let dirURL = ClaudeHome.subagentsDirURL(home: home, cwd: state.cwd, sessionID: sessionID)
+        pendingScanCount += 1
+        Self.dispatchScan(
+            pool: self, sessionID: sessionID, dirURL: dirURL,
+            priorMetaCache: state.metaCache, knownAgentIDs: Set(state.agentTailers.keys),
+            queue: deliveryQueue)
+    }
+
+    /// Off-main: see decision 4 in the type doc comment. Plain GCD
+    /// (`queue.async`) for the listing + `stat` + conditional parse,
+    /// mirroring exactly how `ClaudeTranscriptTailer` already does its
+    /// own off-main work before handing back to `transcriptCallback`/
+    /// `agentCallback`'s `Task { @MainActor in }` hop — this uses that
+    /// same hop shape for its own final delivery. Built from a
+    /// `nonisolated` context for the same isolation-laundering reason as
+    /// `transcriptCallback`/`agentCallback` above.
+    nonisolated private static func dispatchScan(
+        pool: FlowTailerPool, sessionID: String, dirURL: URL,
+        priorMetaCache: [String: (mtime: Date, meta: SubagentMeta)], knownAgentIDs: Set<String>,
+        queue: DispatchQueue
+    ) {
+        queue.async { [weak pool] in
+            let result = scanDirectoryOffMain(
+                dirURL: dirURL, priorMetaCache: priorMetaCache, knownAgentIDs: knownAgentIDs)
+            // Re-strengthened into a per-invocation local before entering
+            // the `Task` — same reasoning as `transcriptCallback`'s doc
+            // comment (avoids reaching through the weak reference a
+            // second time from within the closure).
+            guard let pool else { return }
+            Task { @MainActor in
+                pool.applyScanResults(sessionID: sessionID, result: result)
+                // Decremented last, in the same hop that applied the
+                // result — see `pendingScanCount`'s doc for why a test
+                // must drain this to zero before returning rather than
+                // guessing with a fixed sleep.
+                pool.pendingScanCount -= 1
+            }
+        }
+    }
+
+    /// The actual listing + `stat` + conditional parse, entirely off
+    /// the main actor. `priorMetaCache`/`knownAgentIDs` are snapshots
+    /// taken before this was scheduled — this only reads them and
+    /// returns a `ScanResult`; nothing here touches pool or session
+    /// state directly (that all happens back on main, in
+    /// `applyScanResults`).
+    nonisolated private static func scanDirectoryOffMain(
+        dirURL: URL, priorMetaCache: [String: (mtime: Date, meta: SubagentMeta)], knownAgentIDs: Set<String>
+    ) -> ScanResult {
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: dirURL, includingPropertiesForKeys: nil
-        ) else { return }
+        ) else {
+            return ScanResult(metaCache: [:], metaEmissionOrder: [], agentModDates: [:], newAgentFiles: [], parsedCount: 0)
+        }
 
         // ALWAYS re-emit every meta found here — never dedup `onMeta`
         // itself. `FlowStore` clears its toolUse↔agent joins whenever a
@@ -391,30 +485,112 @@ final class FlowTailerPool: @unchecked Sendable {
         // need to reach the store again to re-establish that join;
         // `onMeta` is idempotent there (it re-sets the same fields), so
         // re-delivery on every scan costs nothing but a dictionary
-        // write. Dedup only matters below, for spawning tailers.
+        // write. Only the PARSE is gated by mtime (`metaCache`, below)
+        // — dedup never applies to the `onMeta` call itself.
+        var metaCache: [String: (mtime: Date, meta: SubagentMeta)] = [:]
+        var metaEmissionOrder: [SubagentMeta] = []
+        var parsedCount = 0
         for url in files where url.lastPathComponent.hasSuffix(".meta.json") {
-            guard let meta = SubagentMeta.parse(url: url) else { continue }
-            onMeta(sessionID, meta)
+            let name = url.lastPathComponent
+            guard name.hasPrefix("agent-") else { continue }
+            let agentID = String(name.dropFirst("agent-".count).dropLast(".meta.json".count))
+            guard !agentID.isEmpty else { continue }
+
+            let mtime = modificationDate(of: url)
+            if let cached = priorMetaCache[agentID], cached.mtime == mtime {
+                metaCache[agentID] = cached
+                metaEmissionOrder.append(cached.meta)
+            } else if let meta = SubagentMeta.parse(url: url) {
+                parsedCount += 1
+                metaCache[agentID] = (mtime, meta)
+                metaEmissionOrder.append(meta)
+            }
         }
+
+        // Every agent file's mtime is refreshed here, live-agent or
+        // not — this is what makes `enforceAgentTailerCap`'s ranking
+        // real (see decision 3 in the type doc comment) rather than
+        // frozen at discovery. The same stat call decides, via
+        // `knownAgentIDs`, which files are new enough to register.
+        var agentModDates: [String: Date] = [:]
+        var newAgentFiles: [(agentID: String, url: URL)] = []
+        for url in files where url.lastPathComponent.hasPrefix("agent-") && url.pathExtension == "jsonl" {
+            let agentID = String(url.deletingPathExtension().lastPathComponent.dropFirst("agent-".count))
+            guard !agentID.isEmpty else { continue }
+            agentModDates[agentID] = modificationDate(of: url)
+            if !knownAgentIDs.contains(agentID) {
+                newAgentFiles.append((agentID: agentID, url: url))
+            }
+        }
+
+        return ScanResult(
+            metaCache: metaCache, metaEmissionOrder: metaEmissionOrder,
+            agentModDates: agentModDates, newAgentFiles: newAgentFiles, parsedCount: parsedCount)
+    }
+
+    /// Back on main: applies one scan's results as a single atomic
+    /// batch (see decision 4 in the type doc comment). Cache update +
+    /// `onMeta` re-emission happen unconditionally (mirrors
+    /// `handleTranscriptLines`/`handleAgentLines` forwarding a stray
+    /// post-stop delivery) — but anything that would touch fds
+    /// (registering a new tailer, `enforceAgentTailerCap` (re)starting
+    /// one) is guarded on `isHot || isLazy`, since this session may
+    /// have been stopped while the scan that produced `result` was
+    /// still in flight off-main. Same guard shape as
+    /// `handleTranscriptLines`'s.
+    private func applyScanResults(sessionID: String, result: ScanResult) {
+        metaParseCount += result.parsedCount
+        guard let state = sessions[sessionID] else { return }
+        state.metaCache = result.metaCache
+        for meta in result.metaEmissionOrder { onMeta(sessionID, meta) }
+
+        guard state.isHot || state.isLazy else { return }
 
         // Registered unconditionally — NOT started here. `init` opens no
         // fds, so it's safe to track every discovered file regardless of
         // the cap; `enforceAgentTailerCap` below decides which ones
         // actually get a live fd (see decision 3 in the type doc
-        // comment).
-        for url in files where url.lastPathComponent.hasPrefix("agent-") && url.pathExtension == "jsonl" {
-            let agentID = String(url.deletingPathExtension().lastPathComponent.dropFirst("agent-".count))
-            guard !agentID.isEmpty, state.agentTailers[agentID] == nil else { continue }
+        // comment). Re-checked against current state (not just the
+        // pre-scan `knownAgentIDs` snapshot) in case a newer scan
+        // already registered the same file first.
+        for (agentID, url) in result.newAgentFiles where state.agentTailers[agentID] == nil {
             state.agentTailers[agentID] = ClaudeTranscriptTailer(
                 url: url, deliveryQueue: deliveryQueue,
                 onLines: Self.agentCallback(pool: self, sessionID: sessionID, agentID: agentID)
             )
-            state.agentFileModDates[agentID] = Self.modificationDate(of: url)
+        }
+        for (agentID, mtime) in result.agentModDates {
+            state.agentFileModDates[agentID] = mtime
         }
         enforceAgentTailerCap(state)
     }
 
-    private static func modificationDate(of url: URL) -> Date {
+    /// Everything one off-main scan produces, carried back across the
+    /// `queue.async` -> `Task { @MainActor in }` hop as a single value
+    /// so `applyScanResults` delivers it as one atomic, in-order batch.
+    private struct ScanResult {
+        /// Replaces `SessionState.metaCache` wholesale — a file no
+        /// longer present in this scan's directory listing simply isn't
+        /// carried forward (matching the pre-Group-4 behavior of only
+        /// ever emitting for what's currently on disk).
+        let metaCache: [String: (mtime: Date, meta: SubagentMeta)]
+        /// Every meta this scan found, cached-or-freshly-parsed, in
+        /// listing order — `applyScanResults` calls `onMeta` for each
+        /// of these unconditionally.
+        let metaEmissionOrder: [SubagentMeta]
+        /// Freshly-`stat`'d mtime for every agent `.jsonl` file this
+        /// scan found — feeds `enforceAgentTailerCap`'s dynamic ranking.
+        let agentModDates: [String: Date]
+        /// Agent files not already in `SessionState.agentTailers` as of
+        /// when the scan STARTED — re-checked against current state in
+        /// `applyScanResults` before actually registering.
+        let newAgentFiles: [(agentID: String, url: URL)]
+        /// How many meta files this scan actually re-parsed (mtime
+        /// changed, or no cache entry yet) — feeds `metaParseCount`.
+        let parsedCount: Int
+    }
+
+    nonisolated private static func modificationDate(of url: URL) -> Date {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let date = attrs[.modificationDate] as? Date
         else { return .distantPast }  // unreadable mtime: treat as oldest, never prioritized
@@ -422,10 +598,10 @@ final class FlowTailerPool: @unchecked Sendable {
     }
 
     /// Ranks every agent file this session has ever discovered by mtime
-    /// (newest first — though today `agentFileModDates` is captured
-    /// once, at discovery, and never refreshed, so this ranking is
-    /// effectively frozen until Group 4's mtime-refresh work lands) and
-    /// keeps only the top `maxAgentTailersPerSession` live. Anything
+    /// (newest first — refreshed on every scan by `scanDirectoryOffMain`'s
+    /// stat pass, so this ranking is live: a file that keeps growing
+    /// rises, one that goes quiet falls) and keeps only the top
+    /// `maxAgentTailersPerSession` live. Anything
     /// newly promoted into that top rank gets started: under `isLazy`,
     /// always a full replay from zero (same choice `ensureLazyTail`
     /// already makes for every live agent tailer); otherwise a FIRST
@@ -439,7 +615,7 @@ final class FlowTailerPool: @unchecked Sendable {
     /// for on the session transcript tailer). Anything that drops rank
     /// gets `stop()`ed (fds released) but keeps its `SessionState
     /// .agentTailers` entry, so its offset is there to resume from
-    /// later. Called only from `scanSubagentsDir`, after new candidates
+    /// later. Called only from `applyScanResults`, after new candidates
     /// are registered — see decision 3 in the type doc comment for why
     /// registration and starting are split like this.
     private func enforceAgentTailerCap(_ state: SessionState) {
@@ -493,11 +669,21 @@ private final class SessionState {
     /// everything written during the demotion gap — depends on
     /// `everStartedAgentTailerIDs` below.
     var agentTailers: [String: ClaudeTranscriptTailer] = [:]
-    /// Mtime of each agent file at discovery time — the recency signal
-    /// `enforceAgentTailerCap` ranks `agentTailers` by. Captured once,
-    /// at discovery, and never refreshed — so today a file's rank is
-    /// effectively frozen (see `enforceAgentTailerCap`'s doc).
+    /// Mtime of each agent file as of the most recent scan — the
+    /// recency signal `enforceAgentTailerCap` ranks `agentTailers` by.
+    /// Refreshed every scan from `FlowTailerPool.scanDirectoryOffMain`'s
+    /// stat pass, so ranking is live, not frozen at discovery (see
+    /// `enforceAgentTailerCap`'s doc).
     var agentFileModDates: [String: Date] = [:]
+    /// Cached parse of every meta file this session's subagents dir
+    /// currently contains, keyed by agent ID, alongside the mtime it
+    /// was parsed at. `FlowTailerPool.scanDirectoryOffMain` reparses an
+    /// entry only when its file's mtime has changed since this was last
+    /// updated (see `FlowTailerPool.metaParseCount`) — but every entry
+    /// present in a given scan's directory listing is still re-emitted
+    /// via `onMeta` unconditionally regardless (see
+    /// `scanDirectoryOffMain`'s comment).
+    var metaCache: [String: (mtime: Date, meta: SubagentMeta)] = [:]
     /// Subset of `agentTailers.keys` currently holding a live fd pair,
     /// bounded by `FlowTailerPool.maxAgentTailersPerSession`. Every
     /// resume/revive/replay path is scoped to this set — an ID dropped
@@ -520,5 +706,20 @@ private final class SessionState {
         self.sessionID = sessionID
         self.cwd = cwd
         self.transcriptTailer = transcriptTailer
+    }
+
+    /// Fd-leak backstop for `subagentsWatcher`, mirroring
+    /// `ClaudeTranscriptTailer.deinit`'s reasoning. `SessionState`
+    /// entries are never removed from `FlowTailerPool.sessions` during
+    /// normal operation (see `agentTailers`'s doc above), so this only
+    /// fires when the whole pool is deallocated — e.g. its owning
+    /// project window closes — without it, a still-resumed watcher
+    /// source would leak its fd. Same accepted stray-callback race as
+    /// `FlowTailerPool.handleTranscriptLines`'s `isHot`/`isLazy` guard:
+    /// an event already in flight when the pool itself is torn down
+    /// can't land anywhere, since nothing retains this `SessionState`
+    /// to call back into once deinit starts.
+    deinit {
+        subagentsWatcher?.cancel()
     }
 }
