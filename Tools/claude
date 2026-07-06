@@ -63,15 +63,27 @@ fi
 
 # Build inline hooks JSON.
 #
-# We wire both Stop and Notification. Stop fires at the end of every
-# assistant turn — including on Ctrl+C — but `dreamux-hook stop`
-# inspects the transcript and skips empty / interrupted turns, so only
-# real task completions ping. Notification fires when the agent asks
-# for permission or idles waiting on the user.
+# Stop/Notification: notification pipeline (see dreamux-hook docstring).
+# SubagentStart/SubagentStop/TaskCreated/TaskCompleted: flow lifecycle
+# events for the Flows observatory — `dreamux-hook flow` relays them to
+# the app's signal socket. async:true so claude never waits on them.
+# TaskCreated/TaskCompleted take no matcher (hooks reference).
 #
 # The hook path is wrapped in escaped quotes so it tolerates spaces in
 # the bundle path. Single-quoted segments stay literal; "$HOOK" expands
 # the path between escaped JSON quotes.
-SETTINGS_JSON='{"hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" stop"}]}],"Notification":[{"matcher":"","hooks":[{"type":"command","command":"\"'"$HOOK"'\" notify"}]}]}}'
+HOOK_CMD='"\"'"$HOOK"'\"'
+SYNC_STOP='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' stop"}]}'
+SYNC_NOTIFY='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' notify"}]}'
+FLOW_MATCHED='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' flow","async":true}]}'
+FLOW_PLAIN='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' flow","async":true}]}'
+SETTINGS_JSON='{"hooks":{'
+SETTINGS_JSON="$SETTINGS_JSON"'"Stop":['"$SYNC_STOP"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"Notification":['"$SYNC_NOTIFY"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"SubagentStart":['"$FLOW_MATCHED"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"SubagentStop":['"$FLOW_MATCHED"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"TaskCreated":['"$FLOW_PLAIN"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"TaskCompleted":['"$FLOW_PLAIN"']'
+SETTINGS_JSON="$SETTINGS_JSON"'}}'
 
 exec "$REAL_CLAUDE" --settings "$SETTINGS_JSON" "$@"
