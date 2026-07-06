@@ -170,4 +170,13 @@ final class FlowStoreTests: XCTestCase {
         XCTAssertEqual(changeCount, 0)
         cancellable.cancel()
     }
+
+    func testEventCreatedLaneUsesEventTimestamp() {
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        let t = Date(timeIntervalSince1970: 500)
+        store.apply(event: .agentStarted(
+            sessionID: "s1", agentID: "a1", agentType: nil, description: nil, cwd: "/w", at: t
+        ))
+        XCTAssertEqual(store.flows[0].startedAt, t)
+    }
 }

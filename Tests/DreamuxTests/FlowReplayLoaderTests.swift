@@ -59,4 +59,37 @@ final class FlowReplayLoaderTests: XCTestCase {
         }
         XCTAssertEqual(agentID, "a0")
     }
+
+    func testReplayDropsNotificationEvents() async {
+        let now = Date()
+        store.append(Signal(
+            source: "claude.hooks",
+            kind: SignalKind.sessionNotification,
+            ts: now.addingTimeInterval(-5),
+            tags: ["cwd": "/w"],
+            payload: .object(["session_id": .string("s1"), "message": .string("needs permission")])
+        ))
+        store.append(flowSignal(kind: SignalKind.agentStarted, session: "s1", ts: now.addingTimeInterval(-4)))
+        let events = await FlowReplayLoader.events(store: store, now: now, window: 86_400, cap: 5_000)
+        XCTAssertEqual(events.count, 1)
+        guard case .agentStarted = events[0] else { return XCTFail("notification should be dropped in replay") }
+    }
+
+    func testReplayCapAcrossKinds() async {
+        let now = Date()
+        // 6 older agentStarted + 6 newer agentStopped; cap 8 must keep the
+        // 8 most recent ACROSS kinds (6 stopped + 2 newest started).
+        for i in 0..<6 {
+            store.append(flowSignal(kind: SignalKind.agentStarted, session: "s1",
+                                    ts: now.addingTimeInterval(TimeInterval(-100 - i)), agent: "old\(i)"))
+        }
+        for i in 0..<6 {
+            store.append(flowSignal(kind: SignalKind.agentStopped, session: "s1",
+                                    ts: now.addingTimeInterval(TimeInterval(-10 - i)), agent: "new\(i)"))
+        }
+        let events = await FlowReplayLoader.events(store: store, now: now, window: 86_400, cap: 8)
+        XCTAssertEqual(events.count, 8)
+        let startedCount = events.filter { if case .agentStarted = $0 { return true }; return false }.count
+        XCTAssertEqual(startedCount, 2)
+    }
 }

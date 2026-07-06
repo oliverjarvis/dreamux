@@ -83,4 +83,13 @@ final class ClaudeFlowAdapterTests: XCTestCase {
         XCTAssertEqual(event.at, Date(timeIntervalSince1970: 1_000))
         XCTAssertEqual(event.cwd, "/w2")
     }
+
+    func testEveryFlowKindMapsToAnEvent() {
+        for kind in SignalKind.flowKinds {
+            let s = signal(kind: kind, payload: [
+                "session_id": .string("s1"), "agent_id": .string("a1"),
+            ])
+            XCTAssertNotNil(ClaudeFlowAdapter.event(from: s), "kind \(kind) does not map — flowKinds and the adapter switch have drifted")
+        }
+    }
 }

@@ -24,6 +24,7 @@ enum FlowReplayLoader {
         let recentFirst = signals.sorted { $0.ts > $1.ts }.prefix(cap)
         return recentFirst
             .compactMap(ClaudeFlowAdapter.event(from:))
+            .filter { if case .notification = $0 { return false }; return true }
             .sorted { $0.at < $1.at }
     }
 }

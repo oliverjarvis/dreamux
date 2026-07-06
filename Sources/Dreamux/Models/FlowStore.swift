@@ -32,7 +32,8 @@ final class FlowStore: ObservableObject {
                 laneID: laneID,
                 sessionID: entry.sessionId,
                 kind: entry.isBackground ? .scheduled : .adhoc,
-                cwd: entry.cwd
+                cwd: entry.cwd,
+                startedAt: Date()
             )
             lane.title = entry.name ?? entry.sessionId
             if lane.workspaceID == nil { lane.workspaceID = workspaceForCwd(entry.cwd) }
@@ -82,7 +83,8 @@ final class FlowStore: ObservableObject {
             laneID: laneID,
             sessionID: String(laneID.dropFirst("session-".count)),
             kind: .adhoc,
-            cwd: event.cwd
+            cwd: event.cwd,
+            startedAt: event.at
         )
 
         switch event {
@@ -133,14 +135,14 @@ final class FlowStore: ObservableObject {
 
     // MARK: - Internals
 
-    private func makeSessionLane(laneID: String, sessionID: String, kind: FlowKind, cwd: String?) -> Flow {
+    private func makeSessionLane(laneID: String, sessionID: String, kind: FlowKind, cwd: String?, startedAt: Date) -> Flow {
         Flow(
             id: laneID,
             title: sessionID,
             kind: kind,
             workspaceID: cwd.flatMap(workspaceForCwd),
             sessionID: sessionID,
-            startedAt: Date(),
+            startedAt: startedAt,
             nodes: [
                 FlowNode(id: "src", kind: .source, label: "prompt", status: .done),
                 FlowNode(id: "session", kind: .agent, label: "claude", status: .running),
