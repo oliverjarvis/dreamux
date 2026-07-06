@@ -48,6 +48,16 @@ final class ClaudeTranscriptParsingTests: XCTestCase {
         XCTAssertTrue(isError)
     }
 
+    func testMultipleToolUsesInOneMessageProcessedInOrder() {
+        let line = #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"bash1","name":"Bash","input":{"command":"ls"}},{"type":"tool_use","id":"agent1","name":"Agent","input":{"description":"explore","subagent_type":"Explore"}}]}}"#
+        let (events, _) = ClaudeFlowAdapter.transcriptEvents(fromLines: [line])
+        XCTAssertEqual(events.count, 2)
+        guard case let .toolStarted(id, tool, _, _)? = events.first else { return XCTFail("expected first toolStarted") }
+        XCTAssertEqual(id, "bash1"); XCTAssertEqual(tool, "Bash")
+        guard case let .agentSpawned(id, type, _, _)? = events.dropFirst().first else { return XCTFail("expected second agentSpawned") }
+        XCTAssertEqual(id, "agent1"); XCTAssertEqual(type, "Explore")
+    }
+
     func testGarbageAndUnknownTypesSkippedNotFatal() {
         let (events, skipped) = ClaudeFlowAdapter.transcriptEvents(fromLines: [
             "not json", #"{"type":"file-history-snapshot","x":1}"#, #"{"no":"type"}"#, "",

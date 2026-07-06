@@ -94,12 +94,6 @@ extension ClaudeFlowAdapter {
     /// must never balloon parsing. Spec guardrail.
     private static let maxLineBytes = 1_048_576
     private static let agentToolNames: Set<String> = ["Agent", "Task"]
-    /// Entry types we understand but produce no events for — silent skips.
-    private static let knownQuietTypes: Set<String> = [
-        "system", "attachment", "summary", "ai-title", "last-prompt", "mode",
-        "permission-mode", "file-history-snapshot", "queue-operation",
-        "worktree-state", "relocated",
-    ]
 
     static func transcriptEvents(fromLines lines: [String]) -> (events: [TranscriptEvent], skipped: Int) {
         var events: [TranscriptEvent] = []
@@ -150,9 +144,9 @@ extension ClaudeFlowAdapter {
                     events.append(.toolFinished(toolUseID: id, isError: isError, at: at))
                 }
             default:
-                // Known-quiet and unknown NEW types alike: silent skip,
-                // not an error — forward compat. `skipped` counts only
-                // lines that failed to parse at all.
+                // All other types are silent skips by design — forward compat.
+                // `skipped` counts only lines that failed to parse (malformed,
+                // oversized, or missing type field), not unknown message types.
                 break
             }
         }
