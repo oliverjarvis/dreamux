@@ -12,14 +12,21 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var selectedID: LibraryItem.ID?
     @State private var loaded = false
+    /// nil = all kinds; otherwise the picker narrows to one section.
+    @State private var kindFilter: LibraryItemKind?
+    /// Show only what THIS project's agents can reach right now.
+    @State private var activeOnly = false
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                searchBar
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial)
+                VStack(spacing: 8) {
+                    searchBar
+                    filterBar
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.regularMaterial)
                 Divider()
                 if !loaded {
                     ProgressView()
@@ -67,10 +74,40 @@ struct LibraryView: View {
         }
     }
 
+    /// Kind picker + active-only toggle. Plugins lead — they're the
+    /// containers most skills/servers arrive in.
+    private var filterBar: some View {
+        HStack(spacing: 10) {
+            Picker("", selection: $kindFilter) {
+                Text("All").tag(LibraryItemKind?.none)
+                Text("Plugins").tag(LibraryItemKind?.some(.plugin))
+                Text("Skills").tag(LibraryItemKind?.some(.skill))
+                Text("MCP Servers").tag(LibraryItemKind?.some(.mcpServer))
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Spacer(minLength: 12)
+            Toggle(isOn: $activeOnly) {
+                Text("Active in this project")
+                    .font(.caption)
+            }
+            .toggleStyle(.checkbox)
+            .help("Show only what this project's agents can reach right now")
+        }
+    }
+
     private var filtered: [LibraryItem] {
-        guard !query.isEmpty else { return items }
+        var result = items
+        if activeOnly {
+            result = result.filter(\.accessible)
+        }
+        if let kindFilter {
+            result = result.filter { $0.kind == kindFilter }
+        }
+        guard !query.isEmpty else { return result }
         let needle = query.lowercased()
-        return items.filter {
+        return result.filter {
             $0.name.lowercased().contains(needle)
                 || $0.description.lowercased().contains(needle)
                 || $0.scopeLabel.lowercased().contains(needle)
@@ -80,9 +117,20 @@ struct LibraryView: View {
     private var grid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // Plugins first: they're the bundles skills and servers
+                // ship inside; the standalone sections follow.
+                section("Plugins", kind: .plugin)
                 section("Skills", kind: .skill)
                 section("MCP Servers", kind: .mcpServer)
-                section("Plugins", kind: .plugin)
+                if loaded && filtered.isEmpty {
+                    Text(activeOnly
+                         ? "Nothing matching is active in this project."
+                         : "No matches.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 40)
+                }
             }
             .padding(16)
         }
