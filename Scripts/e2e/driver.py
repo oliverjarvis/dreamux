@@ -1070,6 +1070,113 @@ def scenario_flows(d):
 
     d.cmd("zoomFlow", laneID=None)
 
+    # 6. Loop: append >=3 failing "swift test" pairs (same Bash
+    # leading-token signature "Bash:swift") to the SAME transcript file
+    # via `open(..., "a")` — the hot tailer only reads newly-appended
+    # bytes (see ClaudeTranscriptTailer's kqueue .write/.extend watch);
+    # rewriting the file would desync its byte offset and drop lines.
+    # The registry entry is still "busy" from step 5's write (nothing
+    # since has flipped it), but re-flip defensively: only a hot
+    # (busy/waiting) session keeps FlowTailerPool's transcript tailer
+    # alive to ever notice this append (see ProjectSession's
+    # `pool?.reconcile(hot:)` filter).
+    write_registry_entry("busy")
+
+    def swift_test_pair(toolu_id, is_error):
+        pair_ts = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        return [
+            {
+                "type": "assistant", "timestamp": pair_ts,
+                "message": {"content": [{
+                    "type": "tool_use", "id": toolu_id, "name": "Bash",
+                    "input": {"command": "swift test --filter Snip"},
+                }]},
+            },
+            {
+                "type": "user", "timestamp": pair_ts,
+                "message": {"content": [{
+                    "type": "tool_result", "tool_use_id": toolu_id, "is_error": is_error,
+                }]},
+            },
+        ]
+
+    with open(transcript_path, "a", encoding="utf-8") as f:
+        for i in range(3):
+            for line in swift_test_pair(f"toolu-e2e-loop-fail-{i}", True):
+                f.write(json.dumps(line) + "\n")
+
+    # LoopDetector.detect (LoopDetector.swift) requires >=3 total,
+    # >=2 errors, AND the window's most recent completion of the
+    # signature to be an error — 3 failing pairs satisfies all three.
+    def loop_edge_detected():
+        state = d.cmd("flowsState")
+        lane = next((l for l in state["lanes"] if l["id"] == f"session-{session_id}"), None)
+        if not lane:
+            return None
+        edge = next((e for e in lane["edges"]
+                     if e["kind"] == "loop" and e["from"] == "session" and e["to"] == "session"), None)
+        if edge and edge.get("iterations", 0) >= 3 and edge.get("label") == "Bash:swift":
+            return state
+        return None
+
+    state = d.wait_until(loop_edge_detected, 15.0,
+                          "session lane loop edge kind=loop, iterations>=3, label=Bash:swift")
+    lane = next(l for l in state["lanes"] if l["id"] == f"session-{session_id}")
+    loop_edge = next(e for e in lane["edges"] if e["kind"] == "loop")
+    require(loop_edge["iterations"] >= 3, f"expected iterations>=3, got {loop_edge['iterations']}")
+    require(loop_edge["label"] == "Bash:swift", f"expected label Bash:swift, got {loop_edge['label']}")
+
+    time.sleep(1.0)
+    d.screenshot("flows-loop-overview")
+
+    # 7. Zoom into the looping lane: FlowDetailView's Canvas special-cases
+    # edge.from == edge.to into a dashed 270 degree arc plus a "loop x N"
+    # label overlay (see FlowDetailView.swift / task-3-report.md) instead
+    # of the degenerate zero-length line a straight edge would draw.
+    #
+    # NOT asserting a specific `iterations` count here (only presence,
+    # below): `zoomFlow` always triggers FlowTailerPool.ensureLazyTail's
+    # FULL replay from byte 0 (ClaudeTranscriptTailer.start(replayExisting:
+    # true)), and FlowStore.toolCompletionRings has no toolUseID dedup —
+    # every tool completion the hot tailer already delivered gets
+    # redelivered and re-counted by the replay. Observed: the ×3 this
+    # lane earned above from the hot tail becomes ×6 post-zoom, since the
+    # 3 failing pairs get counted twice. This is a real pre-existing gap
+    # in the replay path (not introduced by this scenario) — flagged in
+    # task-7-report.md as a follow-up, out of scope for this e2e task.
+    d.cmd("zoomFlow", laneID=f"session-{session_id}")
+
+    def zoomed_lane_has_loop():
+        state = d.cmd("flowsState")
+        lane = next((l for l in state["lanes"] if l["id"] == f"session-{session_id}"), None)
+        if lane and any(e["kind"] == "loop" for e in lane["edges"]):
+            return state
+        return None
+
+    d.wait_until(zoomed_lane_has_loop, 10.0, "loop edge still present in flowsState after zoomFlow")
+    time.sleep(1.0)
+    d.screenshot("flows-loop-zoom")
+
+    d.cmd("zoomFlow", laneID=None)
+
+    # 8. Clear: one successful "swift test" call disqualifies the
+    # signature (LoopDetector requires the window's LATEST completion of
+    # a qualifying signature to be an error) — the edge must disappear
+    # from flowsState entirely, proving the badge/arc aren't sticky once
+    # the failure streak breaks.
+    with open(transcript_path, "a", encoding="utf-8") as f:
+        for line in swift_test_pair("toolu-e2e-loop-clear", False):
+            f.write(json.dumps(line) + "\n")
+
+    def loop_edge_cleared():
+        state = d.cmd("flowsState")
+        lane = next((l for l in state["lanes"] if l["id"] == f"session-{session_id}"), None)
+        if lane is None:
+            return None
+        return state if not any(e["kind"] == "loop" for e in lane["edges"]) else None
+
+    d.wait_until(loop_edge_cleared, 15.0, "loop edge to disappear from flowsState after a success pair")
+
 
 def scenario_quit(d):
     """The app quits cleanly on command."""
