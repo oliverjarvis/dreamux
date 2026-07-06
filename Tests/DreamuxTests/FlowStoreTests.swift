@@ -46,6 +46,21 @@ final class FlowStoreTests: XCTestCase {
         XCTAssertEqual(store.flows[0].title, "s1") // falls back to session id
     }
 
+    func testEventCreatedLaneReconcilesKindOnRegistryPoll() {
+        // A hook event can create the lane before the first registry poll
+        // ever sees the session — it defaults to .adhoc. Once the registry
+        // reports it as a background session, the lane's kind must catch
+        // up, or a bg session misfiles under Running/Queued forever.
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        store.apply(event: .agentStarted(
+            sessionID: "s9", agentID: "a1", agentType: nil, description: nil, cwd: "/w", at: Date()
+        ))
+        XCTAssertEqual(store.flows[0].kind, .adhoc)
+
+        store.apply(registry: [entry(session: "s9", kind: "bg", name: nil)])
+        XCTAssertEqual(store.flows[0].kind, .scheduled)
+    }
+
     func testWaitingDrivesNeedsYou() {
         let store = FlowStore(workspaceForCwd: { _ in nil })
         store.apply(registry: [entry(status: "waiting")])
@@ -85,6 +100,22 @@ final class FlowStoreTests: XCTestCase {
         lane = store.flows[0]
         XCTAssertEqual(lane.nodes.first { $0.id == "agent-a1" }?.status, .done)
         XCTAssertEqual(lane.nodes.first { $0.id == "agent-a1" }?.endedAt, t1)
+    }
+
+    func testAgentAndTaskNodesInsertBeforeDrain() {
+        // PROTOCOL.md's documented lane order is src, session, agent/task…,
+        // drain — new nodes must land ahead of the terminal drain node,
+        // not appended after it.
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        store.apply(registry: [entry()])
+        let t = Date()
+        store.apply(event: .agentStarted(
+            sessionID: "s1", agentID: "a1", agentType: "Explore",
+            description: nil, cwd: "/w", at: t
+        ))
+        store.apply(event: .taskCreated(sessionID: "s1", taskID: "7", subject: "Fix bug", cwd: "/w", at: t))
+
+        XCTAssertEqual(store.flows[0].nodes.map(\.id), ["src", "session", "agent-a1", "task-7", "drain"])
     }
 
     func testEventBeforeRegistryCreatesLane() {

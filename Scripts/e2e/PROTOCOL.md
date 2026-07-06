@@ -674,9 +674,13 @@ Field notes:
 - `lane.detail` (omitted unless set) carries the last
   `session.notification` message; it's cleared whenever the lane
   leaves the waiting state.
-- `running`/`needsYou` are the same aggregates the sidebar tile and the
-  pane header badge show: counts of lanes whose derived `status` is
-  `running` / `waiting`, respectively.
+- `running`/`needsYou` are `FlowStore`'s session-lane aggregates — counts
+  of lanes whose derived `status` is `running` / `waiting`, respectively
+  — the same aggregates the sidebar tile shows. The pane header badge's
+  counts come from `FlowsBoard` instead, which merges in plan lanes,
+  bubbles a suppressed ad hoc session's status onto its plan lane, and
+  counts `waiting` **or** `failed` as needs-you — so the two can differ
+  once plan lanes exist.
 - A lane only appears here if its cwd (registry entry `cwd`, or the
   hook signal's `tags.cwd`) resolves to a real workspace — the feature
   aggregation dir or a per-repo worktree path (`FlowWiring.workspaceID`)

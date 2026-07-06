@@ -649,14 +649,22 @@ struct PlansSpecsSection: View {
     /// (needs you), ● running. Nothing when no live session lane exists.
     @ViewBuilder
     private func liveFlowDot(for workspace: Workspace?) -> some View {
-        if let ws = workspace,
-           let lane = flows.flows.first(where: { $0.workspaceID == ws.id && $0.kind == .adhoc }),
-           lane.status == .waiting || lane.status == .running {
+        if let ws = workspace, let lane = preferredFlowLane(for: ws) {
             Image(systemName: FlowStatusGlyph.symbol(lane.status))
                 .font(.system(size: 8, weight: .bold))
                 .foregroundStyle(FlowStatusGlyph.color(lane.status))
                 .help(lane.status == .waiting ? (lane.detail ?? "Waiting on you") : "claude busy")
         }
+    }
+
+    /// Among a workspace's ad hoc lanes, the one the dot should reflect:
+    /// a waiting lane always wins over a running one — a workspace can
+    /// carry more than one ad hoc lane (e.g. a finished one alongside a
+    /// fresh one), and an older idle/running lane must never shadow a
+    /// lane that actually needs the user.
+    private func preferredFlowLane(for workspace: Workspace) -> Flow? {
+        let candidates = flows.flows.filter { $0.workspaceID == workspace.id && $0.kind == .adhoc }
+        return candidates.first { $0.status == .waiting } ?? candidates.first { $0.status == .running }
     }
 
     private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {

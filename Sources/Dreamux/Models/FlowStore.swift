@@ -36,6 +36,10 @@ final class FlowStore: ObservableObject {
                 startedAt: Date()
             )
             lane.title = entry.name ?? entry.sessionId
+            // An event-created lane defaults to .adhoc (it arrives before
+            // the registry can say otherwise); once the registry is seen,
+            // its `kind` is the source of truth on every poll.
+            lane.kind = entry.isBackground ? .scheduled : .adhoc
             if lane.workspaceID == nil { lane.workspaceID = workspaceForCwd(entry.cwd) }
             setNode(in: &lane, id: "session") { node in
                 node.status = entry.flowStatus
@@ -91,7 +95,7 @@ final class FlowStore: ObservableObject {
         case let .agentStarted(_, agentID, agentType, description, _, at):
             let nodeID = "agent-\(agentID)"
             if !lane.nodes.contains(where: { $0.id == nodeID }) {
-                lane.nodes.append(FlowNode(
+                insertBeforeDrain(in: &lane, FlowNode(
                     id: nodeID,
                     kind: .agent,
                     label: agentType ?? description ?? agentID,
@@ -112,7 +116,7 @@ final class FlowStore: ObservableObject {
             guard let taskID else { break }
             let nodeID = "task-\(taskID)"
             if !lane.nodes.contains(where: { $0.id == nodeID }) {
-                lane.nodes.append(FlowNode(
+                insertBeforeDrain(in: &lane, FlowNode(
                     id: nodeID, kind: .task, label: subject ?? "task", status: .queued, startedAt: at
                 ))
                 lane.edges.append(FlowEdge(from: "session", to: nodeID, kind: .spawn))
@@ -174,6 +178,19 @@ final class FlowStore: ObservableObject {
     private func setNode(in lane: inout Flow, id: String, _ mutate: (inout FlowNode) -> Void) {
         guard let index = lane.nodes.firstIndex(where: { $0.id == id }) else { return }
         mutate(&lane.nodes[index])
+    }
+
+    /// Insert a newly-arrived agent/task node just before the drain
+    /// node, so lanes render `prompt → claude → agent/task… → done`
+    /// (PROTOCOL.md's documented order) instead of shunting new work
+    /// behind the terminal skeleton node. Falls back to append when no
+    /// drain node exists.
+    private func insertBeforeDrain(in lane: inout Flow, _ node: FlowNode) {
+        if let drainIndex = lane.nodes.firstIndex(where: { $0.id == "drain" }) {
+            lane.nodes.insert(node, at: drainIndex)
+        } else {
+            lane.nodes.append(node)
+        }
     }
 
     private func upsert(_ lane: Flow) {
