@@ -15,7 +15,13 @@ struct DetectedLoop: Equatable, Sendable {
 }
 
 /// Conservative repetition heuristic over a lane's recent tool
-/// completions. All thresholds are the spec's contract values.
+/// completions. Real-world data (210 transcripts, 39 badge appearances)
+/// showed that tool-name-wide signatures (Edit, Read, etc.) produce
+/// 22 false positives at ≥2 errors — 11-element windows with 9 successes
+/// are common churn, not stuck loops. Bash command-specific signatures
+/// ("Bash:swift", "Bash:npm") stay stricter: measured 5 plausible detections
+/// vs 0 false at floor 3, but the floor 2 semantic holds for true Bash loops.
+/// This heuristic applies floor 2 to Bash/* only; all other tools require ≥3.
 enum LoopDetector {
     static let windowSize = 12
 
@@ -46,7 +52,10 @@ enum LoopDetector {
             entry.lastIsError = completion.isError
             counts[completion.signature] = entry
         }
-        let qualifying = counts.filter { $0.value.total >= 3 && $0.value.errors >= 2 && $0.value.lastIsError }
+        let qualifying = counts.filter { signature, entry in
+            let minErrors = signature == "Bash" || signature.hasPrefix("Bash:") ? 2 : 3
+            return entry.total >= 3 && entry.errors >= minErrors && entry.lastIsError
+        }
         guard let winner = qualifying.max(by: { lhs, rhs in
             if lhs.value.total != rhs.value.total { return lhs.value.total < rhs.value.total }
             return lhs.value.lastIndex < rhs.value.lastIndex

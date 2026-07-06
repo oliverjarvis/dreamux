@@ -83,4 +83,27 @@ final class LoopDetectorTests: XCTestCase {
     func testEmptyWindowIsNil() {
         XCTAssertNil(LoopDetector.detect(window: []))
     }
+
+    func testNonBashNeedsThreeErrors() {
+        // Non-Bash signatures (Edit, Read, etc.) require ≥3 errors.
+        // Two errors is insufficient churn signal.
+        let window = [
+            completion("Edit", error: true), completion("Edit", error: false),
+            completion("Edit", error: true), completion("Edit", error: false),
+        ]
+        XCTAssertNil(LoopDetector.detect(window: window))
+        // Add one more error: now it qualifies.
+        let window2 = window + [completion("Edit", error: true)]
+        XCTAssertEqual(LoopDetector.detect(window: window2), DetectedLoop(signature: "Edit", count: 5))
+    }
+
+    func testBashKeepsTwoErrorFloor() {
+        // Bash command-specific signatures keep the 2-error floor: true
+        // Bash loops are already command-specific so 2 errors is sufficient.
+        let window = [
+            completion("Bash:swift", error: true), completion("Bash:swift", error: false),
+            completion("Bash:swift", error: true),
+        ]
+        XCTAssertEqual(LoopDetector.detect(window: window), DetectedLoop(signature: "Bash:swift", count: 3))
+    }
 }
