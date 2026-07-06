@@ -84,4 +84,65 @@ final class FlowsBoardTests: XCTestCase {
         )
         XCTAssertEqual(board.sections[0].lanes[0].sessionChip, "waiting on you")
     }
+
+    func testMultipleAdhocSessionsSameWorkspaceKeepsNonEngineVisible() {
+        let wsID = UUID()
+        let old = Date(timeIntervalSince1970: 100)
+        let new = Date(timeIntervalSince1970: 200)
+        let plan = lane(id: "plan-p", kind: .plan, status: .running, workspaceID: wsID)
+        let runningOlder = lane(id: "session-run-old", kind: .adhoc, status: .running, workspaceID: wsID, detail: "running detail", startedAt: old)
+        let waitingNewer = lane(id: "session-wait-new", kind: .adhoc, status: .waiting, workspaceID: wsID, detail: "waiting detail", startedAt: new)
+
+        let board = FlowsBoard.compose(planLanes: [plan], sessionLanes: [runningOlder, waitingNewer])
+
+        let all = board.sections.flatMap(\.lanes)
+        XCTAssertEqual(Set(all.map(\.id)), ["plan-p", "session-run-old"]) // waiting is engine (higher priority), running stays visible
+
+        // Plan lane should have bubbled the waiting status and its detail
+        let planLane = all.first { $0.id == "plan-p" }!
+        XCTAssertEqual(planLane.effectiveStatus, .waiting)
+        XCTAssertEqual(planLane.flow.detail, "waiting detail")
+
+        // Running session stays visible as its own lane
+        let runningLane = all.first { $0.id == "session-run-old" }!
+        XCTAssertEqual(runningLane.effectiveStatus, .running)
+        XCTAssertEqual(runningLane.sessionChip, "claude busy")
+
+        XCTAssertEqual(board.needsYouCount, 1) // plan lane is waiting
+        XCTAssertEqual(board.runningCount, 1) // session-run-old is running
+    }
+
+    func testEngineSelectionByPrecedence() {
+        let wsID = UUID()
+        let old = Date(timeIntervalSince1970: 100)
+        let new = Date(timeIntervalSince1970: 200)
+        let plan = lane(id: "plan-p", kind: .plan, status: .done, workspaceID: wsID)
+        let runningNewer = lane(id: "session-run-new", kind: .adhoc, status: .running, workspaceID: wsID, detail: "newer", startedAt: new)
+        let runningOlder = lane(id: "session-run-old", kind: .adhoc, status: .running, workspaceID: wsID, detail: "older", startedAt: old)
+
+        let board = FlowsBoard.compose(planLanes: [plan], sessionLanes: [runningOlder, runningNewer])
+
+        let all = board.sections.flatMap(\.lanes)
+        XCTAssertEqual(Set(all.map(\.id)), ["plan-p", "session-run-old"]) // newer is engine, older stays visible
+
+        // Plan lane should have bubbled the newer session's detail
+        let planLane = all.first { $0.id == "plan-p" }!
+        XCTAssertEqual(planLane.effectiveStatus, .running)
+        XCTAssertEqual(planLane.flow.detail, "newer")
+
+        XCTAssertEqual(board.runningCount, 2)
+    }
+
+    func testFailedLaneCountsAsNeedsYou() {
+        let board = FlowsBoard.compose(
+            planLanes: [],
+            sessionLanes: [lane(id: "session-f", kind: .adhoc, status: .failed)]
+        )
+
+        let failedLane = board.sections.flatMap(\.lanes)[0]
+        XCTAssertEqual(failedLane.effectiveStatus, .failed)
+        XCTAssertEqual(failedLane.sessionChip, "failed")
+        XCTAssertEqual(board.sections.map(\.kind), [.needsYou])
+        XCTAssertEqual(board.needsYouCount, 1)
+    }
 }

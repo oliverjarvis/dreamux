@@ -40,17 +40,61 @@ struct FlowsBoard: Equatable {
     /// Compose the board. Ad-hoc session lanes whose workspace already
     /// has a plan lane are suppressed — their live status and needs-you
     /// detail bubble onto the plan lane instead (the plan lane is the
-    /// user's mental model; the session is its engine).
+    /// user's mental model; the session is its engine). When multiple
+    /// ad-hoc sessions exist on the same plan workspace, the highest-priority
+    /// one (by status and freshness) becomes the engine; all others stay visible.
     static func compose(planLanes: [Flow], sessionLanes: [Flow]) -> FlowsBoard {
         let planWorkspaces = Set(planLanes.compactMap(\.workspaceID))
 
-        var lanes: [Lane] = []
-        var liveByWorkspace: [UUID: Flow] = [:]
+        // Group ad-hoc sessions by workspace for those that match plan workspaces
+        var adhocByWorkspace: [UUID: [Flow]] = [:]
+        var otherSessions: [Flow] = []
+
         for session in sessionLanes {
             if session.kind == .adhoc,
                let ws = session.workspaceID, planWorkspaces.contains(ws) {
-                liveByWorkspace[ws] = session // suppressed; feeds its plan lane
+                if adhocByWorkspace[ws] == nil {
+                    adhocByWorkspace[ws] = []
+                }
+                adhocByWorkspace[ws]?.append(session)
             } else {
+                otherSessions.append(session)
+            }
+        }
+
+        // Choose the engine session per workspace (highest priority by status then freshness)
+        var engineByWorkspace: [UUID: Flow] = [:]
+        var extraSessionsByWorkspace: [UUID: [Flow]] = [:]
+
+        for (ws, sessions) in adhocByWorkspace {
+            let sorted = sessions.sorted { a, b in
+                let aPriority = statusPriority(a.status)
+                let bPriority = statusPriority(b.status)
+                if aPriority != bPriority {
+                    return aPriority > bPriority
+                }
+                // Tie-break by newest startedAt
+                return (a.startedAt ?? .distantPast) > (b.startedAt ?? .distantPast)
+            }
+            engineByWorkspace[ws] = sorted[0]
+            if sorted.count > 1 {
+                extraSessionsByWorkspace[ws] = Array(sorted.dropFirst())
+            }
+        }
+
+        var lanes: [Lane] = []
+
+        // Add non-matching sessions and extra sessions from the same workspace
+        for session in otherSessions {
+            lanes.append(Lane(
+                flow: session,
+                effectiveStatus: session.status,
+                sessionChip: chip(for: session.status, kind: session.kind)
+            ))
+        }
+
+        for (_, extraSessions) in extraSessionsByWorkspace {
+            for session in extraSessions {
                 lanes.append(Lane(
                     flow: session,
                     effectiveStatus: session.status,
@@ -58,11 +102,13 @@ struct FlowsBoard: Equatable {
                 ))
             }
         }
+
+        // Process plan lanes with their engine sessions
         for plan in planLanes {
             var flow = plan
             var effective = plan.status
             var chipText: String? = nil
-            if let ws = plan.workspaceID, let live = liveByWorkspace[ws] {
+            if let ws = plan.workspaceID, let live = engineByWorkspace[ws] {
                 if live.detail != nil { flow.detail = live.detail }
                 // A live waiting/running session outranks derived plan
                 // status for "what is happening right now".
@@ -84,8 +130,18 @@ struct FlowsBoard: Equatable {
         return FlowsBoard(
             sections: sections,
             runningCount: lanes.filter { $0.effectiveStatus == .running }.count,
-            needsYouCount: lanes.filter { $0.effectiveStatus == .waiting }.count
+            needsYouCount: lanes.filter { $0.effectiveStatus == .waiting || $0.effectiveStatus == .failed }.count
         )
+    }
+
+    private static func statusPriority(_ status: FlowStatus) -> Int {
+        switch status {
+        case .waiting: return 5
+        case .running: return 4
+        case .queued: return 3
+        case .failed: return 2
+        case .done: return 1
+        }
     }
 
     private static func section(for lane: Lane) -> SectionKind {
@@ -105,7 +161,8 @@ struct FlowsBoard: Equatable {
         case .queued: return "idle"
         case .waiting: return "waiting on you"
         case .running: return "claude busy"
-        case .done, .failed: return nil
+        case .failed: return "failed"
+        case .done: return nil
         }
     }
 }
