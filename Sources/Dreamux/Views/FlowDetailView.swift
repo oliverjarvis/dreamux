@@ -11,6 +11,9 @@ struct FlowDetailView: View {
     let onBack: () -> Void
     let onJumpToTerminal: (UUID) -> Void
     let onOpenTranscript: (String) -> Void
+    /// Gate-card wiring (Task 2's shared card); nil renders no actions.
+    let gateActions: FlowGateActions?
+    let gateMergeActionable: Bool
 
     @State private var selectedNodeID: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -60,7 +63,16 @@ struct FlowDetailView: View {
                     .frame(width: Self.inspectorWidth)
             }
         }
-        .onAppear { pulsing = true }
+        .onAppear {
+            pulsing = true
+            // Zooming into a gated lane: the gate IS the story — land on
+            // its actions instead of the empty lane summary. Only as the
+            // initial selection; a user click still wins afterwards.
+            if selectedNodeID == nil,
+               lane.flow.nodes.contains(where: { $0.kind == .gate && $0.status == .waiting }) {
+                selectedNodeID = "gate"
+            }
+        }
     }
 
     private var breadcrumb: some View {
@@ -295,6 +307,14 @@ struct FlowDetailView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .lineLimit(4)
                 }
+            }
+
+            if node.kind == .gate, node.status == .waiting,
+               let actions = gateActions, let workspaceID = lane.flow.workspaceID {
+                GateActionCard(
+                    workspaceID: workspaceID,
+                    mergeActionable: gateMergeActionable,
+                    actions: actions)
             }
 
             Divider()

@@ -44,7 +44,9 @@ struct FlowsOverviewView: View {
                     lane: lane,
                     onBack: { self.zoomedLaneID = nil },
                     onJumpToTerminal: onJumpToTerminal,
-                    onOpenTranscript: onOpenTranscript
+                    onOpenTranscript: onOpenTranscript,
+                    gateActions: gateActions,
+                    gateMergeActionable: mergeActionableLaneIDs.contains(lane.id)
                 )
                 // Without this, zooming straight from one lane to another
                 // (non-nil -> different non-nil, e.g. a second zoomFlow before
