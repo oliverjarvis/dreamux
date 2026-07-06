@@ -487,6 +487,9 @@ final class ProjectSession {
             },
             onMeta: { [weak flows] sessionID, meta in
                 flows?.apply(meta: meta, sessionID: sessionID)
+            },
+            onDroppedBytes: { [weak flows] sessionID in
+                flows?.noteSkippedLines(1, sessionID: sessionID)
             }
         )
         flowTailerPool = pool

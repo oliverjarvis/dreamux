@@ -321,8 +321,12 @@ final class ClaudeTranscriptTailerTests: XCTestCase {
         wait(for: [gotNormalLines], timeout: 2)
 
         lock.lock()
-        XCTAssertTrue(received.contains("normal1"))
-        XCTAssertTrue(received.contains("normal2"))
+        // Exact equality, not just `.contains` — the orphaned tail of
+        // the dropped line (whatever bytes sat in `partial` between the
+        // drop and the eventual `\n` that closed off the abandoned
+        // line) must be discarded, not delivered as a phantom line
+        // glued onto/ahead of "normal1".
+        XCTAssertEqual(received, ["normal1", "normal2"])
         XCTAssertEqual(droppedCounts.count, 1)
         XCTAssertGreaterThan(droppedCounts.first ?? 0, 0)
         lock.unlock()

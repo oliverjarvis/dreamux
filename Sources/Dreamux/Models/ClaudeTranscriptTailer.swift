@@ -34,6 +34,17 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     private var source: DispatchSourceFileSystemObject?
     private var offset: UInt64 = 0
     private var partial = Data()
+    /// Set when a cap overflow drops a still-growing, newline-less
+    /// remainder (see `readAvailable`) without ever having seen that
+    /// line's own terminator. The next `\n` found afterward closes off
+    /// bytes that are the ORPHANED TAIL of the abandoned line, not the
+    /// start of a new one — `drainCompleteLines` discards that one
+    /// segment (not delivered, not itself counted as a further drop)
+    /// and clears this flag, resuming normal delivery from the
+    /// following byte. Left untouched by `resume()`, exactly like
+    /// `partial`/`offset` — a drop that happened before a `stop()`
+    /// still has an orphaned tail to discard once watching resumes.
+    private var isRecoveringFromDrop = false
     /// `true` when not currently watching — covers both "never started"
     /// and "explicitly stopped". Stays `false` while dormant between a
     /// rotation and its retry (that's still a "started" session, just
@@ -160,7 +171,7 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
 
         isStopped = false
         didAttemptRetryOpen = false
-        partial.removeAll(keepingCapacity: false)
+        resetPartialBuffer()
         offset = 0
 
         attemptOpen(offsetMode: replayExisting ? .zero : .endOfFile)
@@ -194,6 +205,18 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         readHandle = nil
     }
 
+    /// Every reset point that establishes a fresh, known-clean read
+    /// boundary (a cold start, a fresh EOF-seek, or a detected
+    /// truncation) clears `isRecoveringFromDrop` alongside `partial` —
+    /// there's nothing orphaned to discard once reading resumes from a
+    /// boundary like that. The one place that intentionally does NOT
+    /// call this is the cap-overflow drop itself (`readAvailable`),
+    /// which clears `partial` but SETS the flag instead.
+    private func resetPartialBuffer() {
+        partial.removeAll(keepingCapacity: false)
+        isRecoveringFromDrop = false
+    }
+
     /// Opens the read handle + event source and establishes `offset`
     /// per `offsetMode`. On failure (file doesn't exist yet, or the
     /// event fd can't be opened) hands off to the one-shot retry.
@@ -209,10 +232,10 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         switch offsetMode {
         case .zero:
             offset = 0
-            partial.removeAll(keepingCapacity: false)
+            resetPartialBuffer()
         case .endOfFile:
             offset = fstatOK ? UInt64(st.st_size) : 0
-            partial.removeAll(keepingCapacity: false)
+            resetPartialBuffer()
         case .preserveCurrent:
             // Same truncation semantics as a live wake (see
             // `handleEvent`): if the file we just reopened is smaller
@@ -221,7 +244,7 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
             // of seeking past its new EOF.
             if fstatOK, UInt64(st.st_size) < offset {
                 offset = 0
-                partial.removeAll(keepingCapacity: false)
+                resetPartialBuffer()
             }
         }
 
@@ -274,7 +297,7 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         var st = stat()
         if fstat(handle.fileDescriptor, &st) == 0, UInt64(st.st_size) < offset {
             offset = 0
-            partial.removeAll(keepingCapacity: false)
+            resetPartialBuffer()
         }
 
         readAvailable()
@@ -294,25 +317,43 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     /// the cap, or complete lines that land in the same chunk as one,
     /// are still delivered whole rather than discarded along with an
     /// unrelated overflow. Only that remainder is dropped — reporting
-    /// its size via `onDroppedBytes` — if it grows past the cap.
-    /// Delivers at most `lineBatchCap` lines per call; if more were
-    /// already buffered or on disk, re-arms immediately (via the
-    /// queue, not a real kqueue wake) so the backlog drains without
-    /// waiting for another write.
+    /// its size via `onDroppedBytes` — if it grows past the cap. The
+    /// bytes between the drop and the abandoned line's OWN eventual
+    /// `\n` (however many more chunks that takes to arrive) are an
+    /// orphaned tail, not a real line — `isRecoveringFromDrop` makes
+    /// `drainCompleteLines` discard exactly that one segment instead of
+    /// delivering it as a phantom line. Delivers at most `lineBatchCap`
+    /// lines per call; if more were already buffered or on disk,
+    /// re-arms immediately (via the queue, not a real kqueue wake) so
+    /// the backlog drains without waiting for another write.
     private func readAvailable() {
         guard !isStopped, let handle = readHandle else { return }
         var batch: [String] = []
 
-        // Extracts every complete line currently in `partial`,
-        // returning `true` (and leaving any remaining complete lines
-        // for the next call) the moment `batch` hits `lineBatchCap`.
-        // Called both before the first read this call (drains anything
-        // left over from a prior batch-cap break) and again right
-        // after every chunk append (drains whatever that chunk just
-        // completed) — see this method's doc comment for why the
-        // second call site is what makes the cap check below safe.
+        // Extracts every complete line currently in `partial` into
+        // `batch`, returning `true` (and leaving any remaining complete
+        // lines for the next call) the moment `batch` hits
+        // `lineBatchCap`. Called both before the first read this call
+        // (drains anything left over from a prior batch-cap break) and
+        // again right after every chunk append (drains whatever that
+        // chunk just completed) — see this method's doc comment for why
+        // the second call site is what makes the cap check below safe.
+        // The very first segment closed off while `isRecoveringFromDrop`
+        // is set is discarded rather than appended — it's the orphaned
+        // tail of a line already reported as dropped, not new content —
+        // and doesn't count against `lineBatchCap` (discarding costs
+        // nothing, so it shouldn't defer real lines behind it).
         func drainCompleteLines() -> Bool {
             while let newlineIndex = partial.firstIndex(of: 0x0A) {
+                if isRecoveringFromDrop {
+                    // Discard unconditionally — before the batch-cap
+                    // check, since this costs nothing and must not defer
+                    // a real line behind it (see this method's doc
+                    // comment).
+                    partial.removeSubrange(partial.startIndex...newlineIndex)
+                    isRecoveringFromDrop = false
+                    continue
+                }
                 if batch.count >= Self.lineBatchCap { return true }
                 let lineData = partial[partial.startIndex..<newlineIndex]
                 batch.append(String(decoding: lineData, as: UTF8.self))
@@ -335,7 +376,12 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
 
             if partial.count > Self.partialCapBytes {
                 let droppedBytes = partial.count
+                // NOT `resetPartialBuffer()` — this is the one place
+                // that intentionally SETS `isRecoveringFromDrop` rather
+                // than clearing it, since the abandoned line's own
+                // terminator hasn't been seen yet.
                 partial.removeAll(keepingCapacity: false)
+                isRecoveringFromDrop = true
                 if let onDroppedBytes {
                     let box = Box(f: onDroppedBytes)
                     deliveryQueue.async { box.f(droppedBytes) }

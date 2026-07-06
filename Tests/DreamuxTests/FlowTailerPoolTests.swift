@@ -62,10 +62,12 @@ final class FlowTailerPoolTests: XCTestCase {
     private func makePool(
         onTranscriptLines: @escaping (String, [String]) -> Void = { _, _ in },
         onAgentLines: @escaping (String, String, [String]) -> Void = { _, _, _ in },
-        onMeta: @escaping (String, SubagentMeta) -> Void = { _, _ in }
+        onMeta: @escaping (String, SubagentMeta) -> Void = { _, _ in },
+        onDroppedBytes: ((String) -> Void)? = nil
     ) -> FlowTailerPool {
         FlowTailerPool(
-            home: home, onTranscriptLines: onTranscriptLines, onAgentLines: onAgentLines, onMeta: onMeta)
+            home: home, onTranscriptLines: onTranscriptLines, onAgentLines: onAgentLines, onMeta: onMeta,
+            onDroppedBytes: onDroppedBytes)
     }
 
     // MARK: - Hot-set reconcile
@@ -154,6 +156,51 @@ final class FlowTailerPoolTests: XCTestCase {
         try append("once\n", to: url)
         wait(for: [exp], timeout: 3)
         XCTAssertEqual(receivedLines, ["once"])
+    }
+
+    /// The pool's own `onDroppedBytes(sessionID:)` — plumbed from
+    /// `ClaudeTranscriptTailer.onDroppedBytes` via
+    /// `droppedBytesCallback`/`handleDroppedBytes` — must fire with the
+    /// session's ID once its transcript tailer hits the partial-buffer
+    /// cap. This is the right test depth for the callback BOUNDARY: the
+    /// further one-line hop from here into `FlowStore.noteSkippedLines`
+    /// lives in `ProjectSession.swift`'s pool construction, which is
+    /// simple enough (and awkward to unit-test in isolation, given
+    /// `ProjectSession`'s own construction cost) to trust by inspection
+    /// rather than duplicate here.
+    func testTailerCapOverflowFiresPoolOnDroppedBytesWithSessionID() throws {
+        let cwd = "/Users/x/proj"
+        let sessionID = "s1"
+        let url = try writeTranscript([], cwd: cwd, sessionID: sessionID)
+
+        var receivedLines: [String] = []
+        var droppedSessionIDs: [String] = []
+        let exp = expectation(description: "normal line after the overflow arrives")
+        let pool = makePool(
+            onTranscriptLines: { sid, lines in
+                guard sid == sessionID else { return }
+                receivedLines.append(contentsOf: lines)
+                if receivedLines.contains("normal1") { exp.fulfill() }
+            },
+            onDroppedBytes: { sid in
+                droppedSessionIDs.append(sid)
+            }
+        )
+
+        pool.reconcile(hot: [entry(session: sessionID, cwd: cwd)])
+        XCTAssertTrue(pool.activeSessionIDs.contains(sessionID))
+
+        // Same shape as `ClaudeTranscriptTailerTests
+        // .testCapOverflowDropsRemainderNotCompleteLines` — a run of
+        // non-newline bytes over the 1 MB cap, followed by its own
+        // terminator and a normal line, all written before the
+        // tailer's wake fires.
+        let giantUnterminatedLine = String(repeating: "x", count: 1_200_000)
+        try append(giantUnterminatedLine + "\nnormal1\n", to: url)
+
+        wait(for: [exp], timeout: 3)
+        XCTAssertEqual(droppedSessionIDs, [sessionID])
+        XCTAssertEqual(receivedLines, ["normal1"])
     }
 
     // MARK: - Dormant tailer revival

@@ -98,6 +98,15 @@ final class FlowTailerPool: @unchecked Sendable {
     private let onTranscriptLines: (String, [String]) -> Void
     private let onAgentLines: (String, String, [String]) -> Void
     private let onMeta: (String, SubagentMeta) -> Void
+    /// Fires once per tailer-cap overflow (see `ClaudeTranscriptTailer
+    /// .onDroppedBytes`) for a session's TRANSCRIPT tailer — the byte
+    /// count itself is discarded, only "at least one drop happened for
+    /// this session" survives (the coarse mapping the brief calls for).
+    /// `nil` by default; `ProjectSession` wires it to
+    /// `FlowStore.noteSkippedLines`. Not wired for agent tailers
+    /// (`applyScanResults`, below) — no caller tracks per-agent drops
+    /// today.
+    private let onDroppedBytes: ((String) -> Void)?
 
     /// Delivery channel for every tailer this pool owns (session +
     /// per-agent) — NOT main. The three callbacks above only ever run
@@ -143,12 +152,14 @@ final class FlowTailerPool: @unchecked Sendable {
         home: URL,
         onTranscriptLines: @escaping (_ sessionID: String, _ lines: [String]) -> Void,
         onAgentLines: @escaping (_ sessionID: String, _ agentID: String, _ lines: [String]) -> Void,
-        onMeta: @escaping (_ sessionID: String, _ meta: SubagentMeta) -> Void
+        onMeta: @escaping (_ sessionID: String, _ meta: SubagentMeta) -> Void,
+        onDroppedBytes: ((_ sessionID: String) -> Void)? = nil
     ) {
         self.home = home
         self.onTranscriptLines = onTranscriptLines
         self.onAgentLines = onAgentLines
         self.onMeta = onMeta
+        self.onDroppedBytes = onDroppedBytes
     }
 
     /// Test seam: sessions this pool is currently tailing for either
@@ -325,14 +336,10 @@ final class FlowTailerPool: @unchecked Sendable {
             return existing
         }
         let url = ClaudeHome.transcriptURL(home: home, cwd: cwd, sessionID: sessionID)
-        let linesCallback = Self.transcriptCallback(pool: self, sessionID: sessionID)
         let tailer = ClaudeTranscriptTailer(
             url: url, deliveryQueue: deliveryQueue,
-            onLines: linesCallback,
-            // Agent tailers (`applyScanResults`, below) don't get this —
-            // there's no existing skip-accounting path for agent lines
-            // to piggyback on (see `droppedBytesCallback`'s doc).
-            onDroppedBytes: Self.droppedBytesCallback(linesCallback: linesCallback)
+            onLines: Self.transcriptCallback(pool: self, sessionID: sessionID),
+            onDroppedBytes: Self.droppedBytesCallback(pool: self, sessionID: sessionID)
         )
         let state = SessionState(sessionID: sessionID, cwd: cwd, transcriptTailer: tailer)
         sessions[sessionID] = state
@@ -359,6 +366,18 @@ final class FlowTailerPool: @unchecked Sendable {
         // session this pool has deliberately torn down.
         guard state.isHot || state.isLazy else { return }
         ensureSubagentsWatcher(sessionID: sessionID)
+    }
+
+    /// Mirrors `handleTranscriptLines`'s/`handleAgentLines`'s "forward
+    /// unconditionally, but only if the session is still known" shape —
+    /// a stray drop notification landing after `stopSession` (same
+    /// accepted race as a stray transcript line, see
+    /// `ClaudeTranscriptTailer`'s trailing comment) is harmless to
+    /// forward, since `onDroppedBytes` triggers no fd-touching side
+    /// effect the way `ensureSubagentsWatcher` would.
+    private func handleDroppedBytes(sessionID: String) {
+        guard sessions[sessionID] != nil else { return }
+        onDroppedBytes?(sessionID)
     }
 
     private func handleAgentLines(sessionID: String, agentID: String, lines: [String]) {
@@ -401,30 +420,19 @@ final class FlowTailerPool: @unchecked Sendable {
         }
     }
 
-    /// Coarse mapping from a tailer's byte-level cap overflow onto the
-    /// EXISTING line-level skip accounting, instead of adding a second
-    /// callback contract (and a second wiring site in `ProjectSession`)
-    /// just for this: `ClaudeFlowAdapter.transcriptEvents` already
-    /// counts any line it can't parse as JSON towards `skipped`, which
-    /// `ProjectSession`'s `onTranscriptLines` wiring forwards to
-    /// `FlowStore.noteSkippedLines`. One drop event is represented here
-    /// as exactly one synthetic, deliberately unparseable "line" fed
-    /// through that same `linesCallback` — the real dropped BYTE COUNT
-    /// is discarded, so this only ever contributes 1 to `skipped`,
-    /// matching the granularity every other malformed line already
-    /// gets.
+    /// `ClaudeTranscriptTailer`'s cap-overflow signal (see its
+    /// `onDroppedBytes` doc), forwarded to this pool's own `sessionID`-
+    /// keyed `onDroppedBytes` (see its doc for why the byte count
+    /// itself is discarded) via the same `Task { @MainActor in }` hop
+    /// shape as `transcriptCallback`/`agentCallback` above.
     nonisolated private static func droppedBytesCallback(
-        linesCallback: @escaping ([String]) -> Void
+        pool: FlowTailerPool, sessionID: String
     ) -> (Int) -> Void {
-        { _ in linesCallback([droppedBytesSentinelLine]) }
+        { [weak pool] _ in
+            guard let pool else { return }
+            Task { @MainActor in pool.handleDroppedBytes(sessionID: sessionID) }
+        }
     }
-
-    /// Not valid transcript JSON (a lone control character) — guaranteed
-    /// to fail `ClaudeFlowAdapter.transcriptEvents`'s parse and so count
-    /// as one `skipped` line (see `droppedBytesCallback`). Must be
-    /// non-empty: `transcriptEvents` silently ignores an empty line
-    /// without counting it as skipped.
-    nonisolated private static let droppedBytesSentinelLine = "\u{0}"
 
     // MARK: - Subagents dir
 
