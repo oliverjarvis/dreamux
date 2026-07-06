@@ -28,8 +28,11 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     private var readHandle: FileHandle?
     private var source: DispatchSourceFileSystemObject?
     private var offset: UInt64 = 0
-    private var inode: ino_t = 0
     private var partial = Data()
+    /// `true` when not currently watching — covers both "never started"
+    /// and "explicitly stopped". Stays `false` while dormant between a
+    /// rotation and its retry (that's still a "started" session, just
+    /// between fds).
     private var isStopped = true
     /// One reopen retry is allowed per disruption (initial missing file,
     /// or a `.delete`/`.rename` mid-tail); reset to `false` whenever a
@@ -47,6 +50,16 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         case endOfFile
     }
 
+    /// `onLines` isn't required to be `@Sendable` by this class's public
+    /// signature, but handing it to `deliveryQueue.async` crosses a
+    /// concurrency-domain boundary the compiler wants proof of safety
+    /// for. This class already asserts that safety via `@unchecked
+    /// Sendable`; boxing the closure carries that same assertion down
+    /// to this one call site instead of loosening the public `init`.
+    private struct Box: @unchecked Sendable {
+        let f: ([String]) -> Void
+    }
+
     init(url: URL, deliveryQueue: DispatchQueue, onLines: @escaping ([String]) -> Void) {
         self.url = url
         self.deliveryQueue = deliveryQueue
@@ -59,10 +72,14 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     ///   `false` seeks to the current EOF and only delivers lines
     ///   appended from here on.
     func start(replayExisting: Bool) {
+        // Public API must never be called from the internal queue — sync
+        // would deadlock (a queue can't wait on itself).
+        dispatchPrecondition(condition: .notOnQueue(queue))
         queue.sync { self.startOnQueue(replayExisting: replayExisting) }
     }
 
     func stop() {
+        dispatchPrecondition(condition: .notOnQueue(queue))
         queue.sync { self.stopOnQueue() }
     }
 
@@ -87,7 +104,6 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         didAttemptRetryOpen = false
         partial.removeAll(keepingCapacity: false)
         offset = 0
-        inode = 0
 
         attemptOpen(offsetMode: replayExisting ? .zero : .endOfFile)
     }
@@ -119,7 +135,6 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
 
         var st = stat()
         let fstatOK = fstat(handle.fileDescriptor, &st) == 0
-        inode = fstatOK ? st.st_ino : 0
         offset = offsetMode == .zero ? 0 : (fstatOK ? UInt64(st.st_size) : 0)
         partial.removeAll(keepingCapacity: false)
 
@@ -164,21 +179,21 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         guard !isStopped, let handle = readHandle, let source else { return }
         let events = source.data
 
+        // Truncation detection only. This fstat runs on the read fd we
+        // already have open, which stays pinned to its vnode regardless
+        // of what happens to the path — it can never observe an inode
+        // change. A same-path rotation instead arrives as a
+        // `.delete`/`.rename` vnode event, handled below by the retry path.
         var st = stat()
-        if fstat(handle.fileDescriptor, &st) == 0 {
-            if st.st_ino != inode || UInt64(st.st_size) < offset {
-                // Rotation or truncation: reread from the top.
-                inode = st.st_ino
-                offset = 0
-                partial.removeAll(keepingCapacity: false)
-            }
+        if fstat(handle.fileDescriptor, &st) == 0, UInt64(st.st_size) < offset {
+            offset = 0
+            partial.removeAll(keepingCapacity: false)
         }
 
         readAvailable()
 
         if events.contains(.delete) || events.contains(.rename) {
             tearDownCurrentWatch()
-            didAttemptRetryOpen = false
             retryOnceOrGoDormant(offsetMode: .zero)
         }
     }
@@ -216,8 +231,8 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
 
         if !batch.isEmpty {
             let lines = batch
-            let deliver = onLines
-            deliveryQueue.async { deliver(lines) }
+            let box = Box(f: onLines)
+            deliveryQueue.async { box.f(lines) }
         }
 
         // Hitting the cap means more may remain (either still-buffered
@@ -233,7 +248,7 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
 // via `.async` before returning. If `stop()` runs (on `queue`) after
 // that hand-off but before the delivery queue executes it, the
 // already-queued `onLines` call still fires once — its captured
-// `lines`/`deliver` don't depend on any tailer state, so this is safe,
+// `lines`/`box` don't depend on any tailer state, so this is safe,
 // just an extra delivery after the logical stop point. Same
 // accepted-race shape as `ClaudeRegistryPoller`'s callers: teardown of
 // the consumer (not a callback guard here) is what makes this fine to
