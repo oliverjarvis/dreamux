@@ -19,18 +19,25 @@ struct FlowsOverviewView: View {
     /// (it only knows its lane, not the tailer pool).
     let onZoomBegin: (String) -> Void
     let onZoomEnd: (String) -> Void
+    /// Gate-card wiring (ContentView is the only layer that can reach
+    /// git, the workspace store, and the plan queue) — passed straight
+    /// through to every plan lane's `GateActionCard`.
+    let gateActions: FlowGateActions
 
     @State private var showFinished = false
 
-    private var board: FlowsBoard {
-        FlowsBoard.compose(
-            planLanes: PlanFlowBuilder.lanes(from: planLaneInputs()),
+    var body: some View {
+        let inputs = planLaneInputs()
+        let board = FlowsBoard.compose(
+            planLanes: PlanFlowBuilder.lanes(from: inputs),
             sessionLanes: flows.flows
         )
-    }
-
-    var body: some View {
-        let board = self.board
+        // Which plan lanes may offer "merge & continue" (Task 2's
+        // predicate), keyed by lane id so `lanesList` can look it up
+        // per-lane without re-deriving `PlanLaneInput`s itself.
+        let mergeActionableLaneIDs = Set(
+            inputs.filter(PlanFlowBuilder.isGateMergeActionable)
+                .map { "plan-\($0.planPath)" })
         return Group {
             if let zoomedLaneID, let lane = lane(forID: zoomedLaneID, in: board) {
                 FlowDetailView(
@@ -60,7 +67,7 @@ struct FlowsOverviewView: View {
                             emptyState
                         } else {
                             ForEach(board.sections) { section in
-                                sectionView(section)
+                                sectionView(section, mergeActionableLaneIDs: mergeActionableLaneIDs)
                             }
                         }
                     }
@@ -110,10 +117,10 @@ struct FlowsOverviewView: View {
     }
 
     @ViewBuilder
-    private func sectionView(_ section: FlowsBoard.Section) -> some View {
+    private func sectionView(_ section: FlowsBoard.Section, mergeActionableLaneIDs: Set<String>) -> some View {
         if section.kind == .finished {
             DisclosureGroup(isExpanded: $showFinished) {
-                lanesList(section.lanes)
+                lanesList(section.lanes, mergeActionableLaneIDs: mergeActionableLaneIDs)
             } label: {
                 Text("\(section.kind.title) (\(section.lanes.count))")
                     .font(.caption.weight(.semibold))
@@ -126,17 +133,19 @@ struct FlowsOverviewView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)
-                lanesList(section.lanes)
+                lanesList(section.lanes, mergeActionableLaneIDs: mergeActionableLaneIDs)
             }
         }
     }
 
-    private func lanesList(_ lanes: [FlowsBoard.Lane]) -> some View {
+    private func lanesList(_ lanes: [FlowsBoard.Lane], mergeActionableLaneIDs: Set<String>) -> some View {
         ForEach(lanes) { lane in
             FlowLaneView(
                 lane: lane,
                 onJumpToTerminal: onJumpToTerminal,
-                onZoom: { zoomedLaneID = lane.id }
+                onZoom: { zoomedLaneID = lane.id },
+                gateActions: gateActions,
+                gateMergeActionable: mergeActionableLaneIDs.contains(lane.id)
             )
             .opacity(lane.effectiveStatus == .done ? 0.6 : 1.0)
         }

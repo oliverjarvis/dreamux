@@ -97,4 +97,16 @@ enum PlanFlowBuilder {
         let firstUnfinished = phases.firstIndex { $0.checkedSteps < $0.totalSteps }
         return firstUnfinished == index
     }
+
+    /// Whether the gate card may offer "merge & continue" for this plan.
+    /// True exactly when the plan is truly at review: derived
+    /// `.awaitingReview` (all boxes checked, feature open), or the queue
+    /// holds THIS plan at its gate (which survives a course correction
+    /// flipping the derived status back to `.running`). `attention`
+    /// deliberately fails — steps are unchecked, and the queue box's
+    /// Resume/Skip is the recovery surface, not a merge.
+    static func isGateMergeActionable(_ input: PlanLaneInput) -> Bool {
+        input.status == .awaitingReview
+            || (input.isCurrentQueuePlan && input.queueState == .atGate)
+    }
 }

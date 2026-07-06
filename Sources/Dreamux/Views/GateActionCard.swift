@@ -1,0 +1,73 @@
+// Sources/Dreamux/Views/GateActionCard.swift
+import SwiftUI
+
+/// Gate-card actions, injected from ContentView — the only layer that
+/// can reach git, the workspace store, and the plan queue. Each closure
+/// lands on an existing, already-tested channel: diff tabs via
+/// `WorkspaceSession.openDiffTab`, merge via
+/// `PlanQueueController.mergeAndContinue` or
+/// `ProjectSession.pendingGateMergeWorkspaceID` (the sidebar's sheet).
+struct FlowGateActions {
+    let openDiff: (UUID) -> Void
+    let requestMerge: (UUID) -> Void
+    let fetchDiffStat: (UUID) async -> GitBranchDiffStat?
+}
+
+/// The expanded gate card (spec "Gate cards"): headline, branch-vs-base
+/// diff stat, [view diff], and — only when the plan is truly at review —
+/// [merge & continue]. One shared view embedded by both the overview
+/// lane (FlowLaneView) and the zoom inspector (FlowDetailView) so the
+/// two surfaces can't drift.
+struct GateActionCard: View {
+    let workspaceID: UUID
+    /// False for the queue-`attention` gate: the plan stalled with steps
+    /// unchecked, so a merge would ship half a plan (and the queue's
+    /// mergeAndContinue would refuse anyway). The card degrades to
+    /// diff-inspection; Resume/Skip live in the sidebar's queue box.
+    let mergeActionable: Bool
+    let actions: FlowGateActions
+
+    /// One-shot fetch on appearance; a stat seconds stale is fine and
+    /// the card is rare (spec: no new pollers).
+    @State private var stat: GitBranchDiffStat?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(
+                mergeActionable ? "waiting: review & merge" : "waiting: needs attention",
+                systemImage: mergeActionable ? "checkmark.circle" : "exclamationmark.triangle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(FlowStatusGlyph.color(.waiting))
+            if let stat {
+                HStack(spacing: 6) {
+                    Text("+\(stat.insertions)")
+                        .foregroundStyle(.green)
+                    Text("−\(stat.deletions)")
+                        .foregroundStyle(.red)
+                    Text("· \(stat.filesChanged) file\(stat.filesChanged == 1 ? "" : "s")")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+            }
+            HStack(spacing: 8) {
+                Button("View diff") { actions.openDiff(workspaceID) }
+                if mergeActionable {
+                    Button("Merge & continue") { actions.requestMerge(workspaceID) }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(10)
+        .frame(maxWidth: 340, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(FlowStatusGlyph.color(.waiting).opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(FlowStatusGlyph.color(.waiting).opacity(0.25), lineWidth: 1)
+        )
+        .task { stat = await actions.fetchDiffStat(workspaceID) }
+    }
+}

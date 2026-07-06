@@ -35,6 +35,9 @@ struct FlowLaneView: View {
     /// Zoom into this lane's DAG detail view. `nil` (e.g. a future
     /// preview/read-only context) just makes the row inert.
     var onZoom: (() -> Void)?
+    /// Gate-card wiring; nil renders no card (previews, read-only hosts).
+    var gateActions: FlowGateActions?
+    var gateMergeActionable: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
@@ -57,6 +60,12 @@ struct FlowLaneView: View {
 
             if lane.effectiveStatus == .waiting, let detail = lane.flow.detail {
                 needsYouChip(detail)
+            }
+            if let actions = gateActions, let workspaceID = waitingGateWorkspaceID {
+                GateActionCard(
+                    workspaceID: workspaceID,
+                    mergeActionable: gateMergeActionable,
+                    actions: actions)
             }
         }
         .padding(.vertical, 8)
@@ -172,6 +181,18 @@ struct FlowLaneView: View {
         .buttonStyle(.plain)
         .disabled(lane.flow.workspaceID == nil)
         .help("Jump to this workspace's terminal")
+    }
+
+    /// Spec: "a gate node in waiting renders expanded". Plan lanes are
+    /// the only lanes with a gate node; a workspace is required because
+    /// every card action is workspace-scoped (a gate whose feature is
+    /// gone has nothing to diff or merge). The board's bubbled
+    /// effectiveStatus deliberately plays no part.
+    private var waitingGateWorkspaceID: UUID? {
+        guard lane.flow.kind == .plan,
+              lane.flow.nodes.contains(where: { $0.kind == .gate && $0.status == .waiting })
+        else { return nil }
+        return lane.flow.workspaceID
     }
 
     /// Only `.running` pulses; reduce-motion pins full opacity.

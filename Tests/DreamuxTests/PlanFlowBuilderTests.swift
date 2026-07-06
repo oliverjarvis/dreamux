@@ -111,4 +111,24 @@ final class PlanFlowBuilderTests: XCTestCase {
         XCTAssertEqual(lanes[0].status, .done)
         XCTAssertEqual(lanes[0].nodes.first { $0.id == "phase-0" }?.status, .done)
     }
+
+    func testGateMergeActionability() {
+        // Truly at review — merge is on the table:
+        XCTAssertTrue(PlanFlowBuilder.isGateMergeActionable(
+            input(status: .awaitingReview)))                       // off-queue review
+        XCTAssertTrue(PlanFlowBuilder.isGateMergeActionable(
+            input(status: .awaitingReview, isCurrent: true, queueState: .atGate)))
+        // Course correction re-opened a step while the queue holds the
+        // gate (ProjectSession.swift:232-238's rail): still mergeable.
+        XCTAssertTrue(PlanFlowBuilder.isGateMergeActionable(
+            input(status: .running, isCurrent: true, queueState: .atGate)))
+
+        // Not at review — never offer merge:
+        XCTAssertFalse(PlanFlowBuilder.isGateMergeActionable(
+            input(status: .running, isCurrent: true, queueState: .attention))) // stalled, steps unchecked
+        XCTAssertFalse(PlanFlowBuilder.isGateMergeActionable(
+            input(status: .running, isCurrent: false, queueState: .atGate)))   // someone else's gate
+        XCTAssertFalse(PlanFlowBuilder.isGateMergeActionable(input(status: .ready)))
+        XCTAssertFalse(PlanFlowBuilder.isGateMergeActionable(input(status: .merged)))
+    }
 }

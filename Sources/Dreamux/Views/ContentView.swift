@@ -318,7 +318,8 @@ struct ContentView: View {
                 },
                 onZoomEnd: { sessionID in
                     session.endFlowsZoom(sessionID: sessionID)
-                }
+                },
+                gateActions: flowGateActions
             )
         case .library:
             LibraryView(projectRoot: repoStore.project.rootPath)
@@ -662,6 +663,79 @@ struct ContentView: View {
     /// `FlowStore`'s next publish.
     private func planLaneInputs() -> [PlanLaneInput] {
         PlanLaneAssembler.inputs(docStore: docStore, queue: planQueue, store: store)
+    }
+
+    private var flowGateActions: FlowGateActions {
+        FlowGateActions(
+            openDiff: { workspaceID in openGateDiff(workspaceID: workspaceID) },
+            requestMerge: { workspaceID in requestGateMerge(workspaceID: workspaceID) },
+            fetchDiffStat: { workspaceID in await gateDiffStat(workspaceID: workspaceID) }
+        )
+    }
+
+    /// The spec's front door: when this lane IS the queue's current
+    /// plan at its gate, go through `mergeAndContinue` (which parks the
+    /// e2e bridge channel too); an off-queue review parks the bundle
+    /// channel directly. Both paths end at the same WorkspaceSidebar
+    /// merge sheet — the branch only decides bookkeeping.
+    private func requestGateMerge(workspaceID: UUID) {
+        if planQueue.state == .atGate,
+           let path = planQueue.currentPlanPath,
+           let feature = planQueue.featureNameForPlan(path),
+           store.featureWorkspace(named: feature)?.id == workspaceID {
+            planQueue.mergeAndContinue()
+        } else {
+            session.pendingGateMergeWorkspaceID = workspaceID
+        }
+    }
+
+    /// One "everything this branch changes" diff tab per linked repo —
+    /// the commit-trail popover's "Diff vs base" request shape
+    /// (merge-base fork point → HEAD), multi-repo like
+    /// WorkspaceSidebar.openTaskDiff, activating the workspace so the
+    /// tabs are visible.
+    private func openGateDiff(workspaceID: UUID) {
+        guard let workspace = store.workspaces.first(where: { $0.id == workspaceID }) else { return }
+        let repos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
+        Task { @MainActor in
+            for repo in repos {
+                guard let worktree = await GitOperations.worktreeURL(
+                    forBranch: workspace.name, in: repo.rootURL) else { continue }
+                let from = await GitOperations.mergeBase(of: repo.defaultBranch, in: worktree)
+                    ?? repo.defaultBranch
+                sidebarMode = .workspace
+                store.activate(workspace.id)
+                store.session(for: workspace).openDiffTab(DiffRequest(
+                    worktreeURL: worktree,
+                    fromRevision: from,
+                    toRevision: "HEAD",
+                    title: repos.count > 1
+                        ? "\(workspace.name) vs \(repo.defaultBranch) — \(repo.name)"
+                        : "\(workspace.name) vs \(repo.defaultBranch)"))
+            }
+        }
+    }
+
+    /// Card stat = sum across the workspace's linked repos (a feature
+    /// can span several); repos where the branch has no worktree or no
+    /// resolvable base contribute nothing. Nil only when NO repo
+    /// yielded a stat — the card then omits the line entirely.
+    private func gateDiffStat(workspaceID: UUID) async -> GitBranchDiffStat? {
+        guard let workspace = store.workspaces.first(where: { $0.id == workspaceID }) else { return nil }
+        let repos = repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) }
+        var total: GitBranchDiffStat?
+        for repo in repos {
+            guard let worktree = await GitOperations.worktreeURL(
+                    forBranch: workspace.name, in: repo.rootURL),
+                  let stat = await GitOperations.branchDiffStat(
+                    vs: repo.defaultBranch, in: worktree)
+            else { continue }
+            total = GitBranchDiffStat(
+                insertions: (total?.insertions ?? 0) + stat.insertions,
+                deletions: (total?.deletions ?? 0) + stat.deletions,
+                filesChanged: (total?.filesChanged ?? 0) + stat.filesChanged)
+        }
+        return total
     }
 
     /// A live session's cwd, from `FlowStore`'s own record of it — the
