@@ -52,6 +52,7 @@ final class E2EProjectHandles {
     weak var planRunner: PlanRunCoordinator?
     weak var planQueue: PlanQueueController?
     weak var nudgeCenter: PlanNudgeCenter?
+    weak var flows: FlowStore?
     let bridge = E2EBridge()
 
     init(projectID: UUID) {
@@ -138,6 +139,15 @@ final class E2ERegistry {
         handles.planRunner = planRunner
         handles.planQueue = planQueue
         handles.nudgeCenter = nudgeCenter
+    }
+
+    /// Called from `ProjectSession.registerWithE2E()` alongside the other
+    /// per-project stores — the flows store lives on `ProjectSession`
+    /// itself, one layer below the Features/Docs sections.
+    func registerFlowStore(projectID: UUID, flows: FlowStore) {
+        guard E2EMode.isActive else { return }
+        let handles = handles(forProject: projectID)
+        handles.flows = flows
     }
 
     func unregister(projectID: UUID) {

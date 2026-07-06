@@ -107,6 +107,8 @@ enum E2ECommands {
             return handleQueueMutation(request) { queue, _ in queue.stopQueue() }
         case "queueState":
             return handleQueueState()
+        case "flowsState":
+            return try flowsState(request: request)
         case "quit":
             return ["ok": true]
         default:
@@ -662,6 +664,31 @@ enum E2ECommands {
         if let current = queue.currentPlanPath { payload["current"] = current }
         if let error = queue.lastError { payload["lastError"] = error }
         return payload
+    }
+
+    /// Snapshot of the Flows pane's session lanes. Plan lanes are
+    /// omitted deliberately — they're derived in the view from plan
+    /// state the e2e can already assert via `queueState`/`listDocs`.
+    private static func flowsState(request: [String: Any]) throws -> [String: Any] {
+        let (handles, _, _) = try projectStores()
+        guard let flows = handles.flows else {
+            throw CommandError(message: "flows store not registered")
+        }
+        let lanes: [[String: Any]] = flows.flows.map { flow in
+            var lane: [String: Any] = [
+                "id": flow.id, "title": flow.title,
+                "kind": flow.kind.rawValue, "status": flow.status.rawValue,
+                "nodes": flow.nodes.map { ["id": $0.id, "label": $0.label, "status": $0.status.rawValue] },
+            ]
+            if let detail = flow.detail { lane["detail"] = detail }
+            return lane
+        }
+        return [
+            "ok": true,
+            "lanes": lanes,
+            "running": flows.aggregates.runningCount,
+            "needsYou": flows.aggregates.needsYouCount,
+        ]
     }
 
     /// Play semantics — worktree-centric, never a question. Flexible

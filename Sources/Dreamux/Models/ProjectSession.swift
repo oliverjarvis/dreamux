@@ -382,14 +382,33 @@ final class ProjectSession {
             installSignalForwarding(projectDir: projectDir, bus: bus)
         }
 
+        // Shared by the forwarding filter below and the flow wiring in
+        // step 4: doubles as the workspace matcher *and* a project-root
+        // fallback so a session running at the project root itself (no
+        // workspace match) still counts.
+        let isInProject: (String) -> Bool = { [weak self] cwd in
+            guard let self else { return false }
+            if FlowWiring.workspaceID(
+                forCwd: cwd, workspaces: self.store.workspaces, projectRoot: self.project.rootPath
+            ) != nil { return true }
+            let root = self.project.rootPath.path
+            return cwd == root || cwd.hasPrefix(root + "/")
+        }
+
         // 2. Surface external emits (MCP signals_emit) in this project's
         //    Signals page, live. App-origin signals are skipped — they
-        //    already went through the UI store on their way in.
+        //    already went through the UI store on their way in. Flow
+        //    signals qualify by cwd (via `isInProject`) instead of
+        //    `project_dir`, since flow events tag the session's cwd —
+        //    that's what lets flow lanes surface in SignalsView too.
         busSubscription = bus.publisher
             .receive(on: DispatchQueue.main)
             .sink { [weak uiStore] signal in
-                guard signal.tags["origin"] != "app",
-                      signal.tags["project_dir"] == projectDir else { return }
+                guard signal.tags["origin"] != "app" else { return }
+                let matchesProject = signal.tags["project_dir"] == projectDir
+                    || (SignalKind.flowKinds.contains(signal.kind)
+                        && (signal.tags["cwd"].map(isInProject) ?? false))
+                guard matchesProject else { return }
                 uiStore?.appendExternal(
                     source: signal.source,
                     line: Self.externalLine(for: signal),
@@ -416,17 +435,6 @@ final class ProjectSession {
 
         // 4. Flows spine: live flow signals → adapter → store, launch
         // replay from history, and a registry poll for session liveness.
-        // `isInProject` doubles as the workspace matcher *and* a
-        // project-root fallback so a session running at the project root
-        // itself (no workspace match) still counts.
-        let isInProject: (String) -> Bool = { [weak self] cwd in
-            guard let self else { return false }
-            if FlowWiring.workspaceID(
-                forCwd: cwd, workspaces: self.store.workspaces, projectRoot: self.project.rootPath
-            ) != nil { return true }
-            let root = self.project.rootPath.path
-            return cwd == root || cwd.hasPrefix(root + "/")
-        }
         flowBusSubscription = bus.publisher
             .filter { SignalKind.flowKinds.contains($0.kind) }
             .receive(on: DispatchQueue.main)
@@ -608,6 +616,7 @@ final class ProjectSession {
             planQueue: planQueue,
             nudgeCenter: nudgeCenter
         )
+        E2ERegistry.shared.registerFlowStore(projectID: project.id, flows: flows)
     }
 }
 
