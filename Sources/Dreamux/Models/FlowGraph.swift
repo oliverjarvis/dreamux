@@ -44,6 +44,9 @@ struct FlowNode: Identifiable, Hashable, Codable, Sendable {
     var startedAt: Date?
     var endedAt: Date?
     var counters: FlowCounters
+    /// Inspector's "last activity" line — a tool summary or agent
+    /// description, refreshed as transcript events arrive.
+    var lastActivity: String?
 
     init(
         id: String,
@@ -52,7 +55,8 @@ struct FlowNode: Identifiable, Hashable, Codable, Sendable {
         status: FlowStatus,
         startedAt: Date? = nil,
         endedAt: Date? = nil,
-        counters: FlowCounters = FlowCounters()
+        counters: FlowCounters = FlowCounters(),
+        lastActivity: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -61,6 +65,7 @@ struct FlowNode: Identifiable, Hashable, Codable, Sendable {
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.counters = counters
+        self.lastActivity = lastActivity
     }
 }
 
@@ -94,6 +99,9 @@ struct Flow: Identifiable, Hashable, Codable, Sendable {
     var startedAt: Date?
     var nodes: [FlowNode]
     var edges: [FlowEdge]
+    /// Set once a lane's transcript tail has dropped enough unparsable
+    /// lines that its detail can't be trusted (see `noteSkippedLines`).
+    var detailUnavailable: Bool
 
     init(
         id: String,
@@ -104,7 +112,8 @@ struct Flow: Identifiable, Hashable, Codable, Sendable {
         detail: String? = nil,
         startedAt: Date? = nil,
         nodes: [FlowNode] = [],
-        edges: [FlowEdge] = []
+        edges: [FlowEdge] = [],
+        detailUnavailable: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -115,6 +124,7 @@ struct Flow: Identifiable, Hashable, Codable, Sendable {
         self.startedAt = startedAt
         self.nodes = nodes
         self.edges = edges
+        self.detailUnavailable = detailUnavailable
     }
 
     /// Lane status, derived. Precedence mirrors what the user must see

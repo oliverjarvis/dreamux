@@ -137,6 +137,156 @@ final class FlowStore: ObservableObject {
         recomputeAggregates()
     }
 
+    // MARK: - Transcript feed (tailer + zoom)
+
+    /// toolUseID → agentID, keyed by lane, once `apply(meta:)` has
+    /// joined a subagent's hook identity to its transcript tool-call
+    /// id. `apply(transcript:)` consults this to decide whether a
+    /// `toolFinished` result closes an agent or an ordinary tool call.
+    private var agentIDByToolUse: [String: [String: String]] = [:]
+    private var pendingSpawns: [String: [String: (type: String?, desc: String?)]] = [:]
+    private var skippedByLane: [String: Int] = [:]
+
+    private static let skippedLinesThreshold = 50
+    private static let agentFanOutCap = 6
+    private static let collapsedAgentNodeID = "agents-collapsed"
+
+    /// A transcript event's own `at`, when it has one — used only to
+    /// seed a lane's `startedAt` if the transcript beats the registry.
+    private func transcriptAt(_ event: TranscriptEvent) -> Date? {
+        switch event {
+        case let .toolStarted(_, _, _, at), let .toolFinished(_, _, at), let .agentSpawned(_, _, _, at):
+            return at
+        }
+    }
+
+    func apply(transcript event: TranscriptEvent, sessionID: String) {
+        let laneID = "session-\(sessionID)"
+        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
+            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: transcriptAt(event) ?? Date()
+        )
+
+        switch event {
+        case let .toolStarted(toolUseID, tool, summary, _):
+            // Agent/Task tool_use blocks never reach here as toolStarted
+            // (the parser already routed them to agentSpawned); the
+            // join-map check is defense in depth against an id collision.
+            if agentIDByToolUse[laneID]?[toolUseID] == nil && pendingSpawns[laneID]?[toolUseID] == nil {
+                setNode(in: &lane, id: "session") { $0.lastActivity = summary ?? tool }
+            }
+        case let .agentSpawned(toolUseID, agentType, description, _):
+            if let agentID = agentIDByToolUse[laneID]?[toolUseID] {
+                setNode(in: &lane, id: "agent-\(agentID)") { node in
+                    if let agentType { node.label = agentType }
+                }
+            } else {
+                // Hooks own node creation; a replayed transcript slice
+                // can re-observe the same spawn line, so this never
+                // mints a node itself.
+                pendingSpawns[laneID, default: [:]][toolUseID] = (agentType, description)
+            }
+        case let .toolFinished(toolUseID, isError, at):
+            // `.failed` is reserved for agent results — a failed
+            // ordinary tool call (a Bash exit-1, a bad Read) is normal
+            // agent life and must not surface as a lane failure.
+            if let agentID = agentIDByToolUse[laneID]?[toolUseID] {
+                setNode(in: &lane, id: "agent-\(agentID)") { node in
+                    node.status = isError ? .failed : .done
+                    node.endedAt = at
+                }
+            }
+        }
+
+        collapseFanOut(in: &lane)
+        upsert(lane)
+        recomputeAggregates()
+    }
+
+    func apply(meta: SubagentMeta, sessionID: String) {
+        let laneID = "session-\(sessionID)"
+        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
+            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: Date()
+        )
+
+        var pending: (type: String?, desc: String?)?
+        if let toolUseID = meta.toolUseID {
+            agentIDByToolUse[laneID, default: [:]][toolUseID] = meta.agentID
+            pending = pendingSpawns[laneID]?.removeValue(forKey: toolUseID)
+        }
+        setNode(in: &lane, id: "agent-\(meta.agentID)") { node in
+            node.label = meta.agentType ?? pending?.type ?? node.label
+            node.lastActivity = meta.description ?? pending?.desc ?? node.lastActivity
+        }
+
+        collapseFanOut(in: &lane)
+        upsert(lane)
+        recomputeAggregates()
+    }
+
+    func apply(agentActivity: String, agentID: String, sessionID: String) {
+        let laneID = "session-\(sessionID)"
+        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
+            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: Date()
+        )
+        setNode(in: &lane, id: "agent-\(agentID)") { $0.lastActivity = agentActivity }
+        upsert(lane)
+        recomputeAggregates()
+    }
+
+    /// Cumulative per lane: a transcript tail that keeps dropping
+    /// malformed/oversized lines eventually can't be trusted, so the
+    /// lane says so instead of silently showing a partial picture.
+    func noteSkippedLines(_ count: Int, sessionID: String) {
+        let laneID = "session-\(sessionID)"
+        var lane = flows.first { $0.id == laneID } ?? makeSessionLane(
+            laneID: laneID, sessionID: sessionID, kind: .adhoc, cwd: nil, startedAt: Date()
+        )
+        skippedByLane[laneID, default: 0] += count
+        if skippedByLane[laneID]! >= Self.skippedLinesThreshold {
+            lane.detailUnavailable = true
+        }
+        upsert(lane)
+        recomputeAggregates()
+    }
+
+    /// Keeps the overview pipeline legible: once a lane's agent-ish
+    /// node count exceeds the cap, the oldest *done* agents merge into
+    /// one `agents-collapsed` node. Running/waiting/failed agents are
+    /// never touched — only finished work piles up.
+    private func collapseFanOut(in lane: inout Flow) {
+        let agentIndices = lane.nodes.indices.filter {
+            lane.nodes[$0].kind == .agent && lane.nodes[$0].id != "session"
+        }
+        guard agentIndices.count > Self.agentFanOutCap else { return }
+
+        let hasCollapsed = lane.nodes.contains { $0.id == Self.collapsedAgentNodeID }
+        let excess = agentIndices.count - Self.agentFanOutCap
+        // Folding the first candidates into a brand-new collapsed node
+        // costs one node (N done → 1 collapsed), so it takes one extra
+        // merge to net the same reduction as growing an existing one.
+        let needed = hasCollapsed ? excess : excess + 1
+
+        let doneCandidates = agentIndices
+            .filter { lane.nodes[$0].status == .done && lane.nodes[$0].id != Self.collapsedAgentNodeID }
+            .sorted { (lane.nodes[$0].startedAt ?? .distantPast) < (lane.nodes[$1].startedAt ?? .distantPast) }
+        let toMerge = Array(doneCandidates.prefix(needed))
+        guard !toMerge.isEmpty else { return }
+
+        let mergedIDs = Set(toMerge.map { lane.nodes[$0].id })
+        lane.nodes.removeAll { mergedIDs.contains($0.id) }
+        lane.edges.removeAll { mergedIDs.contains($0.from) || mergedIDs.contains($0.to) }
+
+        if let index = lane.nodes.firstIndex(where: { $0.id == Self.collapsedAgentNodeID }) {
+            lane.nodes[index].counters.multiplicity = (lane.nodes[index].counters.multiplicity ?? 0) + toMerge.count
+        } else {
+            insertBeforeDrain(in: &lane, FlowNode(
+                id: Self.collapsedAgentNodeID, kind: .agent, label: "agents", status: .done,
+                counters: FlowCounters(multiplicity: toMerge.count)
+            ))
+            lane.edges.append(FlowEdge(from: "session", to: Self.collapsedAgentNodeID, kind: .spawn))
+        }
+    }
+
     // MARK: - Internals
 
     private func makeSessionLane(laneID: String, sessionID: String, kind: FlowKind, cwd: String?, startedAt: Date) -> Flow {
