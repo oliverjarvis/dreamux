@@ -43,8 +43,12 @@ final class FlowStore: ObservableObject {
             if entry.flowStatus != .waiting { lane.detail = nil }
             upsert(lane)
         }
-        // Sessions that disappeared from the registry are over.
-        for index in flows.indices where !seen.contains(flows[index].id) {
+        // Sessions that disappeared from the registry are over. Skip
+        // lanes already done so a steady-state poll doesn't republish
+        // `flows` forever; event-created lanes can't be swept wrongly
+        // here since the registry file is written at session start,
+        // before any hook event can fire.
+        for index in flows.indices where !seen.contains(flows[index].id) && flows[index].status != .done {
             completeSessionNodes(in: &flows[index])
         }
         recomputeAggregates()
@@ -84,12 +88,16 @@ final class FlowStore: ObservableObject {
                 lane.edges.append(FlowEdge(from: "session", to: nodeID, kind: .spawn))
             }
         case let .agentStopped(_, agentID, _, at):
-            setNode(in: &lane, id: "agent-\(agentID)", ifPresent: true) { node in
+            setNode(in: &lane, id: "agent-\(agentID)") { node in
                 node.status = .done
                 node.endedAt = at
             }
         case let .taskCreated(_, taskID, subject, _, at):
-            let nodeID = "task-\(taskID ?? UUID().uuidString)"
+            // A nil task_id means a malformed hook payload — there's no
+            // id a later taskCompleted could ever match, so drop it
+            // rather than mint an unclosable node.
+            guard let taskID else { break }
+            let nodeID = "task-\(taskID)"
             if !lane.nodes.contains(where: { $0.id == nodeID }) {
                 lane.nodes.append(FlowNode(
                     id: nodeID, kind: .task, label: subject ?? "task", status: .queued, startedAt: at
@@ -98,7 +106,7 @@ final class FlowStore: ObservableObject {
             }
         case let .taskCompleted(_, taskID, _, at):
             if let taskID {
-                setNode(in: &lane, id: "task-\(taskID)", ifPresent: true) { node in
+                setNode(in: &lane, id: "task-\(taskID)") { node in
                     node.status = .done
                     node.endedAt = at
                 }
@@ -139,17 +147,18 @@ final class FlowStore: ObservableObject {
         setNode(in: &lane, id: "drain") { $0.status = .done }
         // A vanished session can't be waiting on anyone.
         lane.detail = nil
-        for index in lane.nodes.indices where lane.nodes[index].status == .running {
+        // Anything still running or queued (e.g. a task that was never
+        // completed) is over now too — the session that would have
+        // finished it is gone.
+        for index in lane.nodes.indices
+        where lane.nodes[index].status == .running || lane.nodes[index].status == .queued {
             lane.nodes[index].status = .done
         }
     }
 
-    /// Mutate one node by id. With `ifPresent: false` (default) this
-    /// is a hard expectation and missing nodes are ignored silently —
+    /// Mutate one node by id. A missing node is ignored silently —
     /// degrade, never break.
-    private func setNode(
-        in lane: inout Flow, id: String, ifPresent: Bool = false, _ mutate: (inout FlowNode) -> Void
-    ) {
+    private func setNode(in lane: inout Flow, id: String, _ mutate: (inout FlowNode) -> Void) {
         guard let index = lane.nodes.firstIndex(where: { $0.id == id }) else { return }
         mutate(&lane.nodes[index])
     }
@@ -163,9 +172,13 @@ final class FlowStore: ObservableObject {
     }
 
     private func recomputeAggregates() {
-        aggregates = FlowAggregates(
+        let next = FlowAggregates(
             runningCount: flows.filter { $0.status == .running }.count,
             needsYouCount: flows.filter { $0.status == .waiting }.count
         )
+        // @Published fires objectWillChange on assignment regardless of
+        // equality, so skip the write when nothing actually changed.
+        guard next != aggregates else { return }
+        aggregates = next
     }
 }

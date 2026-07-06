@@ -1,4 +1,5 @@
 // Tests/DreamuxTests/FlowStoreTests.swift
+import Combine
 import XCTest
 @testable import Dreamux
 
@@ -121,5 +122,36 @@ final class FlowStoreTests: XCTestCase {
         store.apply(event: .agentStopped(sessionID: "nope", agentID: "aX", cwd: nil, at: Date()))
         // Creates the lane (session known now) but no phantom agent node.
         XCTAssertNil(store.flows.first?.nodes.first { $0.id == "agent-aX" })
+    }
+
+    func testSessionStoppedCompletesQueuedTaskNode() {
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        store.apply(registry: [entry()])
+        let t = Date()
+        store.apply(event: .taskCreated(sessionID: "s1", taskID: "7", subject: "Fix bug", cwd: "/w", at: t))
+        XCTAssertEqual(store.flows[0].nodes.first { $0.id == "task-7" }?.status, .queued)
+
+        store.apply(event: .sessionStopped(sessionID: "s1", cwd: "/w", at: t))
+        XCTAssertEqual(store.flows[0].nodes.first { $0.id == "task-7" }?.status, .done)
+        XCTAssertEqual(store.flows[0].status, .done)
+    }
+
+    func testTaskCreatedWithNilTaskIDIsIgnored() {
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        store.apply(registry: [entry()])
+        store.apply(event: .taskCreated(sessionID: "s1", taskID: nil, subject: "Fix bug", cwd: "/w", at: Date()))
+        XCTAssertNil(store.flows[0].nodes.first { $0.id.hasPrefix("task-") })
+    }
+
+    func testSteadyStateEmptySweepEmitsNoChange() {
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        store.apply(registry: [entry()])
+        store.apply(registry: []) // vanish: transitions session/drain to done, aggregates drop to zero
+
+        var changeCount = 0
+        let cancellable = store.objectWillChange.sink { _ in changeCount += 1 }
+        store.apply(registry: []) // steady state: already done, aggregates already zero
+        XCTAssertEqual(changeCount, 0)
+        cancellable.cancel()
     }
 }
