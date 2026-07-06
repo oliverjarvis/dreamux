@@ -36,6 +36,20 @@ import Darwin
 ///    returns and stopping it again if it's no longer wanted — same
 ///    self-heal shape as `FlowStore.apply(registry:)`'s stale-stop
 ///    handling.
+/// 3. `scanSubagentsDir` never lets the LIVE agent-tailer count for a
+///    session exceed `maxAgentTailersPerSession`. `ClaudeTranscriptTailer
+///    .init` opens no fds (only `start()`/`resume()` do — see its type
+///    doc), so a newly-discovered agent file is always registered in
+///    `SessionState.agentTailers` but only actually started if it
+///    ranks among the most-recently-modified `maxAgentTailersPerSession`
+///    files once `enforceAgentTailerCap` re-ranks everything this
+///    session has ever discovered. Anything that drops out of that
+///    ranking gets `stop()`ed (fds released) but keeps its
+///    `agentTailers` entry, so its read offset survives. Because
+///    nothing is started until it's already ranked, an outlier session
+///    directory with far more subagents than the cap never transiently
+///    exceeds it mid-scan — see `maxAgentTailersPerSession`'s doc for
+///    the concrete fd math.
 /// `@unchecked Sendable`: every stored property is only ever touched
 /// from the main actor (this class's own isolation). The `[weak pool]`
 /// captures in `transcriptCallback`/`agentCallback`/`replayFullHistory`
@@ -56,6 +70,19 @@ final class FlowTailerPool: @unchecked Sendable {
     /// on main via the `Task { @MainActor in }` trampoline built in
     /// `transcriptCallback`/`agentCallback`.
     private let deliveryQueue = DispatchQueue(label: "com.dreamux.claude.flow-tailer-pool", qos: .utility)
+
+    /// Cap on LIVE agent tailers per session (see decision 3 in this
+    /// type's doc comment). Each actively-watching
+    /// `ClaudeTranscriptTailer` holds 2 fds — a read `FileHandle` plus
+    /// an `O_EVTONLY` kqueue fd (see its type doc) — and the process'
+    /// soft fd limit is 256. A real-world session directory has been
+    /// observed with 219 subagent `.jsonl` files; tailing all of them
+    /// (438 fds) on top of the ~64 fds already open elsewhere in the
+    /// app would blow past that limit and EMFILE the whole app. 24
+    /// live tailers (48 fds) leaves comfortable headroom. Meta
+    /// parsing/emission in `scanSubagentsDir` costs no fds and is NOT
+    /// subject to this cap — only tailers are.
+    private static let maxAgentTailersPerSession = 24
 
     private var sessions: [String: SessionState] = [:]
 
@@ -78,6 +105,13 @@ final class FlowTailerPool: @unchecked Sendable {
         Set(sessions.values.filter { $0.isHot || $0.isLazy }.map(\.sessionID))
     }
 
+    /// Test seam: agent IDs this pool currently holds a LIVE tailer for
+    /// within the given session — `SessionState.liveAgentTailerIDs`,
+    /// bounded by `maxAgentTailersPerSession`. Mirrors `activeSessionIDs`.
+    func liveAgentTailerIDs(sessionID: String) -> Set<String> {
+        sessions[sessionID]?.liveAgentTailerIDs ?? []
+    }
+
     // MARK: - Hot set
 
     /// Start tailing every entry not already hot; stop tailing (but
@@ -94,10 +128,14 @@ final class FlowTailerPool: @unchecked Sendable {
         for (sessionID, state) in sessions where state.isHot && hotByID[sessionID] == nil {
             deactivateHot(state)
         }
-        // Deliberately excludes sessions just activated above — those
-        // already got their own `start()`/`resume()` this very poll, so
-        // re-checking them here would only interrupt their own
-        // just-scheduled retry for no benefit.
+        // Includes sessions just activated above too — nothing excludes
+        // them, and there's no need to: `reviveDormantTailers` only
+        // acts on a tailer that IS dormant, so for a freshly-activated
+        // session whose `start()`/`resume()` just succeeded this is a
+        // harmless, redundant no-op check. For the rarer case where
+        // that same-poll `start()` already exhausted its reopen retry
+        // and went dormant, this pass revives it a poll earlier than
+        // waiting for the next `reconcile` would — pure upside.
         for (_, state) in sessions where state.isHot && hotByID[state.sessionID] != nil {
             reviveDormantTailers(state)
         }
@@ -125,7 +163,11 @@ final class FlowTailerPool: @unchecked Sendable {
         if state.hasStartedTranscript, state.transcriptTailer.isDormant {
             state.transcriptTailer.resume()
         }
-        for agentTailer in state.agentTailers.values where agentTailer.isDormant {
+        // Scoped to `liveAgentTailerIDs`, not all of `agentTailers` —
+        // a tailer the cap has stopped isn't dormant-in-the-retry
+        // sense (see `enforceAgentTailerCap`) and must stay stopped.
+        for agentID in state.liveAgentTailerIDs {
+            guard let agentTailer = state.agentTailers[agentID], agentTailer.isDormant else { continue }
             agentTailer.resume()
         }
     }
@@ -142,7 +184,12 @@ final class FlowTailerPool: @unchecked Sendable {
             state.hasStartedTranscript = true
             state.transcriptTailer.start(replayExisting: false)
         }
-        for agentTailer in state.agentTailers.values { agentTailer.resume() }
+        // Scoped to `liveAgentTailerIDs` — see `enforceAgentTailerCap`;
+        // a capped-out tailer must not be resumed just because the
+        // session went hot again.
+        for agentID in state.liveAgentTailerIDs {
+            state.agentTailers[agentID]?.resume()
+        }
         ensureSubagentsWatcher(sessionID: sessionID)
     }
 
@@ -163,7 +210,12 @@ final class FlowTailerPool: @unchecked Sendable {
         state.isLazy = true
         state.hasStartedTranscript = true
         Self.replayFullHistory(pool: self, sessionID: sessionID, tailer: state.transcriptTailer)
-        for agentTailer in state.agentTailers.values {
+        // Scoped to `liveAgentTailerIDs`, not every agent tailer this
+        // session has ever discovered — replaying a capped-out tailer
+        // would reopen its fds and silently blow past the cap (see
+        // `enforceAgentTailerCap`).
+        for agentID in state.liveAgentTailerIDs {
+            guard let agentTailer = state.agentTailers[agentID] else { continue }
             Self.replayFullHistory(pool: self, sessionID: sessionID, tailer: agentTailer)
         }
         ensureSubagentsWatcher(sessionID: sessionID)
@@ -230,13 +282,24 @@ final class FlowTailerPool: @unchecked Sendable {
     }
 
     private func handleTranscriptLines(sessionID: String, lines: [String]) {
-        guard sessions[sessionID] != nil else { return }
+        guard let state = sessions[sessionID] else { return }
         onTranscriptLines(sessionID, lines)
         // The subagents dir may not exist yet — claude creates it
         // lazily, only once the session's first subagent spawns.
         // Rather than watching a path that doesn't exist, retry the
         // listing on every transcript wake, which happens whenever the
         // session does anything at all (see `ensureSubagentsWatcher`).
+        //
+        // Guarded on hot/lazy: a delivery can still land here after
+        // this pool has already `stopSession`ed it — `onLines` firing
+        // once more post-stop is an accepted race (see
+        // `ClaudeTranscriptTailer`'s trailing comment); forwarding it
+        // to `onTranscriptLines` above is harmless for the same
+        // reason. But calling `ensureSubagentsWatcher` is NOT harmless
+        // — it would resurrect the dir watcher (and everything
+        // downstream: meta re-emission, new agent-tailer spawns) for a
+        // session this pool has deliberately torn down.
+        guard state.isHot || state.isLazy else { return }
         ensureSubagentsWatcher(sessionID: sessionID)
     }
 
@@ -328,20 +391,61 @@ final class FlowTailerPool: @unchecked Sendable {
             onMeta(sessionID, meta)
         }
 
+        // Registered unconditionally — NOT started here. `init` opens no
+        // fds, so it's safe to track every discovered file regardless of
+        // the cap; `enforceAgentTailerCap` below decides which ones
+        // actually get a live fd (see decision 3 in the type doc
+        // comment).
         for url in files where url.lastPathComponent.hasPrefix("agent-") && url.pathExtension == "jsonl" {
             let agentID = String(url.deletingPathExtension().lastPathComponent.dropFirst("agent-".count))
             guard !agentID.isEmpty, state.agentTailers[agentID] == nil else { continue }
-            let tailer = ClaudeTranscriptTailer(
+            state.agentTailers[agentID] = ClaudeTranscriptTailer(
                 url: url, deliveryQueue: deliveryQueue,
                 onLines: Self.agentCallback(pool: self, sessionID: sessionID, agentID: agentID)
             )
-            state.agentTailers[agentID] = tailer
+            state.agentFileModDates[agentID] = Self.modificationDate(of: url)
+        }
+        enforceAgentTailerCap(state)
+    }
+
+    private static func modificationDate(of url: URL) -> Date {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let date = attrs[.modificationDate] as? Date
+        else { return .distantPast }  // unreadable mtime: treat as oldest, never prioritized
+        return date
+    }
+
+    /// Re-ranks every agent file this session has ever discovered by
+    /// mtime (newest first) and keeps only the top
+    /// `maxAgentTailersPerSession` live: anything newly in that top
+    /// rank gets started (EOF-seek if hot, full replay if lazy — same
+    /// per-tailer choice `scanSubagentsDir` used to make inline);
+    /// anything that drops out gets `stop()`ed. `SessionState
+    /// .agentTailers` entries are never removed either way, so a
+    /// stopped tailer's read offset survives. Called only from
+    /// `scanSubagentsDir`, after new candidates are registered — see
+    /// decision 3 in the type doc comment for why registration and
+    /// starting are split like this.
+    private func enforceAgentTailerCap(_ state: SessionState) {
+        let rankedNewestFirst = state.agentTailers.keys.sorted { lhs, rhs in
+            let lhsDate = state.agentFileModDates[lhs] ?? .distantPast
+            let rhsDate = state.agentFileModDates[rhs] ?? .distantPast
+            return lhsDate != rhsDate ? lhsDate > rhsDate : lhs > rhs
+        }
+        let wantLive = Set(rankedNewestFirst.prefix(Self.maxAgentTailersPerSession))
+
+        for agentID in state.liveAgentTailerIDs where !wantLive.contains(agentID) {
+            state.agentTailers[agentID]?.stop()
+        }
+        for agentID in wantLive where !state.liveAgentTailerIDs.contains(agentID) {
+            guard let tailer = state.agentTailers[agentID] else { continue }
             if state.isLazy {
-                Self.replayFullHistory(pool: self, sessionID: sessionID, tailer: tailer)
+                Self.replayFullHistory(pool: self, sessionID: state.sessionID, tailer: tailer)
             } else {
                 tailer.start(replayExisting: false)  // hot only: EOF-seek, bounded (decision 1)
             }
         }
+        state.liveAgentTailerIDs = wantLive
     }
 }
 
@@ -361,7 +465,23 @@ private final class SessionState {
     var isHot = false
     var isLazy = false
     var subagentsWatcher: DispatchSourceFileSystemObject?
+    /// Every agent tailer this pool has ever constructed for this
+    /// session — entries are NEVER removed, even once capped out by
+    /// `FlowTailerPool.enforceAgentTailerCap` or the session stops, so
+    /// a stopped tailer's read offset survives for whenever it might
+    /// matter again.
     var agentTailers: [String: ClaudeTranscriptTailer] = [:]
+    /// Mtime of each agent file at discovery time — the recency signal
+    /// `enforceAgentTailerCap` ranks `agentTailers` by.
+    var agentFileModDates: [String: Date] = [:]
+    /// Subset of `agentTailers.keys` currently holding a live fd pair,
+    /// bounded by `FlowTailerPool.maxAgentTailersPerSession`. Every
+    /// resume/revive/replay path is scoped to this set — an ID dropped
+    /// from it by the cap stays in `agentTailers` (stopped, offset
+    /// preserved) but is otherwise left alone until a fresh
+    /// `enforceAgentTailerCap` ranking (triggered by newly-discovered
+    /// files) puts it back in.
+    var liveAgentTailerIDs: Set<String> = []
 
     init(sessionID: String, cwd: String, transcriptTailer: ClaudeTranscriptTailer) {
         self.sessionID = sessionID

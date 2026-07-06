@@ -293,6 +293,118 @@ final class FlowTailerPoolTests: XCTestCase {
         XCTAssertEqual(deliveries, before)
     }
 
+    // MARK: - Agent tailer fd cap
+
+    /// A real-world session directory has been observed with 219
+    /// subagent files — tailing all of them would exhaust the process'
+    /// fd budget (see `FlowTailerPool.maxAgentTailersPerSession`'s doc).
+    /// Stages `cap + 4` agent files with deterministic, strictly
+    /// increasing mtimes and confirms: (1) live tailers are capped at
+    /// 24, (2) the live set is exactly the 24 newest-by-mtime files,
+    /// and (3) meta parsing/emission — NOT subject to the cap — still
+    /// covers every file.
+    func testAgentTailerLiveCountIsCappedToNewestByMTimeWhileMetaCoversAll() throws {
+        let cwd = "/Users/x/proj"
+        let sessionID = "s1"
+        try writeTranscript([], cwd: cwd, sessionID: sessionID)
+        let subagentsDir = ClaudeHome.subagentsDirURL(home: home, cwd: cwd, sessionID: sessionID)
+        try FileManager.default.createDirectory(at: subagentsDir, withIntermediateDirectories: true)
+
+        let cap = 24
+        let totalAgents = cap + 4
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        var expectedLiveIDs = Set<String>()
+        for i in 0..<totalAgents {
+            let agentID = "a\(i)"
+            let jsonlURL = subagentsDir.appendingPathComponent("agent-\(agentID).jsonl")
+            FileManager.default.createFile(atPath: jsonlURL.path, contents: nil)
+            // Explicit, strictly increasing mtimes — real filesystem
+            // mtimes from rapid-fire creation could collide or not
+            // reflect intended ordering; this makes the ranking
+            // deterministic regardless of clock/filesystem resolution.
+            try FileManager.default.setAttributes(
+                [.modificationDate: baseDate.addingTimeInterval(TimeInterval(i))],
+                ofItemAtPath: jsonlURL.path)
+
+            let metaURL = subagentsDir.appendingPathComponent("agent-\(agentID).meta.json")
+            try #"{"agentType":"Explore","description":"d","toolUseId":"tu-\#(i)","spawnDepth":1}"#
+                .write(to: metaURL, atomically: true, encoding: .utf8)
+
+            if i >= totalAgents - cap { expectedLiveIDs.insert(agentID) }
+        }
+
+        var receivedMetaIDs: Set<String> = []
+        let pool = makePool(onMeta: { sid, meta in
+            guard sid == sessionID else { return }
+            receivedMetaIDs.insert(meta.agentID)
+        })
+
+        // The initial subagents-dir scan (triggered synchronously from
+        // `reconcile` -> `activateHot` -> `ensureSubagentsWatcher`) runs
+        // entirely on the main actor before `reconcile` returns (see
+        // FlowTailerPool's decision 1) — no wait needed.
+        pool.reconcile(hot: [entry(session: sessionID, cwd: cwd)])
+
+        XCTAssertEqual(receivedMetaIDs.count, totalAgents, "meta must be emitted for every file, uncapped")
+
+        let liveIDs = pool.liveAgentTailerIDs(sessionID: sessionID)
+        XCTAssertEqual(liveIDs.count, cap)
+        XCTAssertEqual(liveIDs, expectedLiveIDs, "must keep exactly the cap-count newest-by-mtime files live")
+    }
+
+    // MARK: - Post-stop watcher resurrection guard
+
+    /// A transcript delivery that lands on `deliveryQueue` (and then
+    /// hops to the main actor via `Task`) before `stop()` runs is an
+    /// accepted race (see `ClaudeTranscriptTailer`'s trailing comment)
+    /// — the transcript line itself still gets forwarded once after
+    /// the logical stop point. But `handleTranscriptLines` must NOT let
+    /// that stray delivery call `ensureSubagentsWatcher` and resurrect
+    /// a stopped session's dir watcher.
+    ///
+    /// Forces the race deterministically: this test method itself runs
+    /// on the main thread, and a `Task { @MainActor in ... }` can't
+    /// execute until that thread yields (e.g. via `wait(for:)`).
+    /// `Thread.sleep` blocks the main thread (without pumping the run
+    /// loop) long enough for the tailer's background delivery chain to
+    /// reach the point of enqueueing its main-actor continuation — so
+    /// the synchronous `reconcile(hot: [])` call right after is
+    /// guaranteed to stop the session before that continuation gets a
+    /// chance to run.
+    func testLateTranscriptDeliveryAfterStopDoesNotResurrectSubagentsWatcher() throws {
+        let cwd = "/Users/x/proj"
+        let sessionID = "s1"
+        let transcriptURL = try writeTranscript([], cwd: cwd, sessionID: sessionID)
+        let subagentsDir = ClaudeHome.subagentsDirURL(home: home, cwd: cwd, sessionID: sessionID)
+        try FileManager.default.createDirectory(at: subagentsDir, withIntermediateDirectories: true)
+
+        let noResurrection = expectation(description: "no onMeta for a file dropped in post-stop")
+        noResurrection.isInverted = true
+        let pool = makePool(onMeta: { sid, meta in
+            guard sid == sessionID, meta.agentID == "late" else { return }
+            noResurrection.fulfill()
+        })
+
+        pool.reconcile(hot: [entry(session: sessionID, cwd: cwd)])
+        XCTAssertTrue(pool.activeSessionIDs.contains(sessionID))
+
+        try append("late\n", to: transcriptURL)
+        Thread.sleep(forTimeInterval: 0.2)
+
+        pool.reconcile(hot: []) // synchronous stop (decision 1) — the race is now in flight
+        XCTAssertTrue(pool.activeSessionIDs.isEmpty)
+
+        // Dropped in post-stop: if the in-flight late delivery were
+        // allowed to call `ensureSubagentsWatcher` (the pre-fix bug),
+        // its "catch anything already there" scan would pick this file
+        // up and fire `onMeta` for it once the run loop below is pumped.
+        let metaURL = subagentsDir.appendingPathComponent("agent-late.meta.json")
+        try #"{"agentType":"Explore","description":"d","toolUseId":"tu-late","spawnDepth":1}"#
+            .write(to: metaURL, atomically: true, encoding: .utf8)
+
+        wait(for: [noResurrection], timeout: 0.6)
+    }
+
     func testLazyTailOnHotSessionSurvivesReleaseWhileStillHot() throws {
         let cwd = "/Users/x/proj"
         let sessionID = "s1"

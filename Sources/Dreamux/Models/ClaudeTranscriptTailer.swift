@@ -328,4 +328,9 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
 // accepted-race shape as `ClaudeRegistryPoller`'s callers: teardown of
 // the consumer (not a callback guard here) is what makes this fine to
 // leave unclosed rather than adding synchronization overhead for a
-// once-per-stop, non-corrupting race.
+// once-per-stop, non-corrupting race. When the consumer is
+// `FlowTailerPool`, this is exactly the race its
+// `handleTranscriptLines` guards against re-triggering
+// `ensureSubagentsWatcher` for: the stray delivery itself is fine to
+// forward, but any side effect beyond that must check `isHot`/`isLazy`
+// first.
