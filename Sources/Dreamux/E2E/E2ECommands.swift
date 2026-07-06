@@ -681,10 +681,15 @@ enum E2ECommands {
         }
         let lanes = flows.flows.map(flowLanePayload)
         var planLanes: [[String: Any]] = []
+        var boardRunning = flows.aggregates.runningCount
+        var boardNeedsYou = flows.aggregates.needsYouCount
         if let docStore = handles.docStore, let queue = handles.planQueue {
-            planLanes = PlanFlowBuilder.lanes(
-                from: PlanLaneAssembler.inputs(docStore: docStore, queue: queue, store: store)
-            ).map(flowLanePayload)
+            let planFlows = PlanFlowBuilder.lanes(
+                from: PlanLaneAssembler.inputs(docStore: docStore, queue: queue, store: store))
+            planLanes = planFlows.map(flowLanePayload)
+            let board = FlowsBoard.compose(planLanes: planFlows, sessionLanes: flows.flows)
+            boardRunning = board.runningCount
+            boardNeedsYou = board.needsYouCount
         }
         return [
             "ok": true,
@@ -692,6 +697,8 @@ enum E2ECommands {
             "planLanes": planLanes,
             "running": flows.aggregates.runningCount,
             "needsYou": flows.aggregates.needsYouCount,
+            "boardRunning": boardRunning,
+            "boardNeedsYou": boardNeedsYou,
         ]
     }
 

@@ -649,7 +649,7 @@ this window).
 
 ```
 → {"cmd":"flowsState"}
-← {"ok":true,"running":1,"needsYou":0,
+← {"ok":true,"running":1,"needsYou":0,"boardRunning":1,"boardNeedsYou":0,
    "lanes":[
      {"id":"session-e2e-session-1","title":"flows-demo","kind":"adhoc",
       "status":"running",
@@ -699,13 +699,18 @@ Field notes:
   session's transcript tail has dropped 50+ unparsable lines, so its
   activity detail can no longer be trusted; it never clears back to
   false.
-- `running`/`needsYou` are `FlowStore`'s session-lane aggregates — counts
-  of lanes whose derived `status` is `running` / `waiting`, respectively
-  — the same aggregates the sidebar tile shows. The pane header badge's
-  counts come from `FlowsBoard` instead, which merges in plan lanes,
-  bubbles a suppressed ad hoc session's status onto its plan lane, and
-  counts `waiting` **or** `failed` as needs-you — so the two can differ
-  once plan lanes exist.
+- `running`/`needsYou` are `FlowStore`'s raw session-lane aggregates —
+  counts of lanes whose derived `status` is `running` / `waiting`,
+  respectively — session lanes only, before any plan-lane merge.
+- `boardRunning`/`boardNeedsYou` are the composed `FlowsBoard`'s counts:
+  plan lanes plus session lanes, after a suppressed ad hoc session's
+  status bubbles onto its plan lane and after counting `waiting` **or**
+  `failed` as needs-you. These are what the pane header badge and the
+  sidebar tile badge both show — the two used to diverge (a plan
+  sitting at its gate with no live session lit the pane but left the
+  tile dark); they're unified as of this field, so read `boardRunning`/
+  `boardNeedsYou` for "does anything need attention", not `running`/
+  `needsYou`.
 - A lane only appears here if its cwd (registry entry `cwd`, or the
   hook signal's `tags.cwd`) resolves to a real workspace — the feature
   aggregation dir or a per-repo worktree path (`FlowWiring.workspaceID`)

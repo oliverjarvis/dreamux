@@ -441,12 +441,12 @@ struct WorkspaceSidebar: View {
                     .font(.callout)
                     .foregroundStyle(.primary)
                 if tile == .flows {
-                    let agg = flows.aggregates
-                    if agg.needsYouCount > 0 {
-                        badgeText("!\(agg.needsYouCount)", color: FlowStatusGlyph.color(.waiting))
+                    let agg = flowsBoardAggregates
+                    if agg.needsYou > 0 {
+                        badgeText("!\(agg.needsYou)", color: FlowStatusGlyph.color(.waiting))
                     }
-                    if agg.runningCount > 0 {
-                        badgeText("●\(agg.runningCount)", color: FlowStatusGlyph.color(.running))
+                    if agg.running > 0 {
+                        badgeText("●\(agg.running)", color: FlowStatusGlyph.color(.running))
                     }
                 }
                 Spacer(minLength: 0)
@@ -468,6 +468,21 @@ struct WorkspaceSidebar: View {
             if hovering { hoveredTile = tile }
             else if hoveredTile == tile { hoveredTile = nil }
         }
+    }
+
+    /// Tile badge = the Flows pane header's counts, by construction:
+    /// same assembler, same builder, same compose. Ends the documented
+    /// G2 divergence (session-only badge) — a plan sitting at its gate
+    /// now lights the tile even though its claude session has exited.
+    /// One compose over in-memory plan/lane state per sidebar render;
+    /// docStore/planQueue/store reads are Observation-tracked here, so
+    /// queue transitions re-render the badge on their own.
+    private var flowsBoardAggregates: (running: Int, needsYou: Int) {
+        let board = FlowsBoard.compose(
+            planLanes: PlanFlowBuilder.lanes(
+                from: PlanLaneAssembler.inputs(docStore: docStore, queue: planQueue, store: store)),
+            sessionLanes: flows.flows)
+        return (board.runningCount, board.needsYouCount)
     }
 
     /// Small capsule used by the Flows tile's needs-you/running counts.
