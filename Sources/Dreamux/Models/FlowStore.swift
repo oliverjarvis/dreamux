@@ -321,6 +321,15 @@ final class FlowStore: ObservableObject {
         where lane.nodes[index].status == .running || lane.nodes[index].status == .queued {
             lane.nodes[index].status = .done
         }
+        // Correlation state (toolUse↔agent joins, pending spawns, skip
+        // counts) only means anything while the transcript is still
+        // being tailed — sweep it here so a stray late transcript line
+        // for a dead session can't join to a node and mutate it. The
+        // `Flow` itself deliberately isn't removed: the Finished
+        // section still renders it.
+        pendingSpawns[lane.id] = nil
+        agentIDByToolUse[lane.id] = nil
+        skippedByLane[lane.id] = nil
     }
 
     /// Mutate one node by id. A missing node is ignored silently —

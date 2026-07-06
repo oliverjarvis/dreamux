@@ -702,6 +702,7 @@ enum E2ECommands {
             "nodes": flow.nodes.map { ["id": $0.id, "label": $0.label, "status": $0.status.rawValue] },
         ]
         if let detail = flow.detail { lane["detail"] = detail }
+        if flow.detailUnavailable { lane["detailUnavailable"] = true }
         return lane
     }
 

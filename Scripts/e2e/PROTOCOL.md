@@ -685,6 +685,10 @@ Field notes:
 - `lane.detail` (omitted unless set) carries the last
   `session.notification` message; it's cleared whenever the lane
   leaves the waiting state.
+- `lane.detailUnavailable` (omitted unless `true`) is set once a
+  session's transcript tail has dropped 50+ unparsable lines, so its
+  activity detail can no longer be trusted; it never clears back to
+  false.
 - `running`/`needsYou` are `FlowStore`'s session-lane aggregates — counts
   of lanes whose derived `status` is `running` / `waiting`, respectively
   — the same aggregates the sidebar tile shows. The pane header badge's
