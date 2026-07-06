@@ -48,6 +48,10 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
     private enum InitialOffsetMode {
         case zero
         case endOfFile
+        /// Keep whatever `offset`/`partial` already hold — used by
+        /// `resume()` to continue incrementally after a `stop()`,
+        /// rather than re-seeking. See `resume()`'s doc comment.
+        case preserveCurrent
     }
 
     /// `onLines` isn't required to be `@Sendable` by this class's public
@@ -83,6 +87,28 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         queue.sync { self.stopOnQueue() }
     }
 
+    /// Restarts watching from the offset a PRIOR `start()` established
+    /// (`stopOnQueue()` deliberately never touches `offset`/`partial`),
+    /// instead of resetting to zero or EOF like `start()` always does.
+    /// Used when a session leaves the hot set (`stop()`) and later
+    /// re-enters it (e.g. FlowTailerPool's reconcile): re-entry should
+    /// pick up where it left off, not skip straight back to the new
+    /// EOF (which would silently drop anything written during the
+    /// gap) or replay the whole file again from byte 0. If this tailer
+    /// was never started before, `offset` is still its initial 0, so
+    /// this behaves like a cold `start(replayExisting: true)`.
+    ///
+    /// Rotation-while-stopped safety: since there's no fd open (and so
+    /// no `.delete`/`.rename` event could have fired) during the gap,
+    /// a same-path rotation that happened while stopped is caught here
+    /// the same way live truncation is — if the reopened file is
+    /// smaller than the stored offset, treat it as rotated and replay
+    /// from zero instead of reading past EOF into nothing.
+    func resume() {
+        dispatchPrecondition(condition: .notOnQueue(queue))
+        queue.sync { self.resumeOnQueue() }
+    }
+
     deinit {
         // No other strong reference can exist once deinit runs (every
         // closure captures `self` weakly), so touching the
@@ -116,6 +142,19 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
         tearDownCurrentWatch()
     }
 
+    private func resumeOnQueue() {
+        tearDownCurrentWatch()
+        retryWorkItem?.cancel()
+        retryWorkItem = nil
+
+        isStopped = false
+        didAttemptRetryOpen = false
+        // Deliberately no `offset = 0` / `partial.removeAll()` here —
+        // that's the entire difference from `startOnQueue`.
+
+        attemptOpen(offsetMode: .preserveCurrent)
+    }
+
     private func tearDownCurrentWatch() {
         source?.cancel()
         source = nil
@@ -135,8 +174,24 @@ final class ClaudeTranscriptTailer: @unchecked Sendable {
 
         var st = stat()
         let fstatOK = fstat(handle.fileDescriptor, &st) == 0
-        offset = offsetMode == .zero ? 0 : (fstatOK ? UInt64(st.st_size) : 0)
-        partial.removeAll(keepingCapacity: false)
+        switch offsetMode {
+        case .zero:
+            offset = 0
+            partial.removeAll(keepingCapacity: false)
+        case .endOfFile:
+            offset = fstatOK ? UInt64(st.st_size) : 0
+            partial.removeAll(keepingCapacity: false)
+        case .preserveCurrent:
+            // Same truncation semantics as a live wake (see
+            // `handleEvent`): if the file we just reopened is smaller
+            // than where we left off, it was rotated/truncated while
+            // we weren't watching — replay it from the start instead
+            // of seeking past its new EOF.
+            if fstatOK, UInt64(st.st_size) < offset {
+                offset = 0
+                partial.removeAll(keepingCapacity: false)
+            }
+        }
 
         let eventFD = open(url.path, O_EVTONLY)
         guard eventFD >= 0 else {

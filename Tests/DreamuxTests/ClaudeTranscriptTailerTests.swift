@@ -209,4 +209,60 @@ final class ClaudeTranscriptTailerTests: XCTestCase {
 
         tailer.stop() // idempotent; must not crash
     }
+
+    /// `resume()` is the pool's re-entry lever for a session that left
+    /// and later re-joined the hot set: unlike `start()`, it must not
+    /// reset to zero/EOF — it continues from the offset `stop()` froze,
+    /// so nothing written during the gap is lost or re-delivered.
+    func testResumeContinuesFromStoredOffsetAfterStop() throws {
+        let url = sandbox.root.appendingPathComponent("transcript.jsonl")
+        try append("line1\n", to: url)
+        try append("line2\n", to: url)
+
+        var received: [String] = []
+        let lock = NSLock()
+        var onDeliver: (() -> Void)?
+        let queue = DispatchQueue(label: "test.tailer.delivery.resume")
+        let tailer = ClaudeTranscriptTailer(url: url, deliveryQueue: queue) { lines in
+            lock.lock()
+            received.append(contentsOf: lines)
+            lock.unlock()
+            onDeliver?()
+        }
+
+        let gotFirstTwo = expectation(description: "initial 2 lines")
+        onDeliver = {
+            lock.lock()
+            let count = received.count
+            lock.unlock()
+            if count >= 2 { gotFirstTwo.fulfill() }
+        }
+        tailer.start(replayExisting: true)
+        wait(for: [gotFirstTwo], timeout: 2)
+        tailer.stop()
+
+        // Written entirely while stopped — must not be missed, and
+        // must not be duplicated against the pre-stop lines either.
+        try append("line3\n", to: url)
+
+        lock.lock()
+        received.removeAll()
+        lock.unlock()
+
+        let afterResume = expectation(description: "gap line arrives via resume")
+        onDeliver = {
+            lock.lock()
+            let count = received.count
+            lock.unlock()
+            if count >= 1 { afterResume.fulfill() }
+        }
+        tailer.resume()
+
+        wait(for: [afterResume], timeout: 2)
+        lock.lock()
+        XCTAssertEqual(received, ["line3"])
+        lock.unlock()
+
+        tailer.stop()
+    }
 }
