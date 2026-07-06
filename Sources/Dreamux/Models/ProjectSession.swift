@@ -435,9 +435,14 @@ final class ProjectSession {
 
         // 4. Flows spine: live flow signals → adapter → store, launch
         // replay from history, and a registry poll for session liveness.
+        // `.receive(on:)` must precede `.filter`, not follow it: both
+        // closures are MainActor-isolated (inferred from this method's
+        // isolation), but `bus.publisher` emits from its own private
+        // queue — a filter closure placed before the hop runs there
+        // too and traps the MainActor isolation check at runtime.
         flowBusSubscription = bus.publisher
-            .filter { SignalKind.flowKinds.contains($0.kind) }
             .receive(on: DispatchQueue.main)
+            .filter { SignalKind.flowKinds.contains($0.kind) }
             .sink { [weak flows] signal in
                 guard let event = ClaudeFlowAdapter.event(from: signal),
                       let cwd = event.cwd, isInProject(cwd) else { return }
