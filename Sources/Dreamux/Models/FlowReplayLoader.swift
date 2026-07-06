@@ -12,7 +12,10 @@ enum FlowReplayLoader {
     ) async -> [FlowEvent] {
         let since = now.addingTimeInterval(-window)
         var signals: [Signal] = []
-        for kind in SignalKind.flowKinds {
+        // Replay never uses notifications — they're stale by definition —
+        // so exclude them from the cap budget to avoid evicting real events.
+        let replayKinds = SignalKind.flowKinds.filter { $0 != SignalKind.sessionNotification }
+        for kind in replayKinds {
             // query() filters a single kind; per-kind fetches share the
             // global cap so one chatty kind can't evict the others
             // entirely before the global trim below.

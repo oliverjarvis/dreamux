@@ -92,4 +92,23 @@ final class FlowReplayLoaderTests: XCTestCase {
         let startedCount = events.filter { if case .agentStarted = $0 { return true }; return false }.count
         XCTAssertEqual(startedCount, 2)
     }
+
+    func testReplayNotificationsDoNotConsumeCapSlots() async {
+        let now = Date()
+        // NEWER notification should not evict the OLDER agentStarted from the cap budget.
+        store.append(Signal(
+            source: "claude.hooks",
+            kind: SignalKind.sessionNotification,
+            ts: now.addingTimeInterval(-1),
+            tags: ["cwd": "/w"],
+            payload: .object(["session_id": .string("s1"), "message": .string("needs permission")])
+        ))
+        store.append(flowSignal(kind: SignalKind.agentStarted, session: "s1",
+                                ts: now.addingTimeInterval(-10), agent: "a1"))
+        let events = await FlowReplayLoader.events(store: store, now: now, window: 86_400, cap: 1)
+        XCTAssertEqual(events.count, 1)
+        guard case .agentStarted = events[0] else {
+            return XCTFail("cap: 1 must return the agentStarted, not the (dropped) notification")
+        }
+    }
 }
