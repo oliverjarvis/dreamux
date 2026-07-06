@@ -469,20 +469,20 @@ struct ContentView: View {
     /// project; this column is that project's work).
     private var projectHeaderRow: some View {
         let name = currentProject?.name ?? ""
-        return HStack(spacing: 8) {
-            ProjectGlyph(name: name, size: 20)
+        return HStack(spacing: 10) {
+            ProjectGlyph(name: name, size: 24)
 
             Text(name)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        // Exactly the rail header's height, so the bottom hairline runs
-        // continuously across both columns.
-        .frame(height: 36)
+        .padding(.horizontal, 16)
+        // Shared band height with contextHeaderRow, so the bottom
+        // hairline runs continuously across both columns.
+        .frame(height: 44)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
     }
@@ -492,9 +492,9 @@ struct ContentView: View {
     /// as fallback), else the workspace's own name for ad-hoc work, else
     /// nothing worth saying (fresh project).
     private var contextHeaderRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Text(activeContextTitle ?? " ")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
@@ -522,16 +522,16 @@ struct ContentView: View {
                 Button {
                     showCommitTrail = true
                 } label: {
-                    HStack(spacing: 8) {
-                        HStack(spacing: 4) {
+                    HStack(spacing: 9) {
+                        HStack(spacing: 5) {
                             Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(.tertiary)
                             Text(git.branch)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                             Text(git.shortSHA)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 12, design: .monospaced))
                                 .foregroundStyle(.tertiary)
                         }
                         if git.insertions > 0 || git.deletions > 0 {
@@ -541,12 +541,12 @@ struct ContentView: View {
                                 Text("−\(git.deletions)")
                                     .foregroundStyle(.red)
                             }
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
                         }
                     }
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
                     .background(
                         Capsule().fill(Color.primary.opacity(0.05)))
                 }
@@ -572,18 +572,18 @@ struct ContentView: View {
                 showFileTree.toggle()
             } label: {
                 Image(systemName: "sidebar.right")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(showFileTree ? Color.accentColor : Color.secondary)
-                    .frame(width: 24, height: 20)
+                    .frame(width: 28, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Toggle file explorer (⌥⌘E)")
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         // Same height as projectHeaderRow — the two header strips form
         // one continuous band across the card.
-        .frame(height: 36)
+        .frame(height: 44)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
     }

@@ -43,31 +43,31 @@ struct HeaderRunControls: View {
                 start()
             }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 if summary.runningCount > 0 {
                     Image(systemName: "circle.fill")
-                        .font(.system(size: 6))
+                        .font(.system(size: 7))
                         .foregroundStyle(summary.attention ? Color.orange : Color.green)
                         .symbolEffect(.pulse)
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text("\(summary.runningCount) running")
                         .foregroundStyle(.secondary)
                 } else {
                     if summary.attention {
                         Image(systemName: "circle.fill")
-                            .font(.system(size: 6))
+                            .font(.system(size: 7))
                             .foregroundStyle(Color.orange)
                     }
                     Image(systemName: "play.fill")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
             }
-            .font(.system(size: 11))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
+            .font(.system(size: 12))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(Capsule().fill(Color.primary.opacity(0.05)))
             .contentShape(Capsule())
         }
@@ -86,9 +86,9 @@ struct HeaderRunControls: View {
             showServices.toggle()
         } label: {
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.tertiary)
-                .frame(width: 16, height: 20)
+                .frame(width: 18, height: 24)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
