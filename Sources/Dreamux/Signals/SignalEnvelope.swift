@@ -65,6 +65,22 @@ enum SignalSeverityLevel: String, CaseIterable, Codable, Sendable {
 enum SignalKind {
     static let terminalLine = "terminal.line"
     static let serviceHealth = "service.health"
+
+    // Flow lifecycle events emitted by dreamux-hook (Flows spec,
+    // 2026-07-06). Exact strings are load-bearing: the hook script
+    // and the replay query both use them.
+    static let agentStarted = "agent.started"
+    static let agentStopped = "agent.stopped"
+    static let taskCreated = "task.created"
+    static let taskCompleted = "task.completed"
+    static let sessionStopped = "session.stopped"
+    static let sessionNotification = "session.notification"
+
+    /// Every kind FlowStore consumes — subscription filter + replay set.
+    static let flowKinds: [String] = [
+        agentStarted, agentStopped, taskCreated,
+        taskCompleted, sessionStopped, sessionNotification,
+    ]
 }
 
 /// Type-erased JSON value used for `payload`. Lets us round-trip
