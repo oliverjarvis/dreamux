@@ -94,6 +94,12 @@ struct Flow: Identifiable, Hashable, Codable, Sendable {
     var workspaceID: UUID?
     /// Backing session identifier in the source tool, when there is one.
     var sessionID: String?
+    /// The session's working directory, when known — the zoom detail
+    /// view's lazy-tail seam and its "open transcript" button both
+    /// derive `ClaudeHome` paths from this rather than re-deriving a
+    /// workspace's cwd, since a lane can outlive the workspace lookup
+    /// (a finished session's workspace may since have been removed).
+    var sessionCwd: String?
     /// One-line needs-you context (e.g. the permission-request text).
     var detail: String?
     var startedAt: Date?
@@ -109,6 +115,7 @@ struct Flow: Identifiable, Hashable, Codable, Sendable {
         kind: FlowKind,
         workspaceID: UUID? = nil,
         sessionID: String? = nil,
+        sessionCwd: String? = nil,
         detail: String? = nil,
         startedAt: Date? = nil,
         nodes: [FlowNode] = [],
@@ -120,6 +127,7 @@ struct Flow: Identifiable, Hashable, Codable, Sendable {
         self.kind = kind
         self.workspaceID = workspaceID
         self.sessionID = sessionID
+        self.sessionCwd = sessionCwd
         self.detail = detail
         self.startedAt = startedAt
         self.nodes = nodes

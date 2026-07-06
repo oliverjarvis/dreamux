@@ -41,6 +41,7 @@ final class FlowStore: ObservableObject {
             // its `kind` is the source of truth on every poll.
             lane.kind = entry.isBackground ? .scheduled : .adhoc
             if lane.workspaceID == nil { lane.workspaceID = workspaceForCwd(entry.cwd) }
+            lane.sessionCwd = entry.cwd
             setNode(in: &lane, id: "session") { node in
                 node.status = entry.flowStatus
                 node.label = "claude"
@@ -296,6 +297,7 @@ final class FlowStore: ObservableObject {
             kind: kind,
             workspaceID: cwd.flatMap(workspaceForCwd),
             sessionID: sessionID,
+            sessionCwd: cwd,
             startedAt: startedAt,
             nodes: [
                 FlowNode(id: "src", kind: .source, label: "prompt", status: .done),

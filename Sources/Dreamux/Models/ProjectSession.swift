@@ -658,6 +658,24 @@ final class ProjectSession {
         )
         E2ERegistry.shared.registerFlowStore(projectID: project.id, flows: flows)
     }
+
+    /// The Flows detail view's zoom-in seam: `FlowDetailView` calls this
+    /// on appear (via `ContentView`) when its lane has a `sessionID`, so
+    /// the pool replays that session's full transcript history instead
+    /// of only what's tailed live for the hot set. `cwd` falls back to
+    /// the project root the same way `isInProject` does elsewhere —
+    /// every lane's `sessionCwd` should be populated by the time a lane
+    /// is zoomable, so this only matters for a pathological gap.
+    func beginFlowsZoom(sessionID: String, cwd: String?) {
+        flowTailerPool?.ensureLazyTail(sessionID: sessionID, cwd: cwd ?? project.rootPath.path)
+    }
+
+    /// The zoom detail view's teardown twin — called on disappear/back.
+    /// A session still in the hot set keeps tailing regardless (see
+    /// `FlowTailerPool.releaseLazyTail`).
+    func endFlowsZoom(sessionID: String) {
+        flowTailerPool?.releaseLazyTail(sessionID: sessionID)
+    }
 }
 
 /// Window-scoped cache of `ProjectSession` bundles, keyed by project id.
