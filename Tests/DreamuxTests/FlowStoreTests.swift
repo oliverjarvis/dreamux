@@ -136,6 +136,22 @@ final class FlowStoreTests: XCTestCase {
         XCTAssertEqual(store.flows[0].status, .done)
     }
 
+    func testStaleSessionStoppedSelfHealsOnNextRegistrySnapshot() {
+        // A stale/replayed sessionStopped (e.g. the old per-turn Stop
+        // misfire) marks session+drain done. If the registry still
+        // shows the session alive on the next poll, drain must come
+        // back to queued rather than staying wrongly terminal forever.
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        store.apply(registry: [entry()])
+        store.apply(event: .sessionStopped(sessionID: "s1", cwd: "/w", at: Date()))
+        XCTAssertEqual(store.flows[0].nodes.first { $0.id == "session" }?.status, .done)
+        XCTAssertEqual(store.flows[0].nodes.first { $0.id == "drain" }?.status, .done)
+
+        store.apply(registry: [entry(status: "busy")])
+        XCTAssertEqual(store.flows[0].nodes.first { $0.id == "session" }?.status, .running)
+        XCTAssertEqual(store.flows[0].nodes.first { $0.id == "drain" }?.status, .queued)
+    }
+
     func testTaskCreatedWithNilTaskIDIsIgnored() {
         let store = FlowStore(workspaceForCwd: { _ in nil })
         store.apply(registry: [entry()])

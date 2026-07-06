@@ -87,6 +87,19 @@ final class DreamuxHookFlowTests: XCTestCase {
         wait(for: [exp], timeout: 5)
     }
 
+    func testSessionEndBecomesSessionStoppedSignal() throws {
+        // SessionEnd is Claude Code's true once-per-session terminal
+        // hook (unlike Stop, which fires every assistant turn) —
+        // session.stopped must ride this one, not Stop.
+        let (exp, received) = expectSignal(kind: SignalKind.sessionStopped)
+        try runHook(args: ["flow"], stdin: #"""
+        {"hook_event_name":"SessionEnd","session_id":"s1","cwd":"/w"}
+        """#)
+        wait(for: [exp], timeout: 5)
+        guard case let .object(fields)? = received()?.payload else { return XCTFail("object payload expected") }
+        XCTAssertEqual(fields["session_id"], .string("s1"))
+    }
+
     func testNotifyEmitsSessionNotification() throws {
         let (exp, received) = expectSignal(kind: SignalKind.sessionNotification)
         try runHook(args: ["notify"], stdin: #"""

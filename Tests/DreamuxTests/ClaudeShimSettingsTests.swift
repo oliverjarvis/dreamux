@@ -47,7 +47,7 @@ final class ClaudeShimSettingsTests: XCTestCase {
             try JSONSerialization.jsonObject(with: Data(argv[1].utf8)) as? [String: Any]
         )
         let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
-        for event in ["Stop", "Notification", "SubagentStart", "SubagentStop", "TaskCreated", "TaskCompleted"] {
+        for event in ["Stop", "Notification", "SubagentStart", "SubagentStop", "TaskCreated", "TaskCompleted", "SessionEnd"] {
             XCTAssertNotNil(hooks[event], "missing hook registration for \(event)")
         }
         // Lifecycle hooks are async `dreamux-hook flow` commands.
@@ -59,5 +59,14 @@ final class ClaudeShimSettingsTests: XCTestCase {
         // Task hooks take no matcher (hooks reference).
         let taskCreated = try XCTUnwrap(hooks["TaskCreated"] as? [[String: Any]])
         XCTAssertNil(taskCreated.first?["matcher"])
+        // SessionEnd is the true once-per-session terminal event (unlike
+        // Stop, which fires every turn) — same async flow-relay shape,
+        // no matcher.
+        let sessionEnd = try XCTUnwrap(hooks["SessionEnd"] as? [[String: Any]])
+        XCTAssertNil(sessionEnd.first?["matcher"])
+        let sessionEndEntry = try XCTUnwrap((sessionEnd.first?["hooks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(sessionEndEntry["type"] as? String, "command")
+        XCTAssertEqual(sessionEndEntry["async"] as? Bool, true)
+        XCTAssertTrue((sessionEndEntry["command"] as? String ?? "").hasSuffix("\" flow"))
     }
 }

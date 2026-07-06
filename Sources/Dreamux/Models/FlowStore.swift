@@ -40,6 +40,17 @@ final class FlowStore: ObservableObject {
                 node.status = entry.flowStatus
                 node.label = "claude"
             }
+            if entry.flowStatus == .running || entry.flowStatus == .waiting {
+                // Self-heal: a stale/replayed sessionStopped event can
+                // mark drain done while the registry shows this session
+                // is still alive (e.g. before the SessionEnd fix, a
+                // per-turn Stop-hook misfire did exactly this). The
+                // vanish-sweep below remains the fallback terminal for
+                // sessions that actually crashed.
+                setNode(in: &lane, id: "drain") { node in
+                    if node.status == .done { node.status = .queued }
+                }
+            }
             if entry.flowStatus != .waiting { lane.detail = nil }
             upsert(lane)
         }
@@ -165,6 +176,11 @@ final class FlowStore: ObservableObject {
 
     private func upsert(_ lane: Flow) {
         if let index = flows.firstIndex(where: { $0.id == lane.id }) {
+            // @Published fires objectWillChange on assignment regardless
+            // of equality, so skip the write when nothing actually
+            // changed — otherwise a steady-state registry poll
+            // republishes `flows` every cycle for identical state.
+            guard flows[index] != lane else { return }
             flows[index] = lane
         } else {
             flows.append(lane)

@@ -64,10 +64,12 @@ fi
 # Build inline hooks JSON.
 #
 # Stop/Notification: notification pipeline (see dreamux-hook docstring).
-# SubagentStart/SubagentStop/TaskCreated/TaskCompleted: flow lifecycle
-# events for the Flows observatory — `dreamux-hook flow` relays them to
-# the app's signal socket. async:true so claude never waits on them.
-# TaskCreated/TaskCompleted take no matcher (hooks reference).
+# SubagentStart/SubagentStop/TaskCreated/TaskCompleted/SessionEnd: flow
+# lifecycle events for the Flows observatory — `dreamux-hook flow`
+# relays them to the app's signal socket. async:true so claude never
+# waits on them. TaskCreated/TaskCompleted/SessionEnd take no matcher
+# (hooks reference) — SessionEnd is the true once-per-session terminal
+# event (unlike Stop, which fires every assistant turn).
 #
 # The hook path is wrapped in escaped quotes so it tolerates spaces in
 # the bundle path. Single-quoted segments stay literal; "$HOOK" expands
@@ -83,7 +85,8 @@ SETTINGS_JSON="$SETTINGS_JSON"'"Notification":['"$SYNC_NOTIFY"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"SubagentStart":['"$FLOW_MATCHED"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"SubagentStop":['"$FLOW_MATCHED"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"TaskCreated":['"$FLOW_PLAIN"'],'
-SETTINGS_JSON="$SETTINGS_JSON"'"TaskCompleted":['"$FLOW_PLAIN"']'
+SETTINGS_JSON="$SETTINGS_JSON"'"TaskCompleted":['"$FLOW_PLAIN"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"SessionEnd":['"$FLOW_PLAIN"']'
 SETTINGS_JSON="$SETTINGS_JSON"'}}'
 
 exec "$REAL_CLAUDE" --settings "$SETTINGS_JSON" "$@"
