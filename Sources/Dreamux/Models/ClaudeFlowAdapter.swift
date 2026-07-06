@@ -1,5 +1,40 @@
 import Foundation
 
+struct WorkflowRunArtifacts: Equatable, Sendable {
+    let runID: String
+    let name: String?
+    let phases: [String]
+
+    /// The workflow meta block is required to be a pure literal, so a
+    /// line-oriented scan is reliable enough — and when it isn't, we
+    /// return nil and the lane simply shows no phase nodes. Degrade,
+    /// never break.
+    static func parse(scriptText: String, runID: String) -> WorkflowRunArtifacts? {
+        guard scriptText.contains("export const meta") else { return nil }
+        func firstMatch(_ pattern: String, in text: String) -> String? {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+                  match.numberOfRanges > 1,
+                  let range = Range(match.range(at: 1), in: text)
+            else { return nil }
+            return String(text[range])
+        }
+        let name = firstMatch(#"name:\s*['"]([^'"]+)['"]"#, in: scriptText)
+        var phases: [String] = []
+        if let phasesBlock = firstMatch(#"phases:\s*\[([\s\S]*?)\]"#, in: scriptText) {
+            let regex = try? NSRegularExpression(pattern: #"title:\s*['"]([^'"]+)['"]"#)
+            let range = NSRange(phasesBlock.startIndex..., in: phasesBlock)
+            regex?.enumerateMatches(in: phasesBlock, range: range) { match, _, _ in
+                if let match, match.numberOfRanges > 1, let r = Range(match.range(at: 1), in: phasesBlock) {
+                    phases.append(String(phasesBlock[r]))
+                }
+            }
+        }
+        if name == nil && phases.isEmpty { return nil }
+        return WorkflowRunArtifacts(runID: runID, name: name, phases: phases)
+    }
+}
+
 struct SubagentMeta: Equatable, Sendable {
     let agentID: String
     let agentType: String?
