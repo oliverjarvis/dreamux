@@ -30,11 +30,31 @@ import sys
 # snippet, or "sk-" inside the unrelated word "task-notification"). The
 # fixture-writer's privacy contract requires a hard zero-match grep for
 # these patterns, so this pass is unconditional rather than key-aware.
+#
+# Applied in order to the same string, so entries earlier in this list run
+# first — the generic email pattern is listed before the bare "@" scrub so a
+# full address gets replaced wholesale as one token, rather than losing its
+# "@" first and then falling through the email regex unmatched.
+#
+# Ordering assumption vs. truncation: this pass runs on the already-assembled
+# line, i.e. *after* rule (d) has truncated tool_use.input strings to 60
+# chars. If a flagged name straddles that 60-char boundary (e.g. only "jarv"
+# of "jarvis" survives in the kept prefix, with the rest already replaced by
+# the numeric marker), the literal word patterns below won't match the
+# truncated fragment — accepted as a low-severity residual since a 4-char
+# fragment isn't clearly identifying and everything past it is already a
+# marker, not raw content. The home-path pattern is unaffected by this: it
+# matches "/Users/<up-to-the-next-separator>" greedily, and the marker text
+# itself contains no "/", so it still folds any truncated username+marker
+# run into a single "/redacted/home" replacement.
 LEAK_PATTERNS = [
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "[redacted-email]"),
     (re.compile(r"@"), "(at)"),
     (re.compile(r"sk-", re.IGNORECASE), "sk_"),
     (re.compile(r"ghp_", re.IGNORECASE), "ghpx"),
     (re.compile(r"oliver", re.IGNORECASE), "person"),
+    (re.compile(r"ollie", re.IGNORECASE), "person"),
+    (re.compile(r"jarvis", re.IGNORECASE), "person"),
     # Real home-directory usernames survive the 40/60-char thresholds inside
     # short paths (e.g. a truncated tool_use.input file_path). Strip the
     # username segment but keep the rest of the path for structural fidelity.
