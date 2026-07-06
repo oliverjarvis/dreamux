@@ -145,4 +145,24 @@ final class FlowsBoardTests: XCTestCase {
         XCTAssertEqual(board.sections.map(\.kind), [.needsYou])
         XCTAssertEqual(board.needsYouCount, 1)
     }
+
+    func testWaitingScheduledLaneSectionsUnderNeedsYou() {
+        let board = FlowsBoard.compose(
+            planLanes: [],
+            sessionLanes: [lane(id: "session-bg", kind: .scheduled, status: .waiting)]
+        )
+        XCTAssertEqual(board.sections.map(\.kind), [.needsYou])
+        XCTAssertEqual(board.needsYouCount, 1)
+    }
+
+    func testFailedEngineBubblesOntoPlanLane() {
+        let wsID = UUID()
+        let plan = lane(id: "plan-p", kind: .plan, status: .running, workspaceID: wsID)
+        let engine = lane(id: "session-s", kind: .adhoc, status: .failed, workspaceID: wsID, detail: "test suite crashed")
+        let board = FlowsBoard.compose(planLanes: [plan], sessionLanes: [engine])
+        let planLane = board.sections.flatMap(\.lanes).first { $0.id == "plan-p" }!
+        XCTAssertEqual(planLane.effectiveStatus, .failed)
+        XCTAssertEqual(planLane.flow.detail, "test suite crashed")
+        XCTAssertEqual(board.needsYouCount, 1)
+    }
 }

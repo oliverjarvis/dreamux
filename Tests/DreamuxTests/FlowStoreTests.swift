@@ -210,4 +210,13 @@ final class FlowStoreTests: XCTestCase {
         ))
         XCTAssertEqual(store.flows[0].startedAt, t)
     }
+
+    func testStartedAtIsFirstSeen() {
+        let store = FlowStore(workspaceForCwd: { _ in nil })
+        let t0 = Date(timeIntervalSince1970: 100)
+        store.apply(event: .agentStarted(sessionID: "s1", agentID: "a1", agentType: nil, description: nil, cwd: "/w", at: t0))
+        store.apply(event: .agentStarted(sessionID: "s1", agentID: "a2", agentType: nil, description: nil, cwd: "/w", at: Date(timeIntervalSince1970: 999)))
+        store.apply(registry: [entry()])
+        XCTAssertEqual(store.flows[0].startedAt, t0) // never overwritten
+    }
 }

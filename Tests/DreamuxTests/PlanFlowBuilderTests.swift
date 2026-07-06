@@ -102,4 +102,13 @@ final class PlanFlowBuilderTests: XCTestCase {
     func testSpecOnlyPlansAreSkipped() {
         XCTAssertTrue(PlanFlowBuilder.lanes(from: [input(status: .specOnly)]).isEmpty)
     }
+
+    func testMergedPlanWithStragglerPhaseIsStillDone() {
+        let lanes = PlanFlowBuilder.lanes(from: [input(
+            status: .merged,
+            phases: [PlanPhaseSummary(title: "Straggler", checkedSteps: 2, totalSteps: 5)]
+        )])
+        XCTAssertEqual(lanes[0].status, .done)
+        XCTAssertEqual(lanes[0].nodes.first { $0.id == "phase-0" }?.status, .done)
+    }
 }

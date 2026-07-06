@@ -112,7 +112,8 @@ struct FlowsBoard: Equatable {
                 if live.detail != nil { flow.detail = live.detail }
                 // A live waiting/running session outranks derived plan
                 // status for "what is happening right now".
-                if live.status == .waiting || (live.status == .running && effective != .waiting) {
+                if live.status == .waiting || live.status == .failed
+                    || (live.status == .running && effective != .waiting && effective != .failed) {
                     effective = live.status
                 }
                 chipText = chip(for: live.status, kind: .adhoc)
@@ -145,13 +146,16 @@ struct FlowsBoard: Equatable {
     }
 
     private static func section(for lane: Lane) -> SectionKind {
+        // Needs-you outranks everything, including the scheduled section:
+        // a background session waiting on a human is the board's most
+        // actionable state and must never hide under ↺.
+        if lane.effectiveStatus == .waiting || lane.effectiveStatus == .failed { return .needsYou }
         if lane.flow.kind == .scheduled { return .scheduled }
         switch lane.effectiveStatus {
-        case .waiting: return .needsYou
         case .running: return .running
-        case .queued: return .queued // includes idle-but-alive sessions
-        case .failed: return .needsYou // a failure needs the human too
+        case .queued: return .queued
         case .done: return .finished
+        case .waiting, .failed: return .needsYou // unreachable; keeps switch exhaustive
         }
     }
 
