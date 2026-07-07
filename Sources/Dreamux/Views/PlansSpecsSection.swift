@@ -780,7 +780,6 @@ struct PlansSpecsSection: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
                             if plan.totalSteps > 0 {
                                 ProgressView(value: Double(plan.checkedSteps),
                                              total: Double(plan.totalSteps))
@@ -972,8 +971,10 @@ struct PlansSpecsSection: View {
                 }
                 Spacer(minLength: 0)
                 // Hover button only when at least one step is checked — an
-                // untouched task can't have commits yet.
-                if hoveredTaskLine == task.line, checked > 0 {
+                // untouched task can't have commits yet. Rendered whenever
+                // checked, faded by hover, so the count never shifts.
+                if checked > 0 {
+                    let show = hoveredTaskLine == task.line
                     Button {
                         onViewTaskChanges(plan, task)
                     } label: {
@@ -985,6 +986,8 @@ struct PlansSpecsSection: View {
                     }
                     .buttonStyle(.plain)
                     .help("View this task's changes")
+                    .opacity(show ? 1 : 0)
+                    .allowsHitTesting(show)
                 }
                 Text("\(checked)/\(total)")
                     .font(.caption.monospacedDigit())
@@ -1177,10 +1180,14 @@ struct PlansSpecsSection: View {
         @ViewBuilder menu: () -> Menu = { EmptyView() },
         @ViewBuilder body: () -> Body
     ) -> some View {
-        // The controls are LAYOUT siblings of the row body, not an overlay
-        // — the title truncates before ever reaching them, instead of the
-        // hover cluster floating over the text.
-        HStack(spacing: 4) {
+        // The trailing controls are LAYOUT siblings of the row body, but
+        // they're rendered UNCONDITIONALLY and only faded in/out — so the
+        // body's width is identical hovered vs not, and the title never
+        // reflows on hover. `keepTrailingVisible` keeps a live runner's
+        // controls lit; anything else fades to zero opacity but keeps its
+        // reserved space.
+        let showTrailing = hoveredDocURL == doc.fileURL || keepTrailingVisible
+        return HStack(spacing: 4) {
             Button { onOpenDoc(doc.fileURL) } label: {
                 body()
                     .padding(.horizontal, 10)
@@ -1200,27 +1207,23 @@ struct PlansSpecsSection: View {
                 }
             }
 
-            // Hover-revealed trailing controls: the caller's affordance
-            // (→ workspace, run controls) stacked with Run for a runnable
-            // plan. A live runner keeps them on screen without hover via
-            // `keepTrailingVisible`, the same rule the feature rows use.
-            if hoveredDocURL == doc.fileURL || keepTrailingVisible {
-                HStack(spacing: 4) {
-                    trailing()
-                    if canRun && !hasRunControls {
-                        Button { onRunPlan(doc) } label: {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 22, height: 22)
-                                .background(Circle().fill(Color.accentColor))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Run this plan (provisions a worktree and starts claude)")
+            HStack(spacing: 4) {
+                trailing()
+                if canRun && !hasRunControls {
+                    Button { onRunPlan(doc) } label: {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(Color.accentColor))
                     }
+                    .buttonStyle(.plain)
+                    .help("Run this plan (provisions a worktree and starts claude)")
                 }
-                .padding(.trailing, 12)
             }
+            .padding(.trailing, 12)
+            .opacity(showTrailing ? 1 : 0)
+            .allowsHitTesting(showTrailing)
         }
         .background {
             if hoveredDocURL == doc.fileURL {
