@@ -15,6 +15,8 @@ struct PlansSpecsSection: View {
     /// `ObservableObject` (unlike the `@Observable` stores above), so its own
     /// property wrapper.
     @ObservedObject var flows: FlowStore
+    /// Jump to the full Flows page (the section is a live preview of it).
+    let onViewAllFlows: () -> Void
     let featureExists: (String) -> Bool
     let onOpenDoc: (URL) -> Void
     /// Open a doc jumped to a 1-based line — phase/task rows open the
@@ -177,7 +179,7 @@ struct PlansSpecsSection: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(layout.plansExpanded ? 90 : 0))
-                    Text("Plans & Specs")
+                    Text("Flows")
                         .font(.system(size: 12, weight: .semibold))
                         .kerning(0.6)
                         .textCase(.uppercase)
@@ -187,6 +189,20 @@ struct PlansSpecsSection: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            // Jump to the full Flows page — the section is a live preview.
+            Button(action: onViewAllFlows) {
+                HStack(spacing: 2) {
+                    Text("View all")
+                        .font(.system(size: 11, weight: .medium))
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open the Flows page")
 
             Button { docStore.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
@@ -763,6 +779,8 @@ struct PlansSpecsSection: View {
                             Text(status.label)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                             if plan.totalSteps > 0 {
                                 ProgressView(value: Double(plan.checkedSteps),
                                              total: Double(plan.totalSteps))

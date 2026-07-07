@@ -2,10 +2,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Work Items column of a project window. Top to bottom: icon+label
-/// rows for Signals and Browser, the collapsible Orchestration Files
-/// list, the Plans & Specs section (plan-backed work reachable from its
-/// plan rows), and the always-visible Repositories card with its Add
-/// repository row.
+/// tile rows (Signals, Browser, Flows, Skills & MCPs), the live Flows
+/// section (plan-backed work reachable from its rows, with a "View all"
+/// jump to the Flows page), the collapsible Plans / Specs / Project Files
+/// lists, and the always-visible, borderless Repositories list with its
+/// Add repository row.
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
@@ -39,10 +40,11 @@ struct WorkspaceSidebar: View {
     /// forwarded straight into `PlansSpecsSection`.
     let autoRunFailure: (String) -> String?
 
-    /// Collapsed subfolders inside Orchestration Files (absent = open).
-    @State private var collapsedFolders: Set<String> = []
     @State private var hoveredTile: SidebarTile?
+    /// Hovered doc/config file row in the Plans/Specs/Project Files lists.
     @State private var hoveredOrchestrationURL: URL?
+    /// Hover state for the borderless "Add repository" row.
+    @State private var addRepoHovered = false
     @State private var showAddFeature = false
     @State private var showAddRepo = false
     @State private var addError: String?
@@ -201,12 +203,13 @@ struct WorkspaceSidebar: View {
                 }
             }
 
-            filesSection
-
+            // The live work surface leads (running plans, queue, gates);
+            // the reference file lists collapse below it.
             PlansSpecsSection(
                 docStore: docStore,
                 layout: layout,
                 flows: flows,
+                onViewAllFlows: { sidebarMode = .flows },
                 featureExists: { name in store.featureNames.contains(name) },
                 onOpenDoc: onOpenDoc,
                 onOpenDocAtLine: onOpenDocAtLine,
@@ -253,6 +256,10 @@ struct WorkspaceSidebar: View {
                 mainWorkspace: { store.workspaces.first(where: \.isMain) }
             )
 
+            planFilesSection
+            specFilesSection
+            projectFilesSection
+
             switchNoticeIfAny
 
             // The Ad hoc section is retired for now (user call, 2026-07-04)
@@ -260,27 +267,28 @@ struct WorkspaceSidebar: View {
             // only, and Add Feature is dormant with it. `adHocWorkspaces`
             // and its tests stay for when it returns.
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 // Repositories are always visible — the list is short and
                 // hiding it made "why can't I run a plan?" undiagnosable.
+                // Borderless (no card): the rows carry their own hover
+                // highlight, matching the file lists above.
                 repositoriesHeader
-                card {
-                    repoRows
-                    addRepositoryRow
-                }
+                repoRows
+                addRepositoryRow
             }
         }
     }
 
-    /// Full-width "＋ Add repository" row at the bottom of the repo card —
-    /// the affordance a bare `+` icon was too easy to miss for.
+    /// Borderless "＋ Add repository" row under the repo list — a plain
+    /// plus (no circle, no box), highlighting only on hover.
     private var addRepositoryRow: some View {
         Button {
             showAddRepo = true
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 10) {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 26, height: 26)
                 Text("Add repository")
                     .font(.callout)
                 Spacer(minLength: 0)
@@ -291,136 +299,227 @@ struct WorkspaceSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .background {
+            if addRepoHovered {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
+            }
+        }
+        .onHover { addRepoHovered = $0 }
     }
 
-    /// Collapsible raw-files view of the orchestration docs, grouped by
-    /// their subfolder (plans/, specs/, loose) — Plans & Specs below it
-    /// stays the work-centric grouping.
-    private var filesSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button {
-                withAnimation(.snappy(duration: 0.18)) { layout.filesExpanded.toggle() }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(layout.filesExpanded ? 90 : 0))
-                    Text("Orchestration Files")
-                        .font(.system(size: 12, weight: .semibold))
-                        .kerning(0.6)
-                        .textCase(.uppercase)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+    // MARK: - File lists (Plans / Specs / Project Files)
 
-            if layout.filesExpanded {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(orchestrationFolders, id: \.folder) { group in
-                        orchestrationFolderRow(group)
-                        if !collapsedFolders.contains(group.folder) {
-                            ForEach(group.docs) { doc in
-                                orchestrationFileRow(doc)
-                            }
-                        }
+    /// Every plan file, newest-first — the date-prefixed names make plain
+    /// alphabetical order oldest-first, which buries current work.
+    private var planDocs: [PlanDoc] {
+        docStore.docs.filter { $0.kind == .plan }
+            .sorted { $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent }
+    }
+
+    /// Every spec file, newest-first.
+    private var specDocs: [PlanDoc] {
+        docStore.docs.filter { $0.kind == .spec }
+            .sorted { $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent }
+    }
+
+    private var planFilesSection: some View {
+        fileListSection(title: "Plans", isExpanded: $layout.planFilesExpanded,
+                        docs: planDocs, emptyHint: "No plans yet.")
+    }
+
+    private var specFilesSection: some View {
+        fileListSection(title: "Specs", isExpanded: $layout.specFilesExpanded,
+                        docs: specDocs, emptyHint: "No specs yet.")
+    }
+
+    /// A collapsible, flat list of doc files — filenames only, no `docs/`
+    /// folder level (that grouping is implied). Shared by Plans and Specs.
+    @ViewBuilder
+    private func fileListSection(
+        title: String, isExpanded: Binding<Bool>, docs: [PlanDoc], emptyHint: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            collapsibleHeader(title: title, count: docs.count, isExpanded: isExpanded)
+            if isExpanded.wrappedValue {
+                if docs.isEmpty {
+                    listHint(emptyHint)
+                } else {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(docs) { doc in docFileRow(doc) }
                     }
                 }
             }
         }
     }
 
-    private func orchestrationFolderRow(
-        _ group: (folder: String, docs: [PlanDoc])
+    /// A shared uppercase section header with a chevron and optional count.
+    private func collapsibleHeader(
+        title: String, count: Int?, isExpanded: Binding<Bool>
     ) -> some View {
-        let collapsed = collapsedFolders.contains(group.folder)
-        return Button {
-            withAnimation(.snappy(duration: 0.18)) {
-                if collapsed { collapsedFolders.remove(group.folder) }
-                else { collapsedFolders.insert(group.folder) }
-            }
+        Button {
+            withAnimation(.snappy(duration: 0.18)) { isExpanded.wrappedValue.toggle() }
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 4) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(collapsed ? 0 : 90))
-                Image(systemName: "folder")
-                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                Text(group.folder)
-                    .font(.callout.weight(.medium))
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .kerning(0.6)
+                    .textCase(.uppercase)
                     .foregroundStyle(.secondary)
+                if let count, count > 0 {
+                    Text("\(count)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer(minLength: 0)
-                Text("\(group.docs.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 3)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private func orchestrationFileRow(_ doc: PlanDoc) -> some View {
-        Button { onOpenDoc(doc.fileURL) } label: {
+    private func listHint(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 3)
+    }
+
+    private func docFileRow(_ doc: PlanDoc) -> some View {
+        fileRow(url: doc.fileURL,
+                symbol: doc.kind == .plan ? "checklist"
+                    : (doc.kind == .spec ? "doc.text.magnifyingglass" : "doc.text"))
+    }
+
+    /// One openable file row (filename + type glyph), hover-highlighted.
+    private func fileRow(url: URL, symbol: String) -> some View {
+        Button { onOpenDoc(url) } label: {
             HStack(spacing: 7) {
-                Image(systemName: doc.kind == .plan ? "checklist"
-                      : (doc.kind == .spec ? "doc.text.magnifyingglass" : "doc.text"))
+                Image(systemName: symbol)
                     .font(.system(size: 12))
                     .foregroundStyle(.tertiary)
-                Text(doc.fileURL.lastPathComponent)
+                    .frame(width: 16)
+                Text(url.lastPathComponent)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 30)
+            .padding(.leading, 12)
             .padding(.trailing, 10)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background {
-            if hoveredOrchestrationURL == doc.fileURL {
+            if hoveredOrchestrationURL == url {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.primary.opacity(0.04))
                     .padding(.horizontal, 4)
             }
         }
         .onHover { hovering in
-            if hovering { hoveredOrchestrationURL = doc.fileURL }
-            else if hoveredOrchestrationURL == doc.fileURL { hoveredOrchestrationURL = nil }
+            if hovering { hoveredOrchestrationURL = url }
+            else if hoveredOrchestrationURL == url { hoveredOrchestrationURL = nil }
         }
         .contextMenu {
             Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([doc.fileURL])
+                NSWorkspace.shared.activateFileViewerSelecting([url])
             }
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(doc.fileURL.path, forType: .string)
+                NSPasteboard.general.setString(url.path, forType: .string)
             }
         }
     }
 
-    /// Orchestration docs grouped by their project-relative subfolder
-    /// (`docs/plans`, `docs/specs`, …), folders sorted by name. Files sort
-    /// newest-first — the date-prefixed names make alphabetical order
-    /// oldest-first, which buries the docs you're actually working on.
-    private var orchestrationFolders: [(folder: String, docs: [PlanDoc])] {
-        Dictionary(grouping: docStore.docs) { doc in
-            let dir = (docStore.relativePath(of: doc) as NSString).deletingLastPathComponent
-            return dir.isEmpty ? "." : dir
+    // MARK: - Project Files (CLAUDE.md and friends)
+
+    /// Known project-root config/instruction files, in a stable order,
+    /// filtered to the ones that actually exist.
+    private static let configFileNames = [
+        "CLAUDE.md", "AGENTS.md", "GEMINI.md", "run.toml", ".mcp.json", "README.md",
+    ]
+
+    private var projectConfigFiles: [URL] {
+        let root = docStore.projectRoot
+        let fm = FileManager.default
+        return Self.configFileNames.compactMap { name in
+            let url = root.appendingPathComponent(name)
+            return fm.fileExists(atPath: url.path) ? url : nil
         }
-        .sorted { $0.key < $1.key }
-        .map { (folder: $0.key,
-                docs: $0.value.sorted {
-                    $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent
-                }) }
+    }
+
+    private func configSymbol(for name: String) -> String {
+        switch name {
+        case "CLAUDE.md", "AGENTS.md", "GEMINI.md": return "sparkles"
+        case "run.toml": return "gearshape"
+        case ".mcp.json": return "puzzlepiece.extension"
+        default: return "doc.richtext"
+        }
+    }
+
+    private var projectFilesSection: some View {
+        let files = projectConfigFiles
+        let hasClaude = files.contains { $0.lastPathComponent == "CLAUDE.md" }
+        return VStack(alignment: .leading, spacing: 4) {
+            collapsibleHeader(title: "Project Files", count: files.count,
+                              isExpanded: $layout.projectFilesExpanded)
+            if layout.projectFilesExpanded {
+                VStack(alignment: .leading, spacing: 1) {
+                    ForEach(files, id: \.self) { url in
+                        fileRow(url: url, symbol: configSymbol(for: url.lastPathComponent))
+                    }
+                    // CLAUDE.md is the one people reach for most — offer to
+                    // create it inline when it's missing.
+                    if !hasClaude { createClaudeRow }
+                }
+            }
+        }
+    }
+
+    private var createClaudeRow: some View {
+        Button(action: createAndOpenClaudeMd) {
+            HStack(spacing: 7) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 16)
+                Text("New CLAUDE.md")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 10)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Create a CLAUDE.md at the project root and open it")
+    }
+
+    /// Write a minimal CLAUDE.md at the project root (if absent) and open
+    /// it in an editor tab.
+    private func createAndOpenClaudeMd() {
+        let url = docStore.projectRoot.appendingPathComponent("CLAUDE.md")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let stub = """
+            # \(repoStore.project.name)
+
+            Project instructions for Claude. Describe the architecture,
+            conventions, and anything an agent should know before working
+            here.
+            """
+            try? stub.write(to: url, atomically: true, encoding: .utf8)
+        }
+        onOpenDoc(url)
     }
 
     /// One icon+label row per pinned destination — monochrome outline
