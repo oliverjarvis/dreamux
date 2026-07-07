@@ -20,6 +20,11 @@ let package = Package(
         // Markdown rendering for file tabs and (later) plan/spec docs.
         // GitHub-flavored: tables, fenced code, task-list checkboxes.
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui.git", from: "2.4.0"),
+        // Layered DAG layout for the Flows graph — a pure-Swift port of
+        // dagre (network-simplex ranking, barycenter crossing reduction,
+        // Brandes-Köpf coordinates, routed edge waypoints). Layout only;
+        // FlowLayoutEngine wraps it behind its own interface.
+        .package(url: "https://github.com/lukilabs/dagre-swift", from: "0.1.0"),
     ],
     targets: [
         // Must never link XCTest — ProjectSession gates signal persistence on NSClassFromString("XCTestCase") == nil.
@@ -30,6 +35,7 @@ let package = Package(
                 .product(name: "GhosttyTheme", package: "libghostty-spm"),
                 .product(name: "Bonsplit", package: "bonsplit"),
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+                .product(name: "SwiftDagre", package: "dagre-swift"),
                 "DreamuxPTY",
             ],
             path: "Sources/Dreamux",

@@ -1,70 +1,55 @@
 import XCTest
 @testable import Dreamux
 
+/// `FlowLayoutEngine` delegates to SwiftDagre, so these assert the
+/// structural invariants a layered layout must satisfy — rank ordering,
+/// no overlaps, chain alignment, routed edge waypoints — rather than exact
+/// pixel coordinates (which are dagre's to choose and may shift between
+/// versions).
 final class FlowLayoutEngineTests: XCTestCase {
-    /// Constants for coordinate derivation.
-    /// y(rank) = margin + rank * (nodeSize.height + rankGap) + nodeSize.height/2
-    /// where margin = 24, nodeSize.height = 44, rankGap = 56
-    /// x centers spread symmetrically around size.width/2
+    private let nodeWidth = FlowLayoutEngine.nodeSize.width
 
-    // MARK: Test 1 — Chain src→a→drain: three ranks, equal x, y increasing
+    // MARK: Chain src→a→drain — ranks stack top to bottom, aligned in x
     func testChainLayout() {
         let nodes = [
             FlowNode(id: "src", kind: .source, label: "source", status: .done),
             FlowNode(id: "a", kind: .phase, label: "phase a", status: .done),
-            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done)
+            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done),
         ]
         let edges = [
             FlowEdge(from: "src", to: "a", kind: .sequence),
-            FlowEdge(from: "a", to: "drain", kind: .sequence)
+            FlowEdge(from: "a", to: "drain", kind: .sequence),
         ]
 
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // Coordinate derivation: y(rank) = margin + rank * (nodeSize.height + rankGap) + nodeSize.height/2
-        // With margin = 24, nodeSize.height = 44, rankGap = 56:
-        // rank 0: y = 24 + 0 * 100 + 22 = 46
-        // rank 1: y = 24 + 1 * 100 + 22 = 146
-        // rank 2: y = 24 + 2 * 100 + 22 = 246
-        //
-        // Single column (1 node per rank): maxColumn = 0, columnSpacing = 168
-        // contentWidth = 0 * 168 + 150 = 150
-        // canvasWidth = 150 + 2*24 = 198, centerX = 99
-        // x(all) = 99 - 0*168/2 + 0*168 = 99
-        //
-        // canvasHeight = 2*24 + 2*100 + 44 = 292
+        let src = layout.positions["src"]!
+        let a = layout.positions["a"]!
+        let drain = layout.positions["drain"]!
 
-        let expectedX = CGFloat(99)
-        let expectedY0 = CGFloat(46)
-        let expectedY1 = CGFloat(146)
-        let expectedY2 = CGFloat(246)
-        let expectedSize = CGSize(width: 198, height: 292)
-
-        let srcPos = layout.positions["src"]!
-        let aPos = layout.positions["a"]!
-        let drainPos = layout.positions["drain"]!
-
-        // Exact x and y coordinates
-        XCTAssertEqual(srcPos.x, expectedX)
-        XCTAssertEqual(aPos.x, expectedX)
-        XCTAssertEqual(drainPos.x, expectedX)
-
-        XCTAssertEqual(srcPos.y, expectedY0)
-        XCTAssertEqual(aPos.y, expectedY1)
-        XCTAssertEqual(drainPos.y, expectedY2)
-
-        // Symmetric 24px margins top and bottom
-        XCTAssertEqual(layout.size, expectedSize)
+        // Top-to-bottom by rank.
+        XCTAssertLessThan(src.y, a.y)
+        XCTAssertLessThan(a.y, drain.y)
+        // A straight chain aligns vertically.
+        XCTAssertEqual(src.x, a.x, accuracy: 0.5)
+        XCTAssertEqual(a.x, drain.x, accuracy: 0.5)
+        // Positive canvas, and every non-self edge is routed.
+        XCTAssertGreaterThan(layout.size.width, 0)
+        XCTAssertGreaterThan(layout.size.height, 0)
+        XCTAssertGreaterThanOrEqual(
+            layout.edgePoints[FlowLayout.EdgeKey(from: "src", to: "a")]?.count ?? 0, 2)
+        XCTAssertGreaterThanOrEqual(
+            layout.edgePoints[FlowLayout.EdgeKey(from: "a", to: "drain")]?.count ?? 0, 2)
     }
 
-    // MARK: Test 2 — Fan-out src→{a,b,c}→drain: a,b,c share rank, ordered by id
+    // MARK: Fan-out src→{a,b,c}→drain — a,b,c share a rank, don't overlap
     func testFanOutLayout() {
         let nodes = [
             FlowNode(id: "src", kind: .source, label: "source", status: .done),
             FlowNode(id: "a", kind: .phase, label: "phase a", status: .done),
             FlowNode(id: "b", kind: .phase, label: "phase b", status: .done),
             FlowNode(id: "c", kind: .phase, label: "phase c", status: .done),
-            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done)
+            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done),
         ]
         let edges = [
             FlowEdge(from: "src", to: "a", kind: .spawn),
@@ -72,165 +57,130 @@ final class FlowLayoutEngineTests: XCTestCase {
             FlowEdge(from: "src", to: "c", kind: .spawn),
             FlowEdge(from: "a", to: "drain", kind: .sequence),
             FlowEdge(from: "b", to: "drain", kind: .sequence),
-            FlowEdge(from: "c", to: "drain", kind: .sequence)
+            FlowEdge(from: "c", to: "drain", kind: .sequence),
         ]
 
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // Coordinate derivation: 3 columns (a, b, c at indices 0, 1, 2)
-        // maxColumn = 2, columnSpacing = 168
-        // contentWidth = 2 * 168 + 150 = 486
-        // canvasWidth = 486 + 2*24 = 534, centerX = 267
-        // startX = 267 - 2*168/2 = 99
-        // x(a) = 99 + 0*168 = 99
-        // x(b) = 99 + 1*168 = 267
-        // x(c) = 99 + 2*168 = 435
-        // x(src) at rank 0 (single node): 99
-        // x(drain) at rank 2 (single node): 99
-        //
-        // y-coordinates: rank 0: 46, rank 1: 146, rank 2: 246
+        let src = layout.positions["src"]!
+        let a = layout.positions["a"]!
+        let b = layout.positions["b"]!
+        let c = layout.positions["c"]!
+        let drain = layout.positions["drain"]!
 
-        let expectedY0 = CGFloat(46)
-        let expectedY1 = CGFloat(146)
-        let expectedY2 = CGFloat(246)
+        // The three siblings share one rank, between src and drain.
+        XCTAssertEqual(a.y, b.y, accuracy: 0.5)
+        XCTAssertEqual(b.y, c.y, accuracy: 0.5)
+        XCTAssertLessThan(src.y, a.y)
+        XCTAssertLessThan(a.y, drain.y)
 
-        let srcPos = layout.positions["src"]!
-        let aPos = layout.positions["a"]!
-        let bPos = layout.positions["b"]!
-        let cPos = layout.positions["c"]!
-        let drainPos = layout.positions["drain"]!
-
-        // Y coordinates by rank
-        XCTAssertEqual(srcPos.y, expectedY0)
-        XCTAssertEqual(aPos.y, expectedY1)
-        XCTAssertEqual(bPos.y, expectedY1)
-        XCTAssertEqual(cPos.y, expectedY1)
-        XCTAssertEqual(drainPos.y, expectedY2)
-
-        // X coordinates: exact values and ordering
-        XCTAssertEqual(aPos.x, 99)
-        XCTAssertEqual(bPos.x, 267)
-        XCTAssertEqual(cPos.x, 435)
-        XCTAssertEqual(srcPos.x, 99)
-        XCTAssertEqual(drainPos.x, 99)
-
-        // Verify ordering a < b < c
-        XCTAssertLessThan(aPos.x, bPos.x)
-        XCTAssertLessThan(bPos.x, cPos.x)
-
-        // Verify no overlaps: min distance >= nodeSize.width + siblingGap
-        let minDistance: CGFloat = 150 + 18  // 168
-        XCTAssertGreaterThanOrEqual(abs(bPos.x - aPos.x), minDistance)
-        XCTAssertGreaterThanOrEqual(abs(cPos.x - bPos.x), minDistance)
+        // No two siblings overlap horizontally (centers ≥ a node-width apart).
+        let xs = [a.x, b.x, c.x].sorted()
+        XCTAssertGreaterThanOrEqual(xs[1] - xs[0], nodeWidth)
+        XCTAssertGreaterThanOrEqual(xs[2] - xs[1], nodeWidth)
     }
 
-    // MARK: Test 3 — Diamond: longest path determines drain rank
+    // MARK: Diamond — the longest path sets the drain's rank
     func testDiamondLayout() {
         let nodes = [
             FlowNode(id: "src", kind: .source, label: "source", status: .done),
             FlowNode(id: "a", kind: .phase, label: "phase a", status: .done),
             FlowNode(id: "b", kind: .phase, label: "phase b", status: .done),
-            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done)
+            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done),
         ]
         let edges = [
             FlowEdge(from: "src", to: "a", kind: .sequence),
             FlowEdge(from: "a", to: "b", kind: .sequence),
             FlowEdge(from: "b", to: "drain", kind: .sequence),
-            FlowEdge(from: "src", to: "drain", kind: .sequence)  // Direct path
+            FlowEdge(from: "src", to: "drain", kind: .sequence),  // direct short path
         ]
 
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // y(rank) formulas
-        let expectedY0 = CGFloat(24 + 0 * (44 + 56) + 22)  // 46
-        let expectedY1 = CGFloat(24 + 1 * (44 + 56) + 22)  // 146
-        let expectedY2 = CGFloat(24 + 2 * (44 + 56) + 22)  // 246
-        let expectedY3 = CGFloat(24 + 3 * (44 + 56) + 22)  // 346
+        let src = layout.positions["src"]!
+        let a = layout.positions["a"]!
+        let b = layout.positions["b"]!
+        let drain = layout.positions["drain"]!
 
-        let srcPos = layout.positions["src"]!
-        let aPos = layout.positions["a"]!
-        let bPos = layout.positions["b"]!
-        let drainPos = layout.positions["drain"]!
-
-        // src at rank 0
-        XCTAssertEqual(srcPos.y, expectedY0)
-        // a at rank 1
-        XCTAssertEqual(aPos.y, expectedY1)
-        // b at rank 2
-        XCTAssertEqual(bPos.y, expectedY2)
-        // drain at rank 3 (longest path src→a→b→drain, not the short src→drain)
-        XCTAssertEqual(drainPos.y, expectedY3)
+        // src→a→b→drain stacks in order; drain sits below b, not beside src.
+        XCTAssertLessThan(src.y, a.y)
+        XCTAssertLessThan(a.y, b.y)
+        XCTAssertLessThan(b.y, drain.y)
     }
 
-    // MARK: Test 4 — Cycle safety: loop edge must not hang
+    // MARK: Cycle safety — a back-edge must not hang or crash
     func testCycleSafety() {
         let nodes = [
             FlowNode(id: "src", kind: .source, label: "source", status: .done),
             FlowNode(id: "a", kind: .phase, label: "phase a", status: .done),
-            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done)
+            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done),
         ]
         let edges = [
             FlowEdge(from: "src", to: "a", kind: .sequence),
             FlowEdge(from: "a", to: "drain", kind: .sequence),
-            FlowEdge(from: "a", to: "src", kind: .loop)  // Back-edge, should not crash
+            FlowEdge(from: "a", to: "src", kind: .loop),  // back-edge
         ]
 
-        // Should not hang or crash
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // All nodes should be positioned
         XCTAssertEqual(layout.positions.count, 3)
         XCTAssertNotNil(layout.positions["src"])
         XCTAssertNotNil(layout.positions["a"])
         XCTAssertNotNil(layout.positions["drain"])
     }
 
-    // MARK: Test 5 — Empty input: zero size, empty positions
-    func testEmptyLayout() {
-        let layout = FlowLayoutEngine.layout(nodes: [], edges: [])
+    // MARK: Self-loop is excluded from the routed edges (the view draws it)
+    func testSelfLoopExcludedFromEdgePoints() {
+        let nodes = [
+            FlowNode(id: "src", kind: .source, label: "source", status: .done),
+            FlowNode(id: "session", kind: .phase, label: "claude", status: .running),
+            FlowNode(id: "drain", kind: .drain, label: "drain", status: .queued),
+        ]
+        let edges = [
+            FlowEdge(from: "src", to: "session", kind: .sequence),
+            FlowEdge(from: "session", to: "session", kind: .loop, iterations: 3),
+            FlowEdge(from: "session", to: "drain", kind: .sequence),
+        ]
 
-        XCTAssertEqual(layout.positions.count, 0)
-        XCTAssertEqual(layout.size, CGSize(width: 0, height: 0))
+        let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
+
+        XCTAssertEqual(layout.positions.count, 3)
+        XCTAssertNil(layout.edgePoints[FlowLayout.EdgeKey(from: "session", to: "session")])
+        XCTAssertGreaterThanOrEqual(
+            layout.edgePoints[FlowLayout.EdgeKey(from: "src", to: "session")]?.count ?? 0, 2)
+        XCTAssertGreaterThanOrEqual(
+            layout.edgePoints[FlowLayout.EdgeKey(from: "session", to: "drain")]?.count ?? 0, 2)
     }
 
-    // MARK: Test 6 — Size calculation and symmetric margins
+    // MARK: Empty input — zero size, no positions
+    func testEmptyLayout() {
+        let layout = FlowLayoutEngine.layout(nodes: [], edges: [])
+        XCTAssertEqual(layout.positions.count, 0)
+        XCTAssertEqual(layout.size, .zero)
+        XCTAssertTrue(layout.edgePoints.isEmpty)
+    }
+
+    // MARK: Two-column fan-out — positive canvas, no overlap
     func testSizeAndOverlaps() {
         let nodes = [
             FlowNode(id: "src", kind: .source, label: "source", status: .done),
             FlowNode(id: "a", kind: .phase, label: "phase a", status: .done),
             FlowNode(id: "b", kind: .phase, label: "phase b", status: .done),
-            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done)
+            FlowNode(id: "drain", kind: .drain, label: "drain", status: .done),
         ]
         let edges = [
             FlowEdge(from: "src", to: "a", kind: .spawn),
             FlowEdge(from: "src", to: "b", kind: .spawn),
             FlowEdge(from: "a", to: "drain", kind: .sequence),
-            FlowEdge(from: "b", to: "drain", kind: .sequence)
+            FlowEdge(from: "b", to: "drain", kind: .sequence),
         ]
 
         let layout = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
 
-        // 2 columns (a, b at indices 0, 1): maxColumn = 1, columnSpacing = 168
-        // contentWidth = 1 * 168 + 150 = 318
-        // canvasWidth = 318 + 2*24 = 366, centerX = 183
-        // Node extents: leftmost at (99 - 75 = 24), rightmost at (267 + 75 = 342)
-        // Layout height: 3 ranks with max rank = 2
-        // canvasHeight = 2*24 + 2*100 + 44 = 292
-
-        let expectedSize = CGSize(width: 366, height: 292)
-        XCTAssertEqual(layout.size, expectedSize)
-
-        // Verify exact margin symmetry: left and right edges at 24px from canvas edges
-        let aPos = layout.positions["a"]!  // x = 99
-        let bPos = layout.positions["b"]!  // x = 267
-
-        // Left edge of node a: 99 - 75 = 24
-        XCTAssertEqual(aPos.x - 75, 24)
-        // Right edge of node b: 267 + 75 = 342, should be canvasWidth - 24 = 342
-        XCTAssertEqual(bPos.x + 75, layout.size.width - 24)
-
-        // Verify no overlaps: pairwise distance >= nodeSize.width + siblingGap
-        let minDistance: CGFloat = 150 + 18
-        XCTAssertGreaterThanOrEqual(abs(bPos.x - aPos.x), minDistance)
+        XCTAssertGreaterThan(layout.size.width, 0)
+        XCTAssertGreaterThan(layout.size.height, 0)
+        let a = layout.positions["a"]!
+        let b = layout.positions["b"]!
+        XCTAssertGreaterThanOrEqual(abs(b.x - a.x), nodeWidth)
     }
 }

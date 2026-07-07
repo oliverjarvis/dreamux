@@ -1,6 +1,15 @@
 {
-  "originHash" : "e6b2544f4b3a2bd30bae6b5fc2b9de50ee5492e21c6e9a49e628cc82078fa174",
+  "originHash" : "5f25533b25a9145f212bf9e4f783b3404469c8e349b4d2a4d8ad9ac7010ed14d",
   "pins" : [
+    {
+      "identity" : "dagre-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/lukilabs/dagre-swift",
+      "state" : {
+        "revision" : "92efb78b73a8b665ee74bacfb0f1f5b17bbe1b38",
+        "version" : "0.1.0"
+      }
+    },
     {
       "identity" : "libghostty-spm",
       "kind" : "remoteSourceControl",
