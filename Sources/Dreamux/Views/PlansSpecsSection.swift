@@ -683,6 +683,13 @@ struct PlansSpecsSection: View {
         return candidates.first { $0.status == .waiting } ?? candidates.first { $0.status == .running }
     }
 
+    /// An active plan renders as a small card: the title gets a full-width
+    /// line, the status/count a meta line, a full-width progress bar its
+    /// own line, and the primary actions (open, run/stop) a persistent
+    /// bottom row — so the title never fights the controls for width and
+    /// the actions don't hide behind hover. The disclosure chevron overlays
+    /// the leading gutter (a chevron click toggles tasks without opening
+    /// the doc).
     private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {
         let name = featureName(plan)
         let openableFeature = PlanWorkspacePresence.workspaceToOpen(
@@ -691,11 +698,7 @@ struct PlansSpecsSection: View {
         // can produce output while parked at a gate — so it keys off the
         // feature existing, not the in-flight gate the → affordance uses.
         let showUnread = name.map { featureExists($0) && hasUnread($0) } ?? false
-        // The live workspace behind this plan (nil until its worktree exists),
-        // and whether a runner is up on it — run controls ride alongside the →
-        // affordance and, like feature rows, stay visible while running.
         let workspace = name.flatMap(workspaceForFeature)
-        let runnerRunning = workspace.map { !runners.runningRunners(onBranch: $0.name).isEmpty } ?? false
         // A `**Runs:** after <blocker>` plan carries the blocker's title in
         // its caption (resolved via DocStore; `<filename> (missing)` when the
         // path doesn't resolve — never a silent drop).
@@ -703,132 +706,199 @@ struct PlansSpecsSection: View {
             let target = docStore.resolvedURL(forReference: reference)
             return docStore.docs.first { $0.fileURL.standardizedFileURL == target }?.title
         }
-        // The disclosure chevron overlays the row's leading gap rather than
-        // nesting inside its open-doc button — the same on-top idiom the
-        // feature rows use for their hover controls, so a click on the
-        // chevron toggles tasks without opening the doc.
-        return ZStack(alignment: .leading) {
-            docRow(
-                plan,
-                canRun: status == .ready || status == .inProgress,
-                keepTrailingVisible: runnerRunning,
-                hasRunControls: workspace != nil,
-                trailing: {
-                    if let feature = openableFeature {
-                        Button { onOpenFeature(feature) } label: {
-                            Image(systemName: "arrow.right.circle")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 22, height: 22)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Open \(feature)'s workspace")
-                    }
-                    if let workspace {
-                        makeRunControls(workspace)
-                    }
-                },
-                menu: {
-                    // Plan-level correction: no natural anchor, so it lands
-                    // in the phase holding the current task (spec).
-                    Button("Course correct…") {
-                        correcting = CorrectionTarget(
-                            plan: plan, anchor: .currentPhase, description: plan.title)
-                    }
-                    Divider()
-                    if let feature = openableFeature {
-                        Button("Open workspace") { onOpenFeature(feature) }
-                    }
-                    // Merge/Close parity with the feature rows, for any plan
-                    // whose feature workspace is live — routed through the
-                    // sidebar's sheet/alert channels (see featureMenu).
-                    if let workspace {
-                        if !workspace.linkedRepoIDs.isEmpty {
-                            Button("Merge…") { gateMergeWorkspaceID = workspace.id }
-                        }
-                        Divider()
-                        Button("Close \"\(workspace.name)\"", role: .destructive) {
-                            gateCloseWorkspaceID = workspace.id
-                        }
-                    }
-                }
-            ) {
-                HStack(spacing: 8) {
-                    Color.clear.frame(width: chevronColumnWidth, height: 18)
-                    Image(systemName: status.glyph)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(status == .running ? Color.green : Color.secondary)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 4) {
-                            if let ordinal {
-                                Text("\(ordinal) ·")
-                                    .font(.callout.weight(.medium).monospacedDigit())
-                                    .foregroundStyle(.secondary)
+        let canRun = status == .ready || status == .inProgress
+        let hasActions = openableFeature != nil || workspace != nil || canRun
+        let isHovered = hoveredDocURL == plan.fileURL
+
+        return ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 7) {
+                // Title + meta + progress — the whole block opens the doc.
+                Button { onOpenDoc(plan.fileURL) } label: {
+                    HStack(alignment: .top, spacing: 8) {
+                        Color.clear.frame(width: chevronColumnWidth, height: 18)
+                        Image(systemName: status.glyph)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(status == .running ? Color.green : Color.secondary)
+                            .frame(width: 18, height: 18)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 4) {
+                                if let ordinal {
+                                    Text("\(ordinal) ·")
+                                        .font(.callout.weight(.medium).monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(plan.title)
+                                    .font(.callout.weight(.medium))
+                                    .lineLimit(1).truncationMode(.tail)
+                                liveFlowDot(for: workspace)
+                                if showUnread {
+                                    Circle().fill(Color.red).frame(width: 5, height: 5)
+                                }
+                                Spacer(minLength: 0)
                             }
-                            Text(plan.title)
-                                .font(.callout.weight(.medium))
-                                .lineLimit(1).truncationMode(.tail)
-                            liveFlowDot(for: workspace)
-                            if showUnread {
-                                Circle().fill(Color.red).frame(width: 5, height: 5)
-                            }
-                        }
-                        HStack(spacing: 6) {
-                            // The status word truncates first in a narrow
-                            // sidebar; the progress bar shrinks; the count
-                            // never wraps (it carries the same info the bar
-                            // does).
-                            Text(status.label)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
+                            planMetaLine(plan, status: status, blockedBy: blockedBy,
+                                         afterCaption: afterCaption)
                             if plan.totalSteps > 0 {
                                 ProgressView(value: Double(plan.checkedSteps),
                                              total: Double(plan.totalSteps))
                                     .controlSize(.mini)
-                                    .frame(maxWidth: 60)
-                                Text("\(plan.checkedSteps)/\(plan.totalSteps)")
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
-                                    .layoutPriority(1)
-                            }
-                            if let blockedBy {
-                                Text("· blocked by \(blockedBy)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                            }
-                            if let afterCaption {
-                                Text("· \(afterCaption)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                            if let failure = autoRunFailure(docStore.relativePath(of: plan)) {
-                                // An unattended launch failed (name
-                                // collision, no repos, …) — the mark
-                                // sticks so it won't retry; say so
-                                // instead of an unexplained `ready`.
-                                Text("· auto-run failed")
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                                    .lineLimit(1)
-                                    .help(failure)
+                                    .frame(maxWidth: .infinity)
                             }
                         }
                     }
-                    Spacer(minLength: 0)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    planContextMenu(plan, canRun: canRun,
+                                    openableFeature: openableFeature, workspace: workspace)
+                }
+
+                if hasActions {
+                    planActionRow(plan, canRun: canRun,
+                                  openableFeature: openableFeature, workspace: workspace)
                 }
             }
-            if !renderableTasks(plan).isEmpty {
-                planDisclosure(plan).padding(.leading, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                if isHovered {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(0.04))
+                        .padding(.horizontal, 4)
+                }
             }
+            .onHover { hovering in
+                if hovering { hoveredDocURL = plan.fileURL }
+                else if hoveredDocURL == plan.fileURL { hoveredDocURL = nil }
+            }
+
+            if !renderableTasks(plan).isEmpty {
+                planDisclosure(plan)
+                    .padding(.leading, 10)
+                    .padding(.top, 7)
+            }
+        }
+    }
+
+    /// The status word, step count, and any blocked/after/auto-run
+    /// annotations — everything on one line, nothing allowed to wrap.
+    @ViewBuilder
+    private func planMetaLine(
+        _ plan: PlanDoc, status: PlanStatus, blockedBy: Int?, afterCaption: String?
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text(status.label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if plan.totalSteps > 0 {
+                Text("· \(plan.checkedSteps)/\(plan.totalSteps)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            if let blockedBy {
+                Text("· blocked by \(blockedBy)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            if let afterCaption {
+                Text("· \(afterCaption)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            if let failure = autoRunFailure(docStore.relativePath(of: plan)) {
+                // An unattended launch failed (name collision, no repos, …)
+                // — the mark sticks so it won't retry; say so instead of an
+                // unexplained `ready`.
+                Text("· auto-run failed")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(1)
+                    .help(failure)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// The persistent action row under a plan card: Open (its workspace),
+    /// the run/stop controls when a worktree exists, or a Run button when
+    /// it's runnable but not yet provisioned. Right-aligned.
+    @ViewBuilder
+    private func planActionRow(
+        _ plan: PlanDoc, canRun: Bool, openableFeature: String?, workspace: Workspace?
+    ) -> some View {
+        HStack(spacing: 12) {
+            Spacer(minLength: 0)
+            if let feature = openableFeature {
+                Button { onOpenFeature(feature) } label: {
+                    Label("Open", systemImage: "arrow.right.circle")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open \(feature)'s workspace")
+            }
+            if let workspace {
+                makeRunControls(workspace)
+            } else if canRun {
+                Button { onRunPlan(plan) } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 18, height: 18)
+                            .background(Circle().fill(Color.accentColor))
+                        Text("Run")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Run this plan (provisions a worktree and starts claude)")
+            }
+        }
+    }
+
+    /// The plan card's context menu — the run/queue actions a runnable plan
+    /// gets, plus course-correct and the workspace merge/close parity.
+    @ViewBuilder
+    private func planContextMenu(
+        _ plan: PlanDoc, canRun: Bool, openableFeature: String?, workspace: Workspace?
+    ) -> some View {
+        if canRun {
+            Button("Run Plan…") { onRunPlan(plan) }
+            Button("Add to Queue") { onEnqueue(plan) }
+            Divider()
+        }
+        // Plan-level correction: no natural anchor, so it lands in the phase
+        // holding the current task (spec).
+        Button("Course correct…") {
+            correcting = CorrectionTarget(
+                plan: plan, anchor: .currentPhase, description: plan.title)
+        }
+        Divider()
+        if let feature = openableFeature {
+            Button("Open workspace") { onOpenFeature(feature) }
+        }
+        if let workspace {
+            if !workspace.linkedRepoIDs.isEmpty {
+                Button("Merge…") { gateMergeWorkspaceID = workspace.id }
+            }
+            Divider()
+            Button("Close \"\(workspace.name)\"", role: .destructive) {
+                gateCloseWorkspaceID = workspace.id
+            }
+        }
+        Button("Reveal in Finder") {
+            NSWorkspace.shared.activateFileViewerSelecting([plan.fileURL])
         }
     }
 
