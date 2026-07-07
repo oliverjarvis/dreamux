@@ -49,6 +49,9 @@ struct ContentView: View {
     @State private var gitDefaultBranch: String?
     /// Whether the git chip's commit-trail popover is showing.
     @State private var showCommitTrail = false
+    /// Project whose icon/color Customize sheet is open (from the collapsed
+    /// rail glyph's context menu).
+    @State private var customizingProject: Project?
     /// Appearance knobs (Settings window) — applied live.
     @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
     @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
@@ -206,6 +209,16 @@ struct ContentView: View {
             VisualEffectBackground()
                 .overlay(backdropTint.opacity(1 - backdropTransparency))
                 .ignoresSafeArea()
+        }
+        .sheet(item: $customizingProject) { project in
+            CustomizeProjectSheet(
+                projectName: project.name,
+                selectedSymbol: project.symbol,
+                selectedTintHex: project.tintHex,
+                onPickSymbol: { projects.setSymbol($0, for: project.id) },
+                onPickTintHex: { projects.setTintHex($0, for: project.id) },
+                onDismiss: { customizingProject = nil }
+            )
         }
         // The file explorer is toggled from the View menu (⌥⌘E, see
         // `FileExplorerCommands`) rather than a toolbar-item shortcut: a
@@ -401,7 +414,8 @@ struct ContentView: View {
         return Button {
             onSwitchProject(project.id)
         } label: {
-            ProjectGlyph(name: project.name, size: 34)
+            ProjectGlyph(name: project.name, size: 34,
+                         symbol: project.symbol, tint: project.glyphTint())
                 .opacity(selected ? 1 : 0.55)
                 .overlay {
                     if selected {
@@ -414,6 +428,7 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .help(project.name)
         .contextMenu {
+            Button("Customize Icon…") { customizingProject = project }
             Button("Show in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
             }
@@ -468,9 +483,11 @@ struct ContentView: View {
     /// project name — heading the Work-Items column (the rail picks the
     /// project; this column is that project's work).
     private var projectHeaderRow: some View {
-        let name = currentProject?.name ?? ""
+        let project = currentProject
+        let name = project?.name ?? ""
         return HStack(spacing: 10) {
-            ProjectGlyph(name: name, size: 24)
+            ProjectGlyph(name: name, size: 24,
+                         symbol: project?.symbol, tint: project?.glyphTint())
 
             Text(name)
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
@@ -831,33 +848,58 @@ enum SidebarMode: Hashable {
 struct ProjectGlyph: View {
     let name: String
     let size: CGFloat
+    /// User-chosen SF Symbol; nil renders the initial-letter glyph.
+    var symbol: String? = nil
+    /// User-chosen tint; nil falls back to the stable name-derived color.
+    var tint: Color? = nil
 
-    private static let palette: [Color] = [
+    static let palette: [Color] = [
         .blue, .purple, .pink, .orange, .teal, .indigo, .green, .red,
     ]
 
-    private var tint: Color {
-        // Stable across launches (String.hashValue is per-process seeded).
+    /// Stable across launches (String.hashValue is per-process seeded), so
+    /// a project keeps the same auto-color until the user overrides it.
+    static func derivedTint(for name: String) -> Color {
         let sum = name.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
-        let index = abs(sum) % Self.palette.count
-        return Self.palette[index]
+        let index = abs(sum) % palette.count
+        return palette[index]
     }
+
+    private var effectiveTint: Color { tint ?? Self.derivedTint(for: name) }
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [tint, tint.opacity(0.55)],
+                        colors: [effectiveTint, effectiveTint.opacity(0.55)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
-            Text(String(name.prefix(1)).uppercased())
-                .font(.system(size: size * 0.42, weight: .heavy, design: .rounded))
-                .foregroundStyle(.white)
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.44, weight: .semibold))
+                    .foregroundStyle(.white)
+            } else {
+                Text(String(name.prefix(1)).uppercased())
+                    .font(.system(size: size * 0.42, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+            }
         }
         .frame(width: size, height: size)
+    }
+}
+
+extension Project {
+    /// The glyph's effective tint: the user's pick, else a stable
+    /// name-derived color. Shared by the rail (both modes) and the
+    /// work-items header so a project reads the same everywhere.
+    func glyphTint() -> Color {
+        if let tintHex, let color = AppearanceSettings.color(fromHex: tintHex) {
+            return color
+        }
+        return ProjectGlyph.derivedTint(for: name)
     }
 }
 

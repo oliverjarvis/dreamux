@@ -415,6 +415,19 @@ final class GitOperationsTests: XCTestCase {
         XCTAssertEqual(GitOperations.deriveName(from: "git@host:team/my_repo.v2.git"), "my_repo.v2")
     }
 
+    // MARK: - slug
+
+    func testSlugFromProjectName() {
+        XCTAssertEqual(GitOperations.slug(from: "Pokemon Emulator"), "pokemon-emulator")
+        // Runs of non-alphanumerics collapse to one hyphen; ends trimmed.
+        XCTAssertEqual(GitOperations.slug(from: "  My  Cool  App!! "), "my-cool-app")
+        XCTAssertEqual(GitOperations.slug(from: "already-slugged"), "already-slugged")
+        XCTAssertEqual(GitOperations.slug(from: "under_scores.kept"), "under-scores-kept")
+        // A name of only punctuation slugs to empty (the modal blocks it).
+        XCTAssertEqual(GitOperations.slug(from: "!!!"), "")
+        XCTAssertEqual(GitOperations.slug(from: "Café Déjà"), "caf-d-j")
+    }
+
     // MARK: - Helpers
 
     /// Run git via the same plumbing under test and trim the trailing

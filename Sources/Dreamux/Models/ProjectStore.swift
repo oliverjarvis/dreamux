@@ -151,11 +151,15 @@ final class ProjectStore {
                 if existing.name == folderName {
                     refreshed.append(existing)
                 } else {
+                    // Folder was renamed on disk — keep the identity and
+                    // any user-chosen icon/tint, only the name follows.
                     refreshed.append(Project(
                         id: existing.id,
                         name: folderName,
                         rootPath: standardized,
-                        createdAt: existing.createdAt
+                        createdAt: existing.createdAt,
+                        symbol: existing.symbol,
+                        tintHex: existing.tintHex
                     ))
                 }
             } else {
@@ -169,6 +173,21 @@ final class ProjectStore {
 
         refreshed.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         projects = refreshed
+        save()
+    }
+
+    /// Set (or clear, with nil) the project's custom glyph symbol.
+    func setSymbol(_ symbol: String?, for id: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[index].symbol = symbol
+        save()
+    }
+
+    /// Set (or clear, with nil) the project's custom tint, stored as a
+    /// `#RRGGBB` hex string.
+    func setTintHex(_ hex: String?, for id: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == id }) else { return }
+        projects[index].tintHex = hex
         save()
     }
 

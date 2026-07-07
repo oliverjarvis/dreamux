@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Repo bootstrap choice offered when creating a project.
+/// Repo bootstrap choice offered when creating a project. Every project
+/// gets a git repository — the choice is only *how* it's seeded.
 enum CreateRepoMode: String, CaseIterable, Identifiable {
-    case none = "Skip"
-    case initialize = "Initialize"
+    case initialize = "New repo"
     case clone = "Clone"
     case importExisting = "Import"
     var id: String { rawValue }
@@ -13,6 +13,12 @@ enum CreateRepoMode: String, CaseIterable, Identifiable {
 /// rail. Owns the form state and the create + repo-bootstrap flow so
 /// both entry points behave identically; callers provide the store and
 /// react to `onCreated` (the sheet dismisses itself first).
+///
+/// A project always gets a git repository: a fresh one is initialized, a
+/// remote is cloned, or an existing folder is imported. When cloning or
+/// importing, the project name auto-fills from the source and stays
+/// editable; when starting fresh, the typed name is slugified into the
+/// repository's folder name (`Pokemon Emulator` → `pokemon-emulator`).
 struct CreateProjectSheet: View {
     let store: ProjectStore
     let onCreated: (Project) -> Void
@@ -20,41 +26,33 @@ struct CreateProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var repoMode: CreateRepoMode = .none
+    @State private var repoMode: CreateRepoMode = .initialize
     @State private var repoURL = ""
-    @State private var repoName = ""
     @State private var importPath: URL?
     @State private var error: String?
     @State private var isWorking = false
-    @State private var didTouchRepoName = false
+    /// The name we last auto-filled from the clone URL / imported folder.
+    /// Auto-fill keeps flowing while the field still holds this value; once
+    /// the user types something else, `name != autoFilledName` and we stop
+    /// (this also ignores our own programmatic writes, which would otherwise
+    /// look like user edits to `onChange`).
+    @State private var autoFilledName = ""
 
     @FocusState private var focused: Field?
 
-    enum Field { case name, repoURL, repoName }
+    enum Field { case name, repoURL }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New Project")
                 .font(.headline)
-            Text("A folder will be created under ~/Documents/Dreamux.")
+            Text("A folder is created under ~/Documents/Dreamux with a git repository inside.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Project name")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextField("e.g. mobile-app", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focused, equals: .name)
-                    .disabled(isWorking)
-                    .onSubmit(submitIfReady)
-            }
-
-            Divider()
+                .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Repository (optional)")
+                Text("Repository")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
@@ -73,9 +71,12 @@ struct CreateProjectSheet: View {
                         .focused($focused, equals: .repoURL)
                         .disabled(isWorking)
                         .onChange(of: repoURL) { _, newURL in
-                            if !didTouchRepoName {
+                            // Sync the name to the URL until the user edits
+                            // it by hand.
+                            if name.isEmpty || name == autoFilledName {
                                 let derived = GitOperations.deriveName(from: newURL)
-                                if !derived.isEmpty { repoName = derived }
+                                name = derived
+                                autoFilledName = derived
                             }
                         }
                 }
@@ -92,22 +93,25 @@ struct CreateProjectSheet: View {
                             .disabled(isWorking)
                     }
                 }
+            }
 
-                if repoMode != .none {
-                    TextField(
-                        repoNamePlaceholder,
-                        text: $repoName
-                    )
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Project name")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                TextField(namePlaceholder, text: $name)
                     .textFieldStyle(.roundedBorder)
-                    .focused($focused, equals: .repoName)
+                    .focused($focused, equals: .name)
                     .disabled(isWorking)
-                    .onChange(of: repoName) { _, _ in didTouchRepoName = true }
+                    .onSubmit(submitIfReady)
+                if !repoSummary.isEmpty {
+                    Text(repoSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Text("All repos use a bare-with-worktrees layout: .bare/ for git data plus a worktree for the default branch under repos/<name>/. Import keeps the source folder untouched (we git clone --bare from it).")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let error {
@@ -137,10 +141,10 @@ struct CreateProjectSheet: View {
         }
         .padding(20)
         .frame(width: 460)
-        .onAppear { focused = .name }
+        .onAppear { focused = repoMode == .clone ? .repoURL : .name }
     }
 
-    // MARK: - Validation
+    // MARK: - Derived
 
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -149,11 +153,50 @@ struct CreateProjectSheet: View {
         repoURL.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The repository folder name that will be created under `repos/`.
+    /// New repos slugify the project name; clone/import take the source's
+    /// own name.
+    private var derivedRepoName: String {
+        switch repoMode {
+        case .initialize:
+            return GitOperations.slug(from: trimmedName)
+        case .clone:
+            return GitOperations.deriveName(from: trimmedRepoURL)
+        case .importExisting:
+            return importPath.map { GitOperations.deriveName(from: $0.lastPathComponent) } ?? ""
+        }
+    }
+
+    private var namePlaceholder: String {
+        switch repoMode {
+        case .initialize: return "e.g. Pokemon Emulator"
+        case .clone: return "Auto-filled from the repository"
+        case .importExisting: return "Auto-filled from the folder"
+        }
+    }
+
+    /// A one-line summary of the repository that will be created, shown
+    /// under the name field.
+    private var repoSummary: String {
+        let repo = derivedRepoName
+        guard !repo.isEmpty else { return "" }
+        switch repoMode {
+        case .initialize:
+            return "Initializes a git repository named “\(repo)”."
+        case .clone:
+            return "Clones into a repository named “\(repo)”."
+        case .importExisting:
+            return "Imports the folder as a repository named “\(repo)”."
+        }
+    }
+
     private var canSubmit: Bool {
         guard !trimmedName.isEmpty else { return false }
         switch repoMode {
-        case .none, .initialize:
-            return true
+        case .initialize:
+            // A slug is required so the repo folder is well-formed (a name
+            // of only punctuation would slug to empty).
+            return !derivedRepoName.isEmpty
         case .clone:
             return !trimmedRepoURL.isEmpty
         case .importExisting:
@@ -166,16 +209,6 @@ struct CreateProjectSheet: View {
         case .clone: return "Cloning repository…"
         case .initialize: return "Initializing repository…"
         case .importExisting: return "Importing repository…"
-        case .none: return "Creating project…"
-        }
-    }
-
-    private var repoNamePlaceholder: String {
-        switch repoMode {
-        case .clone: return "Folder name (auto-detected)"
-        case .initialize: return "Folder name (defaults to project name)"
-        case .importExisting: return "Folder name (defaults to source folder)"
-        case .none: return "Folder name"
         }
     }
 
@@ -189,7 +222,7 @@ struct CreateProjectSheet: View {
     private func createProject() {
         guard !isWorking else { return }
         let projectName = trimmedName
-        let repoIntent = pendingRepoIntent(forProjectName: projectName)
+        let repoIntent = pendingRepoIntent()
         isWorking = true
         error = nil
 
@@ -197,10 +230,9 @@ struct CreateProjectSheet: View {
             do {
                 let project = try store.createProject(name: projectName)
 
-                // Run the optional repo bootstrap before handing the
-                // project back so its window appears with the repo
-                // already in place (avoids a "Repositories: empty"
-                // flash).
+                // Seed the repository before handing the project back so
+                // its window appears with the repo already in place
+                // (avoids a "Repositories: empty" flash).
                 if let repoIntent {
                     try await runRepoIntent(repoIntent, in: project)
                 }
@@ -215,24 +247,19 @@ struct CreateProjectSheet: View {
         }
     }
 
-    private func pendingRepoIntent(forProjectName projectName: String) -> AddRepoIntent? {
+    private func pendingRepoIntent() -> AddRepoIntent? {
+        let repo = derivedRepoName
         switch repoMode {
-        case .none:
-            return nil
         case .initialize:
-            let trimmed = repoName.trimmingCharacters(in: .whitespacesAndNewlines)
-            return .initialize(name: trimmed.isEmpty ? projectName : trimmed)
+            guard !repo.isEmpty else { return nil }
+            return .initialize(name: repo)
         case .clone:
             let url = trimmedRepoURL
             guard !url.isEmpty else { return nil }
-            let trimmed = repoName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = trimmed.isEmpty ? GitOperations.deriveName(from: url) : trimmed
-            return .clone(url: url, name: name)
+            return .clone(url: url, name: repo)
         case .importExisting:
             guard let path = importPath else { return nil }
-            let trimmed = repoName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let name = trimmed.isEmpty ? GitOperations.deriveName(from: path.lastPathComponent) : trimmed
-            return .importLocal(path: path, name: name)
+            return .importLocal(path: path, name: repo)
         }
     }
 
@@ -258,9 +285,10 @@ struct CreateProjectSheet: View {
         panel.message = "Pick the existing local repository to import."
         if panel.runModal() == .OK, let url = panel.url {
             importPath = url
-            if !didTouchRepoName {
+            if name.isEmpty || name == autoFilledName {
                 let derived = GitOperations.deriveName(from: url.lastPathComponent)
-                if !derived.isEmpty { repoName = derived }
+                name = derived
+                autoFilledName = derived
             }
         }
     }

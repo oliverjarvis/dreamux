@@ -540,6 +540,27 @@ enum GitOperations {
         let scrubbed = name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
         return String(scrubbed).trimmingCharacters(in: CharacterSet(charactersIn: "-_."))
     }
+
+    /// Slugify a human name into a repo/folder-safe token: lowercased,
+    /// runs of non-alphanumerics collapsed to a single hyphen, ends
+    /// trimmed. `"Pokemon Emulator"` → `"pokemon-emulator"`.
+    static func slug(from name: String) -> String {
+        let lowered = name.lowercased()
+        var out = ""
+        var lastWasHyphen = false
+        for scalar in lowered.unicodeScalars {
+            // ASCII-only so repo/folder names dodge Unicode-normalization
+            // and case-folding surprises on disk and in git.
+            if scalar.isASCII, CharacterSet.alphanumerics.contains(scalar) {
+                out.unicodeScalars.append(scalar)
+                lastWasHyphen = false
+            } else if !lastWasHyphen {
+                out.append("-")
+                lastWasHyphen = true
+            }
+        }
+        return out.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
 }
 
 // MARK: - Streaming helpers

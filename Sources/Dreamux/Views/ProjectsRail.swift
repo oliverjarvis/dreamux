@@ -23,27 +23,34 @@ struct ProjectsRail: View {
     @State private var showCreate = false
     @State private var pendingDelete: Project?
     @State private var deleteError: String?
+    @State private var customizing: Project?
 
     var body: some View {
         List(selection: selectionBinding) {
             ForEach(projects.projects) { project in
-                Label(project.name, systemImage: "folder")
-                    .tag(project.id)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(project.rootPath.path)
-                    .contextMenu {
-                        Button("Open in New Window") {
-                            openInNewWindow(project.id)
-                        }
-                        Button("Show in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
-                        }
-                        Divider()
-                        Button("Move to Trash…", role: .destructive) {
-                            pendingDelete = project
-                        }
+                Label {
+                    Text(project.name)
+                } icon: {
+                    ProjectGlyph(name: project.name, size: 18,
+                                 symbol: project.symbol, tint: project.glyphTint())
+                }
+                .tag(project.id)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(project.rootPath.path)
+                .contextMenu {
+                    Button("Customize…") { customizing = project }
+                    Button("Open in New Window") {
+                        openInNewWindow(project.id)
                     }
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([project.rootPath])
+                    }
+                    Divider()
+                    Button("Move to Trash…", role: .destructive) {
+                        pendingDelete = project
+                    }
+                }
             }
             // New Project rides directly below the last project, one of
             // the rows rather than a pinned bottom bar.
@@ -91,6 +98,16 @@ struct ProjectsRail: View {
             CreateProjectSheet(store: projects) { project in
                 onSelect(project.id)
             }
+        }
+        .sheet(item: $customizing) { project in
+            CustomizeProjectSheet(
+                projectName: project.name,
+                selectedSymbol: project.symbol,
+                selectedTintHex: project.tintHex,
+                onPickSymbol: { projects.setSymbol($0, for: project.id) },
+                onPickTintHex: { projects.setTintHex($0, for: project.id) },
+                onDismiss: { customizing = nil }
+            )
         }
         .alert(
             "Move \(pendingDelete?.name ?? "project") to Trash?",
