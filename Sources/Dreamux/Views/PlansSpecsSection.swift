@@ -776,28 +776,39 @@ struct PlansSpecsSection: View {
                             }
                         }
                         HStack(spacing: 6) {
+                            // The status word truncates first in a narrow
+                            // sidebar; the progress bar shrinks; the count
+                            // never wraps (it carries the same info the bar
+                            // does).
                             Text(status.label)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                             if plan.totalSteps > 0 {
                                 ProgressView(value: Double(plan.checkedSteps),
                                              total: Double(plan.totalSteps))
                                     .controlSize(.mini)
-                                    .frame(width: 60)
+                                    .frame(maxWidth: 60)
                                 Text("\(plan.checkedSteps)/\(plan.totalSteps)")
                                     .font(.caption2.monospacedDigit())
                                     .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .layoutPriority(1)
                             }
                             if let blockedBy {
                                 Text("· blocked by \(blockedBy)")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
                             }
                             if let afterCaption {
                                 Text("· \(afterCaption)")
                                     .font(.caption2)
                                     .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
                             }
                             if let failure = autoRunFailure(docStore.relativePath(of: plan)) {
                                 // An unattended launch failed (name
@@ -807,6 +818,7 @@ struct PlansSpecsSection: View {
                                 Text("· auto-run failed")
                                     .font(.caption2)
                                     .foregroundStyle(.orange)
+                                    .lineLimit(1)
                                     .help(failure)
                             }
                         }
