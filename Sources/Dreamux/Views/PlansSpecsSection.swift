@@ -109,15 +109,29 @@ struct PlansSpecsSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            header
-            mainRow
-            if layout.plansExpanded {
-                if docStore.plans.isEmpty && docStore.unpairedSpecs.isEmpty
-                    && docStore.otherDocs.isEmpty {
-                    emptyState
-                } else {
-                    rows
+        // The reserved main worktree — and the queue riding alongside it —
+        // are project-level, not a peer of the plan run-cards below, so they
+        // sit above the FLOWS header as an always-visible anchor. A hairline
+        // divider and generous outer spacing (independent of the tighter
+        // inner spacing each block uses) mark the seam; FLOWS collapsing
+        // only ever hides plan cards, never the anchor.
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                mainRow
+                queueSection()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                header
+                if layout.plansExpanded {
+                    if docStore.plans.isEmpty && docStore.unpairedSpecs.isEmpty
+                        && docStore.otherDocs.isEmpty {
+                        emptyState
+                    } else {
+                        rows
+                    }
                 }
             }
         }
@@ -290,7 +304,6 @@ struct PlansSpecsSection: View {
         }
 
         VStack(spacing: 2) {
-            queueSection()
             ForEach(active) { initiative in
                 if initiative.plans.count > 1 {
                     multiPlanBlock(initiative, statuses: statuses)
