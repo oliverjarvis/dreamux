@@ -360,6 +360,7 @@ private struct MarkdownTabView: View {
                 FileEditorWebView(webView: session.webView)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
