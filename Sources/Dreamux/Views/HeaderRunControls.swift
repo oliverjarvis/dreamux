@@ -18,22 +18,40 @@ struct HeaderRunControls: View {
     @State private var showServices = false
     @State private var hoveredRowID: String?
 
+    /// Fixed height of the outlined control so its two segments and the
+    /// divider between them line up.
+    private static let controlHeight: CGFloat = 26
+
     var body: some View {
         let summary = runners.headerSummary(for: workspace)
-        HStack(spacing: 2) {
-            playCapsule(summary)
+        // One outlined pill: play/stop on the left, a chevron for the
+        // services popover on the right, split by a hairline divider.
+        HStack(spacing: 0) {
+            playSegment(summary)
             if summary.hasConfig {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.25))
+                    .frame(width: 1, height: 16)
                 chevronButton
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .popover(isPresented: $showServices, arrowEdge: .bottom) {
             servicesPopover
         }
     }
 
-    // MARK: - Capsule
+    // MARK: - Segments
 
-    private func playCapsule(_ summary: HeaderRunSummary) -> some View {
+    private func playSegment(_ summary: HeaderRunSummary) -> some View {
         Button {
             if !summary.hasConfig {
                 openRunPane()
@@ -67,9 +85,8 @@ struct HeaderRunControls: View {
             }
             .font(.system(size: 12))
             .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Color.primary.opacity(0.05)))
-            .contentShape(Capsule())
+            .frame(height: Self.controlHeight)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(playHelp(summary))
@@ -87,8 +104,8 @@ struct HeaderRunControls: View {
         } label: {
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.tertiary)
-                .frame(width: 18, height: 24)
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: Self.controlHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

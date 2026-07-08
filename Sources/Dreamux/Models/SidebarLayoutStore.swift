@@ -14,17 +14,18 @@ final class SidebarLayoutStore {
     var plansExpanded: Bool {
         didSet { if plansExpanded != oldValue { save() } }
     }
-    /// The Plans file list (flat, filenames only).
+    /// The Context section (Plans + Specs groups and the project's
+    /// instruction/config files).
+    var contextExpanded: Bool {
+        didSet { if contextExpanded != oldValue { save() } }
+    }
+    /// The Plans group inside Context (flat, filenames only).
     var planFilesExpanded: Bool {
         didSet { if planFilesExpanded != oldValue { save() } }
     }
-    /// The Specs file list (flat, filenames only).
+    /// The Specs group inside Context (flat, filenames only).
     var specFilesExpanded: Bool {
         didSet { if specFilesExpanded != oldValue { save() } }
-    }
-    /// The Project Files list (CLAUDE.md, run.toml, …).
-    var projectFilesExpanded: Bool {
-        didSet { if projectFilesExpanded != oldValue { save() } }
     }
     /// Auto-run parallel plans on discovery (spec: Decisions §1). Default
     /// OFF — a `**Runs:** parallel` plan lands `ready` for an explicit Run
@@ -43,9 +44,9 @@ final class SidebarLayoutStore {
         tiles = Self.reconcile(loaded?.tiles ?? SidebarTile.allCases)
         featureOrder = loaded?.features ?? []
         plansExpanded = loaded?.plansExpanded ?? true
-        planFilesExpanded = loaded?.planFilesExpanded ?? false
-        specFilesExpanded = loaded?.specFilesExpanded ?? false
-        projectFilesExpanded = loaded?.projectFilesExpanded ?? false
+        contextExpanded = loaded?.contextExpanded ?? false
+        planFilesExpanded = loaded?.planFilesExpanded ?? true
+        specFilesExpanded = loaded?.specFilesExpanded ?? true
         autoRunParallel = loaded?.autoRunParallel ?? false
     }
 
@@ -82,9 +83,9 @@ final class SidebarLayoutStore {
         var tiles: [SidebarTile]
         var features: [String]
         var plansExpanded: Bool?
+        var contextExpanded: Bool?
         var planFilesExpanded: Bool?
         var specFilesExpanded: Bool?
-        var projectFilesExpanded: Bool?
         var autoRunParallel: Bool?
     }
 
@@ -106,9 +107,9 @@ final class SidebarLayoutStore {
     private func save() {
         let payload = Payload(tiles: tiles, features: featureOrder,
                               plansExpanded: plansExpanded,
+                              contextExpanded: contextExpanded,
                               planFilesExpanded: planFilesExpanded,
                               specFilesExpanded: specFilesExpanded,
-                              projectFilesExpanded: projectFilesExpanded,
                               autoRunParallel: autoRunParallel)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

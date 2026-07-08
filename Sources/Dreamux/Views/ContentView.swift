@@ -539,33 +539,51 @@ struct ContentView: View {
                 Button {
                     showCommitTrail = true
                 } label: {
-                    HStack(spacing: 9) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                            Text(git.branch)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                            Text(git.shortSHA)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                        }
-                        if git.insertions > 0 || git.deletions > 0 {
-                            HStack(spacing: 4) {
-                                Text("+\(git.insertions)")
-                                    .foregroundStyle(.green)
-                                Text("−\(git.deletions)")
-                                    .foregroundStyle(.red)
+                    // Same outlined-pill shape as the run control: a content
+                    // segment, a hairline divider, then a down chevron for
+                    // the commit-trail popover.
+                    HStack(spacing: 0) {
+                        HStack(spacing: 9) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                Text(git.branch)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Text(git.shortSHA)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
                             }
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            if git.insertions > 0 || git.deletions > 0 {
+                                HStack(spacing: 4) {
+                                    Text("+\(git.insertions)")
+                                        .foregroundStyle(.green)
+                                    Text("−\(git.deletions)")
+                                        .foregroundStyle(.red)
+                                }
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            }
                         }
+                        .font(.system(size: 12))
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.25))
+                            .frame(width: 1, height: 16)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 26)
                     }
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
                     .background(
-                        Capsule().fill(Color.primary.opacity(0.05)))
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.primary.opacity(0.04)))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .help("Commit trail of the active worktree")

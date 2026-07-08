@@ -174,14 +174,14 @@ struct PlansSpecsSection: View {
             Button {
                 withAnimation(.snappy(duration: 0.18)) { layout.plansExpanded.toggle() }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(layout.plansExpanded ? 90 : 0))
                     Text("Flows")
-                        .font(.system(size: 12, weight: .semibold))
-                        .kerning(0.6)
+                        .font(.system(size: 13, weight: .semibold))
+                        .kerning(0.4)
                         .textCase(.uppercase)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
@@ -192,11 +192,11 @@ struct PlansSpecsSection: View {
 
             // Jump to the full Flows page — the section is a live preview.
             Button(action: onViewAllFlows) {
-                HStack(spacing: 2) {
+                HStack(spacing: 3) {
                     Text("View all")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                     Image(systemName: "arrow.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                 }
                 .foregroundStyle(.tertiary)
                 .contentShape(Rectangle())
@@ -206,8 +206,8 @@ struct PlansSpecsSection: View {
 
             Button { docStore.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 18, height: 18)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 20, height: 20)
                     .foregroundStyle(.secondary)
                     .contentShape(Rectangle())
             }
@@ -216,15 +216,15 @@ struct PlansSpecsSection: View {
 
             Button(action: onNewPlan) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 18, height: 18)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 20, height: 20)
                     .foregroundStyle(.secondary)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("New plan… (opens a planning session)")
         }
-        .padding(.bottom, 2)
+        .padding(.vertical, 2)
     }
 
     /// The permanent main-branch row — a place, not a plan: no status
@@ -235,18 +235,18 @@ struct PlansSpecsSection: View {
         Button {
             onOpenMain()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 9) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(mainWorktreeIssue == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
-                    .frame(width: 16)
+                    .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(mainBranchDisplayName)
-                        .font(.callout.weight(mainWorkspaceActive ? .semibold : .medium))
+                        .font(.system(size: 15, weight: mainWorkspaceActive ? .semibold : .medium))
                         .foregroundStyle(.primary)
                     if mainRepoNames.count > 1 {
                         Text(mainRepoNames.joined(separator: " · "))
-                            .font(.caption)
+                            .font(.system(size: 12))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
@@ -258,7 +258,7 @@ struct PlansSpecsSection: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -278,7 +278,7 @@ struct PlansSpecsSection: View {
 
     private var emptyState: some View {
         Text("No specs or plans yet. “＋” starts a planning session that writes them to this project's docs/ folder.")
-            .font(.caption2)
+            .font(.system(size: 12))
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 4)
@@ -728,7 +728,7 @@ struct PlansSpecsSection: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Text(plan.title)
-                                    .font(.callout.weight(.medium))
+                                    .font(.system(size: 15, weight: .medium))
                                     .lineLimit(1).truncationMode(.tail)
                                 liveFlowDot(for: workspace)
                                 if showUnread {
@@ -790,25 +790,25 @@ struct PlansSpecsSection: View {
     ) -> some View {
         HStack(spacing: 6) {
             Text(status.label)
-                .font(.caption2)
+                .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             if plan.totalSteps > 0 {
                 Text("· \(plan.checkedSteps)/\(plan.totalSteps)")
-                    .font(.caption2.monospacedDigit())
+                    .font(.system(size: 13).monospacedDigit())
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
             if let blockedBy {
                 Text("· blocked by \(blockedBy)")
-                    .font(.caption2)
+                    .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
             if let afterCaption {
                 Text("· \(afterCaption)")
-                    .font(.caption2)
+                    .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1).truncationMode(.tail)
             }
@@ -817,7 +817,7 @@ struct PlansSpecsSection: View {
                 // — the mark sticks so it won't retry; say so instead of an
                 // unexplained `ready`.
                 Text("· auto-run failed")
-                    .font(.caption2)
+                    .font(.system(size: 13))
                     .foregroundStyle(.orange)
                     .lineLimit(1)
                     .help(failure)

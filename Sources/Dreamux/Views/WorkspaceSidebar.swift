@@ -194,10 +194,10 @@ struct WorkspaceSidebar: View {
     // MARK: - Content
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Simple icon+label rows (Raycast/Linear style) — the Arc
-            // tile grid was outsized for two entries.
-            VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 18) {
+            // Pinned destinations — roomy, readable rows, not a cramped
+            // list.
+            VStack(spacing: 3) {
                 ForEach(layout.tiles) { tile in
                     tileRow(tile)
                 }
@@ -256,9 +256,7 @@ struct WorkspaceSidebar: View {
                 mainWorkspace: { store.workspaces.first(where: \.isMain) }
             )
 
-            planFilesSection
-            specFilesSection
-            projectFilesSection
+            contextSection
 
             switchNoticeIfAny
 
@@ -285,17 +283,17 @@ struct WorkspaceSidebar: View {
         Button {
             showAddRepo = true
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 11) {
                 Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .semibold))
-                    .frame(width: 26, height: 26)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 28, height: 28)
                 Text("Add repository")
-                    .font(.callout)
+                    .font(.system(size: 15))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -324,24 +322,59 @@ struct WorkspaceSidebar: View {
             .sorted { $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent }
     }
 
-    private var planFilesSection: some View {
-        fileListSection(title: "Plans", isExpanded: $layout.planFilesExpanded,
-                        docs: planDocs, emptyHint: "No plans yet.")
+    /// One place for everything an agent reads as context: the Plans and
+    /// Specs groups, plus the project's instruction/config files (CLAUDE.md
+    /// and friends). Collapsing all three former top-level sections under
+    /// one header keeps the sidebar from sprouting a header per doc kind.
+    private var contextSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            collapsibleHeader(title: "Context", count: nil, isExpanded: $layout.contextExpanded)
+            if layout.contextExpanded {
+                VStack(alignment: .leading, spacing: 3) {
+                    nestedFileGroup(title: "Plans", isExpanded: $layout.planFilesExpanded,
+                                    docs: planDocs, emptyHint: "No plans yet.")
+                    nestedFileGroup(title: "Specs", isExpanded: $layout.specFilesExpanded,
+                                    docs: specDocs, emptyHint: "No specs yet.")
+                    configFileRows
+                }
+                .padding(.leading, 6)
+            }
+        }
     }
 
-    private var specFilesSection: some View {
-        fileListSection(title: "Specs", isExpanded: $layout.specFilesExpanded,
-                        docs: specDocs, emptyHint: "No specs yet.")
-    }
-
-    /// A collapsible, flat list of doc files — filenames only, no `docs/`
-    /// folder level (that grouping is implied). Shared by Plans and Specs.
+    /// A light, indented sub-group inside Context (Plans / Specs) — a
+    /// smaller, lower-contrast header than the top-level section labels so
+    /// the nesting reads without shouting.
     @ViewBuilder
-    private func fileListSection(
+    private func nestedFileGroup(
         title: String, isExpanded: Binding<Bool>, docs: [PlanDoc], emptyHint: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            collapsibleHeader(title: title, count: docs.count, isExpanded: isExpanded)
+        VStack(alignment: .leading, spacing: 2) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) { isExpanded.wrappedValue.toggle() }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                        .frame(width: 14)
+                    Text(title)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.primary)
+                    if docs.count > 0 {
+                        Text("\(docs.count)")
+                            .font(.system(size: 12).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 4)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
             if isExpanded.wrappedValue {
                 if docs.isEmpty {
                     listHint(emptyHint)
@@ -354,30 +387,50 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// A shared uppercase section header with a chevron and optional count.
+    /// The project's instruction/config files, listed directly under
+    /// Context (no separate section). `.mcp.json` is intentionally omitted.
+    @ViewBuilder
+    private var configFileRows: some View {
+        let files = projectConfigFiles
+        let hasClaude = files.contains { $0.lastPathComponent == "CLAUDE.md" }
+        // Config files are siblings of the Plans/Specs groups, so their glyph
+        // aligns with the group chevrons (inset 4, 14-wide column) rather
+        // than indenting like a file nested inside a group.
+        ForEach(files, id: \.self) { url in
+            fileRow(url: url, symbol: configSymbol(for: url.lastPathComponent),
+                    leadingInset: 4, iconWidth: 14)
+        }
+        // CLAUDE.md is the one people reach for most — offer to create it
+        // inline when it's missing.
+        if !hasClaude { createClaudeRow }
+    }
+
+    /// A shared uppercase top-level section header with a chevron and
+    /// optional count.
     private func collapsibleHeader(
         title: String, count: Int?, isExpanded: Binding<Bool>
     ) -> some View {
         Button {
             withAnimation(.snappy(duration: 0.18)) { isExpanded.wrappedValue.toggle() }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .kerning(0.6)
+                    .font(.system(size: 13, weight: .semibold))
+                    .kerning(0.4)
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
                 if let count, count > 0 {
                     Text("\(count)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -385,10 +438,10 @@ struct WorkspaceSidebar: View {
 
     private func listHint(_ text: String) -> some View {
         Text(text)
-            .font(.caption2)
+            .font(.system(size: 12))
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 3)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 4)
     }
 
     private func docFileRow(_ doc: PlanDoc) -> some View {
@@ -398,22 +451,28 @@ struct WorkspaceSidebar: View {
     }
 
     /// One openable file row (filename + type glyph), hover-highlighted.
-    private func fileRow(url: URL, symbol: String) -> some View {
+    /// `leadingInset`/`iconWidth` let a caller align the glyph column: files
+    /// nested under a Plans/Specs group indent past it (default), while the
+    /// config files sit at the group level, their glyph aligned with the
+    /// group chevrons.
+    private func fileRow(
+        url: URL, symbol: String, leadingInset: CGFloat = 14, iconWidth: CGFloat = 18
+    ) -> some View {
         Button { onOpenDoc(url) } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 9) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 16)
-                Text(url.lastPathComponent)
-                    .font(.callout)
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
+                    .frame(width: iconWidth)
+                Text(url.lastPathComponent)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.primary)
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 12)
+            .padding(.leading, leadingInset)
             .padding(.trailing, 10)
-            .padding(.vertical, 5)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -444,7 +503,7 @@ struct WorkspaceSidebar: View {
     /// Known project-root config/instruction files, in a stable order,
     /// filtered to the ones that actually exist.
     private static let configFileNames = [
-        "CLAUDE.md", "AGENTS.md", "GEMINI.md", "run.toml", ".mcp.json", "README.md",
+        "CLAUDE.md", "AGENTS.md", "GEMINI.md", "run.toml", "README.md",
     ]
 
     private var projectConfigFiles: [URL] {
@@ -460,45 +519,25 @@ struct WorkspaceSidebar: View {
         switch name {
         case "CLAUDE.md", "AGENTS.md", "GEMINI.md": return "sparkles"
         case "run.toml": return "gearshape"
-        case ".mcp.json": return "puzzlepiece.extension"
         default: return "doc.richtext"
-        }
-    }
-
-    private var projectFilesSection: some View {
-        let files = projectConfigFiles
-        let hasClaude = files.contains { $0.lastPathComponent == "CLAUDE.md" }
-        return VStack(alignment: .leading, spacing: 4) {
-            collapsibleHeader(title: "Project Files", count: files.count,
-                              isExpanded: $layout.projectFilesExpanded)
-            if layout.projectFilesExpanded {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(files, id: \.self) { url in
-                        fileRow(url: url, symbol: configSymbol(for: url.lastPathComponent))
-                    }
-                    // CLAUDE.md is the one people reach for most — offer to
-                    // create it inline when it's missing.
-                    if !hasClaude { createClaudeRow }
-                }
-            }
         }
     }
 
     private var createClaudeRow: some View {
         Button(action: createAndOpenClaudeMd) {
-            HStack(spacing: 7) {
+            HStack(spacing: 9) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 16)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
                 Text("New CLAUDE.md")
-                    .font(.callout)
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 12)
+            .padding(.leading, 4)
             .padding(.trailing, 10)
-            .padding(.vertical, 5)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -531,13 +570,13 @@ struct WorkspaceSidebar: View {
         return Button {
             handleTileTap(tile)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 11) {
                 Image(systemName: tile.symbol)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(selected ? Color.accentColor : Color.primary)
-                    .frame(width: 20)
+                    .frame(width: 22)
                 Text(tile.label)
-                    .font(.callout)
+                    .font(.system(size: 15))
                     .foregroundStyle(.primary)
                 if tile == .flows {
                     let agg = flowsBoardAggregates
@@ -551,7 +590,7 @@ struct WorkspaceSidebar: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -832,8 +871,8 @@ struct WorkspaceSidebar: View {
     private var repositoriesHeader: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text("Repositories")
-                .font(.system(size: 12, weight: .semibold))
-                .kerning(0.6)
+                .font(.system(size: 13, weight: .semibold))
+                .kerning(0.4)
                 .textCase(.uppercase)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
@@ -844,7 +883,7 @@ struct WorkspaceSidebar: View {
                     .help("Working…")
             }
         }
-        .padding(.bottom, 2)
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder
@@ -1316,30 +1355,30 @@ private struct RepoRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 11) {
             ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(Color.secondary.opacity(isHovered ? 0.18 : 0.12))
                 Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .frame(width: 26, height: 26)
+            .frame(width: 30, height: 30)
 
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(repository.name)
-                    .font(.callout.weight(.medium))
+                    .font(.system(size: 15, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(repository.defaultBranch)
-                    .font(.system(.caption2, design: .monospaced))
+                    .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             if isHovered {
