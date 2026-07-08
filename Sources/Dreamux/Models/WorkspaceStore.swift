@@ -72,6 +72,16 @@ final class WorkspaceStore {
         sessions[workspace.id]?.lastActivityMessage
     }
 
+    /// Whether this workspace has a live plan-execution agent — i.e. its
+    /// tracked agent terminal tab is open (a plan run opened it via
+    /// `openPlanAgentTab`; it clears when the tab closes). Non-creating:
+    /// a workspace with no session yet has no agent. This is the app's own
+    /// durable "the plan is being worked" signal, independent of the
+    /// transient flow-event/registry liveness the Flows lanes derive.
+    func hasLivePlanAgent(for workspaceID: UUID) -> Bool {
+        sessions[workspaceID]?.agentTabSession() != nil
+    }
+
     /// Tap the workspace row. Switches to it if not already active;
     /// otherwise dismisses any pending unread badge / activity message
     /// so a click on the currently-visible workspace functions as an

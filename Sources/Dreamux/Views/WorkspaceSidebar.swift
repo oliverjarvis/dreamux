@@ -11,6 +11,9 @@ struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
     @Bindable var runners: RunnerManager
+    /// Only to focus a runner's logs from the run-control popover
+    /// (`showLogs`) — sets `pendingSourceFocus` and flips to Signals.
+    let signals: SignalStore
     @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
     @Bindable var docStore: DocStore
@@ -240,6 +243,7 @@ struct WorkspaceSidebar: View {
                 workspaceForFeature: { name in
                     store.featureWorkspace(named: name)
                 },
+                hasLivePlanAgent: { store.hasLivePlanAgent(for: $0.id) },
                 makeRunControls: { runControls(for: $0) },
                 gateMergeWorkspaceID: $gateMergeWorkspaceID,
                 gateCloseWorkspaceID: $gateCloseWorkspaceID,
@@ -771,14 +775,17 @@ struct WorkspaceSidebar: View {
     /// The trailing run-control cluster for a workspace, wired to this view's
     /// actions. Shared with `PlansSpecsSection` (passed as `makeRunControls`)
     /// so plan rows drive runners exactly like feature rows do.
-    private func runControls(for workspace: Workspace) -> WorkspaceRunControls {
-        WorkspaceRunControls(
+    private func runControls(for workspace: Workspace) -> HeaderRunControls {
+        HeaderRunControls(
             workspace: workspace,
             runners: runners,
-            openServices: { openServices(for: workspace, runnerName: $0) },
             start: { startRunnersForWorkspace(workspace) },
             stop: { stopAllRunning(on: workspace) },
-            configure: { configure(workspace) }
+            openRunPane: { configure(workspace) },
+            showLogs: { runnerName in
+                signals.pendingSourceFocus = runnerName
+                sidebarMode = .signals
+            }
         )
     }
 

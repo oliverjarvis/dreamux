@@ -42,6 +42,11 @@ struct ContentView: View {
     /// `NewPlanSheet` `WorkspaceSidebar`'s `+` opens, independent local
     /// state like `showCreateProject`/`ProjectsRail.showCreate`.
     @State private var showNewPlan = false
+    /// Run-the-plan sheet fired from a workspace's Overview (Mode A's lime
+    /// pill) — the window-level twin of `WorkspaceSidebar`'s own
+    /// `runningPlan`, so the Overview can start/resume a plan the same way
+    /// the rail card does.
+    @State private var overviewRunningPlan: PlanDoc?
     /// Feedback for a failed Overview checklist action (view-changes with
     /// no commits found, etc.) — this view's own copy of
     /// `WorkspaceSidebar`'s `addError`, since the Overview tab is hosted
@@ -139,6 +144,7 @@ struct ContentView: View {
                         store: store,
                         repoStore: repoStore,
                         runners: runners,
+                        signals: signals,
                         layout: layout,
                         sidebarMode: $sidebarMode,
                         docStore: docStore,
@@ -243,6 +249,24 @@ struct ContentView: View {
                     }
                 },
                 onCancel: { showNewPlan = false }
+            )
+        }
+        .sheet(item: $overviewRunningPlan) { plan in
+            // Mirrors WorkspaceSidebar's own run-plan sheet, lifted to the
+            // window so the Overview's lime pill starts/resumes a plan the
+            // same way the rail card does.
+            let record = docStore.ledger.recordForPlan(docStore.relativePath(of: plan))
+            RunPlanSheet(
+                plan: plan,
+                initialBranch: record?.featureName
+                    ?? PlanDoc.branchName(forFileName: plan.fileURL.lastPathComponent),
+                availableRepos: repoStore.repositories,
+                isResume: record != nil,
+                onSubmit: { branch, repoIDs in
+                    overviewRunningPlan = nil
+                    runPlanFromOverview(plan, branch: branch, repoIDs: repoIDs)
+                },
+                onCancel: { overviewRunningPlan = nil }
             )
         }
         .alert(
@@ -761,6 +785,8 @@ struct ContentView: View {
             onOpenDoc: openFile,
             onOpenDocAtLine: { openFile($0, atLine: $1) },
             makeRunControls: { overviewRunControls(for: $0) },
+            onRunPlan: { plan in overviewRunningPlan = plan },
+            hasLiveAgent: { ws in store.hasLivePlanAgent(for: ws.id) },
             gateActions: flowGateActions,
             onNewPlan: { showNewPlan = true },
             onOpenRun: { plan in openRunFromOverview(plan) },
@@ -786,6 +812,23 @@ struct ContentView: View {
             store.session(for: workspace).focusOverview()
         } else {
             openFile(plan.fileURL)
+        }
+    }
+
+    /// Run/resume a plan from its Overview — the window-level twin of
+    /// `WorkspaceSidebar.executePlan`, driving the same `PlanRunCoordinator`
+    /// and then focusing the (materialized) run's Overview.
+    private func runPlanFromOverview(_ plan: PlanDoc, branch: String, repoIDs: [String]) {
+        Task {
+            do {
+                let workspace = try await planRunner.runPlan(
+                    plan, branchName: branch, repoNames: repoIDs)
+                sidebarMode = .workspace
+                store.activate(workspace.id)
+                store.session(for: workspace).focusOverview()
+            } catch {
+                overviewTaskChangesError = error.localizedDescription
+            }
         }
     }
 
@@ -848,23 +891,22 @@ struct ContentView: View {
         }
     }
 
-    /// The Overview's action-row run controls — the same shape
-    /// `WorkspaceSidebar.runControls(for:)` builds for the rail, minus the
-    /// switch-notice banner (the header's run cluster skips it too).
-    private func overviewRunControls(for workspace: Workspace) -> WorkspaceRunControls {
-        WorkspaceRunControls(
+    /// The Overview's action-row run controls — the same `HeaderRunControls`
+    /// pill the context header uses (play/stop + services chevron popover),
+    /// so the run.toml services control reads identically everywhere.
+    private func overviewRunControls(for workspace: Workspace) -> HeaderRunControls {
+        HeaderRunControls(
             workspace: workspace,
             runners: runners,
-            openServices: { runnerName in
-                let openable = runners.openableRunners(for: workspace)
-                let targets = runnerName == nil ? openable : openable.filter { $0.name == runnerName }
-                for runner in targets { runners.openNow(runner, on: workspace.name) }
-            },
             start: { startHeaderRunners(for: workspace) },
             stop: { stopHeaderRunners(for: workspace) },
-            configure: {
+            openRunPane: {
                 store.activate(workspace.id)
                 sidebarMode = .run(workspaceID: workspace.id)
+            },
+            showLogs: { runnerName in
+                signals.pendingSourceFocus = runnerName
+                sidebarMode = .signals
             }
         )
     }

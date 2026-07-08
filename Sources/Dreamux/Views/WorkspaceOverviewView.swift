@@ -18,7 +18,16 @@ struct WorkspaceOverviewDependencies {
     let featureExists: (String) -> Bool
     let onOpenDoc: (URL) -> Void
     let onOpenDocAtLine: (URL, Int) -> Void
-    let makeRunControls: (Workspace) -> WorkspaceRunControls
+    let makeRunControls: (Workspace) -> HeaderRunControls
+    /// Run *the plan* (start/resume the claude agent) — the lime pill,
+    /// distinct from `makeRunControls`' run.toml services. Presents the same
+    /// RunPlanSheet the rail's Run pill does, lifted to the window.
+    let onRunPlan: (PlanDoc) -> Void
+    /// Whether a claude agent is actually live (busy/waiting) on this
+    /// workspace — the same busy/waiting-lane signal the rail card uses to
+    /// decide whether "Run the plan" applies (a `.running` *status* alone
+    /// only means the plan was started).
+    let hasLiveAgent: (Workspace) -> Bool
     let gateActions: FlowGateActions
     /// Mode B's "Plan something here" — the same New Plan sheet the rail's
     /// `+` opens (`WorkspaceSidebar`'s `showNewPlan`), triggered a second
@@ -77,7 +86,12 @@ struct WorkspaceOverviewView: View {
     /// Builds the shared run-control cluster for a workspace (start/stop
     /// services, open, Run Settings) — the same closure the rail's plan
     /// rows and feature rows use.
-    let makeRunControls: (Workspace) -> WorkspaceRunControls
+    let makeRunControls: (Workspace) -> HeaderRunControls
+    /// See `WorkspaceOverviewDependencies.onRunPlan` — the lime "Run the
+    /// plan" pill, distinct from the services control above.
+    let onRunPlan: (PlanDoc) -> Void
+    /// See `WorkspaceOverviewDependencies.hasLiveAgent`.
+    let hasLiveAgent: (Workspace) -> Bool
     /// Gate review/merge wiring, shared verbatim with the Flows page's
     /// gate cards (`ContentView.flowGateActions`) so a merge here and a
     /// merge from Flows can't drift.
@@ -441,7 +455,20 @@ struct WorkspaceOverviewView: View {
     // MARK: - Actions
 
     private func actionsRow(_ plan: PlanDoc) -> some View {
-        HStack(spacing: 12) {
+        // Lime pill runs the *plan* (start/resume the agent); shown while the
+        // plan is incomplete AND no agent is live on it (a `.running` status
+        // alone just means it was started). `makeRunControls` is the
+        // separate run.toml services control.
+        let status = docStore.status(for: plan, featureExists: featureExists)
+        let incomplete = status == .ready || status == .inProgress || status == .running
+        let live = hasLiveAgent(session.workspace)
+        let canRun = incomplete && !live
+        return HStack(spacing: 12) {
+            if canRun {
+                RunPlanButton { onRunPlan(plan) }
+            } else if incomplete && live {
+                RunningIndicator()
+            }
             makeRunControls(session.workspace)
             Button(action: openOrFocusTerminal) {
                 Label("Open terminal", systemImage: "terminal")

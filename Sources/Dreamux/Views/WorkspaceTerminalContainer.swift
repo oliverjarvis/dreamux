@@ -97,6 +97,8 @@ private struct TabContentView: View {
                 onOpenDoc: overview.onOpenDoc,
                 onOpenDocAtLine: overview.onOpenDocAtLine,
                 makeRunControls: overview.makeRunControls,
+                onRunPlan: overview.onRunPlan,
+                hasLiveAgent: overview.hasLiveAgent,
                 gateActions: overview.gateActions,
                 onNewPlan: overview.onNewPlan,
                 onOpenRun: overview.onOpenRun,

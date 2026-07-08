@@ -39,9 +39,12 @@ struct PlansSpecsSection: View {
     /// The live workspace backing a feature name, or nil when it isn't in the
     /// sidebar — resolves the row's target for `makeRunControls`.
     let workspaceForFeature: (String) -> Workspace?
+    /// Whether a workspace has a live plan-execution agent (its tracked agent
+    /// terminal tab is open) — gates whether "Run plan" is offered.
+    let hasLivePlanAgent: (Workspace) -> Bool
     /// Builds the shared run-control cluster for a workspace, wired to the
     /// sidebar's runner actions (see `WorkspaceSidebar.runControls(for:)`).
-    let makeRunControls: (Workspace) -> WorkspaceRunControls
+    let makeRunControls: (Workspace) -> HeaderRunControls
     /// Merge/Close pending channels — the plan-row context menu parks the
     /// target workspace id here; `WorkspaceSidebar` owns the merge sheet and
     /// close confirm-alert and consumes these exactly like the gate-merge
@@ -75,7 +78,6 @@ struct PlansSpecsSection: View {
     /// `makeRunControls`.
     let mainWorkspace: () -> Workspace?
 
-    @State private var doneExpanded = false
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
     @State private var hoveredChipURL: URL?
@@ -287,13 +289,6 @@ struct PlansSpecsSection: View {
             .filter { hasActivePlan($0, statuses) }
             .sorted { initiativeRank($0, statuses) < initiativeRank($1, statuses) }
         let needsPlan = docStore.initiatives.filter(\.needsPlan)
-        // Merged plans fold into the shared Done disclosure — except the
-        // merged phases of an active multi-plan family, which render as
-        // children under their grouping row instead of being double-listed.
-        let claimed = familyMemberURLs(active)
-        let done = docStore.plans.filter {
-            statuses[$0.fileURL] == .merged && !claimed.contains($0.fileURL)
-        }
 
         VStack(spacing: 2) {
             ForEach(active) { initiative in
@@ -316,25 +311,14 @@ struct PlansSpecsSection: View {
                     }
                 }
             }
-            if !done.isEmpty {
-                disclosure("Done (\(done.count))", isExpanded: $doneExpanded) {
-                    ForEach(done) { plan in
-                        planRow(plan, status: .merged, ordinal: nil, blockedBy: nil)
-                    }
-                }
-            }
+            // Merged plans are intentionally NOT listed here — a done run is
+            // archived to the Flows page, not kept in the Workspaces rail.
             if !docStore.looseDocs.isEmpty {
                 disclosure("Docs (\(docStore.looseDocs.count))", isExpanded: $docsExpanded) {
                     ForEach(docStore.looseDocs) { doc in plainDocRow(doc) }
                 }
             }
         }
-    }
-
-    /// File URLs of every plan owned by an active multi-plan family — the
-    /// rows the grouping level renders itself, kept out of the flat Done list.
-    private func familyMemberURLs(_ active: [Initiative]) -> Set<URL> {
-        Set(active.filter { $0.plans.count > 1 }.flatMap { $0.plans.map(\.fileURL) })
     }
 
     private func planStatuses() -> [URL: PlanStatus] {
@@ -681,8 +665,21 @@ struct PlansSpecsSection: View {
             let target = docStore.resolvedURL(forReference: reference)
             return docStore.docs.first { $0.fileURL.standardizedFileURL == target }?.title
         }
-        let canRun = status == .ready || status == .inProgress
-        let hasActions = openableFeature != nil || workspace != nil || canRun
+        // "Run the plan" is offered whenever the plan is incomplete AND no
+        // agent is actually working it. Liveness is the app's own durable
+        // signal — the tracked plan-agent terminal tab (`hasLivePlanAgent`) —
+        // NOT the `.running` *status* (which only means the worktree exists)
+        // nor the transient flow-event lane (lost on relaunch, oscillates
+        // when the agent idles between turns). So a plan stuck at `.running`
+        // with no agent tab can be re-run, and the button hides once a run
+        // opens the agent.
+        let hasLiveAgent = workspace.map(hasLivePlanAgent) ?? false
+        let incomplete = status == .ready || status == .inProgress || status == .running
+        let canRun = incomplete && !hasLiveAgent
+        // Incomplete + a live agent = actively worked → show the running
+        // spinner in the "Run plan" slot instead of the button.
+        let isRunning = incomplete && hasLiveAgent
+        let hasActions = workspace != nil || canRun
         let isHovered = hoveredDocURL == plan.fileURL
 
         return VStack(alignment: .leading, spacing: 7) {
@@ -716,16 +713,14 @@ struct PlansSpecsSection: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        planMetaLine(plan, status: status, blockedBy: blockedBy,
+                        planMetaLine(plan, blockedBy: blockedBy,
                                      afterCaption: afterCaption)
                         if plan.totalSteps > 0 {
-                            ProgressView(value: Double(plan.checkedSteps),
-                                         total: Double(plan.totalSteps))
-                                .controlSize(.mini)
-                                .frame(maxWidth: .infinity)
+                            planProgressBar(checked: plan.checkedSteps,
+                                            total: plan.totalSteps)
                         }
                         if let current = PlanCurrentStep.label(for: plan) {
-                            Text("current: \(current)")
+                            Text("Current: \(current)")
                                 .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1).truncationMode(.tail)
@@ -741,8 +736,7 @@ struct PlansSpecsSection: View {
             }
 
             if hasActions {
-                planActionRow(plan, canRun: canRun,
-                              openableFeature: openableFeature, workspace: workspace)
+                planActionRow(plan, canRun: canRun, isRunning: isRunning, workspace: workspace)
             }
         }
         .padding(.horizontal, 10)
@@ -761,47 +755,59 @@ struct PlansSpecsSection: View {
         }
     }
 
-    /// The status word, step count, and any blocked/after/auto-run
-    /// annotations — everything on one line, nothing allowed to wrap.
+    /// Exceptional annotations only — blocked/after/auto-run-failed. The
+    /// status word moved to the leading glyph and the step count to the
+    /// progress bar, so this line renders nothing for an ordinary plan.
     @ViewBuilder
     private func planMetaLine(
-        _ plan: PlanDoc, status: PlanStatus, blockedBy: Int?, afterCaption: String?
+        _ plan: PlanDoc, blockedBy: Int?, afterCaption: String?
     ) -> some View {
-        HStack(spacing: 6) {
-            Text(status.label)
-                .font(.system(size: 13))
+        let failure = autoRunFailure(docStore.relativePath(of: plan))
+        if blockedBy != nil || afterCaption != nil || failure != nil {
+            HStack(spacing: 6) {
+                if let blockedBy {
+                    Text("blocked by \(blockedBy)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if let afterCaption {
+                    Text(afterCaption)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+                if let failure {
+                    // An unattended launch failed (name collision, no repos,
+                    // …) — the mark sticks so it won't retry; say so.
+                    Text("auto-run failed")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                        .help(failure)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// The compact card's progress: a taller capsule bar with the checked/
+    /// total count riding on its trailing edge.
+    private func planProgressBar(checked: Int, total: Int) -> some View {
+        let fraction = total > 0 ? Double(checked) / Double(total) : 0
+        return HStack(spacing: 9) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.12))
+                    Capsule().fill(Color.accentColor)
+                        .frame(width: max(0, geo.size.width * fraction))
+                }
+            }
+            .frame(height: 6)
+            Text("\(checked)/\(total)")
+                .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-            if plan.totalSteps > 0 {
-                Text("· \(plan.checkedSteps)/\(plan.totalSteps)")
-                    .font(.system(size: 13).monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            if let blockedBy {
-                Text("· blocked by \(blockedBy)")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            if let afterCaption {
-                Text("· \(afterCaption)")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1).truncationMode(.tail)
-            }
-            if let failure = autoRunFailure(docStore.relativePath(of: plan)) {
-                // An unattended launch failed (name collision, no repos, …)
-                // — the mark sticks so it won't retry; say so instead of an
-                // unexplained `ready`.
-                Text("· auto-run failed")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.orange)
-                    .lineLimit(1)
-                    .help(failure)
-            }
-            Spacer(minLength: 0)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 
@@ -810,40 +816,28 @@ struct PlansSpecsSection: View {
     /// it's runnable but not yet provisioned. Right-aligned.
     @ViewBuilder
     private func planActionRow(
-        _ plan: PlanDoc, canRun: Bool, openableFeature: String?, workspace: Workspace?
+        _ plan: PlanDoc, canRun: Bool, isRunning: Bool, workspace: Workspace?
     ) -> some View {
-        HStack(spacing: 12) {
-            Spacer(minLength: 0)
-            if let feature = openableFeature {
-                Button { onOpenFeature(feature) } label: {
-                    Label("Open", systemImage: "arrow.right.circle")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Open \(feature)'s workspace")
+        // The lime pill *runs the plan* (starts the claude agent), shown when
+        // startable; once an agent is live it becomes a running spinner in
+        // the same slot. `makeRunControls` is the separate run.toml
+        // *services* control, shown once the workspace is materialized.
+        HStack(spacing: 10) {
+            if canRun {
+                RunPlanButton { onRunPlan(plan) }
+            } else if isRunning {
+                RunningIndicator()
             }
+            Spacer(minLength: 0)
             if let workspace {
                 makeRunControls(workspace)
-            } else if canRun {
-                Button { onRunPlan(plan) } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "play.fill")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 18, height: 18)
-                            .background(Circle().fill(Color.accentColor))
-                        Text("Run")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Run this plan (provisions a worktree and starts claude)")
             }
         }
+        // Align the row's leading edge with the title/progress column
+        // (past the status glyph's 18pt frame + the row's 8pt spacing), so
+        // "Run plan" lines up under the content instead of hanging out at
+        // the card's edge.
+        .padding(.leading, 26)
     }
 
     /// The plan card's context menu — the run/queue actions a runnable plan

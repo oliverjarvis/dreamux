@@ -6,7 +6,9 @@ import SwiftUI
 /// RunnerHeaderState.swift); actions that navigate — starting the scope
 /// (which may need the Run pane), editing run config, jumping to
 /// Signals — are injected because they drive `sidebarMode`, which the
-/// owning view controls. Mirrors `WorkspaceRunControls`' split.
+/// owning view controls. Shared across the context header, the Workspaces
+/// rail cards, the main row, and the workspace Overview, so the run.toml
+/// services control reads identically everywhere.
 struct HeaderRunControls: View {
     let workspace: Workspace
     let runners: RunnerManager
