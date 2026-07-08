@@ -778,43 +778,17 @@ struct ContentView: View {
         )
     }
 
-    /// Mode B's "Plan something here" kickoff — the same planning-session
-    /// bootstrap `WorkspaceSidebar.openPlanningSession(buildPrompt:)` runs
-    /// for the rail's `+`, duplicated here (not shared) since that method
-    /// is private to the sidebar view and everything it touches (`store`,
-    /// `repoStore`, `docStore`, `sidebarMode`) is already available on
-    /// `ContentView` too.
+    /// Mode B's "Plan something here" kickoff — the same shared
+    /// `PlanningSessionLauncher` the rail's `+` uses, so the two entry
+    /// points can't drift.
     private func openOverviewPlanningSession(buildPrompt: @escaping (String?) -> String) {
-        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
-        store.activate(workspace.id)
-        sidebarMode = .workspace
-        let session = store.session(for: workspace)
-        DocStore.ensureDocsHome(at: repoStore.project.rootPath)
-        docStore.refresh()
-        MCPInstaller.installIfNeeded(at: repoStore.project.rootPath.path)
-        guard let tab = session.reuseOrOpenPlanningTab(
-            at: repoStore.project.rootPath.path) else { return }
-        tab.startIfNeeded()
-        Task {
-            let prompt = buildPrompt(await overviewIntakeDigest())
-            ClaudePromptDriver.send(prompt, into: tab)
-        }
-    }
-
-    /// Mirrors `WorkspaceSidebar.intakeDigest()` — same reasoning as
-    /// `openOverviewPlanningSession` above.
-    private func overviewIntakeDigest() async -> String? {
-        let featureExists: (String) -> Bool = { name in
-            store.featureNames.contains(name)
-        }
-        guard docStore.plans.contains(where: {
-            docStore.status(for: $0, featureExists: featureExists) != .merged
-        }) else { return nil }
-        return await IntakeDigest.build(
+        PlanningSessionLauncher.open(
+            store: store,
+            repoStore: repoStore,
             docStore: docStore,
-            repos: repoStore.repositories,
-            queue: planQueue.entries,
-            featureExists: featureExists)
+            planQueue: planQueue,
+            sidebarMode: $sidebarMode,
+            buildPrompt: buildPrompt)
     }
 
     /// The spec's front door: when this lane IS the queue's current
