@@ -80,7 +80,9 @@ private struct TabContentView: View {
     let paneId: PaneID
 
     var body: some View {
-        if let tabSession = session.tabSession(for: tabId) {
+        if session.isOverviewTab(tabId) {
+            WorkspaceOverviewView(session: session)
+        } else if let tabSession = session.tabSession(for: tabId) {
             // Read inside `body` (not cached in `onAppear`/`onChange`) so
             // this view depends on `PaneState.selectedTabId` -- the same
             // `@Observable` property `TabBarView` reads -- and re-renders
