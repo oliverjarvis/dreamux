@@ -299,8 +299,13 @@ final class WorkspaceSession {
             }
             // Bonsplit's select doesn't touch AppKit's responder chain —
             // wire focus to the new tab's terminal so keystrokes land
-            // without the user having to click in.
-            TerminalFocus.focusVisibleTerminal()
+            // without the user having to click in. Only for terminal-backed
+            // tabs: the Overview (or any other non-terminal tab) has no
+            // Ghostty surface to focus, and grabbing one anyway steals focus
+            // from whatever terminal was last active elsewhere.
+            if tabSession(for: tab.id) != nil {
+                TerminalFocus.focusVisibleTerminal()
+            }
         }
     }
 

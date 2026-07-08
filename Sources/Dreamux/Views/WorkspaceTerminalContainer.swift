@@ -11,6 +11,10 @@ import WebKit
 /// active workspace is visible and accepts input.
 struct WorkspaceTerminalContainer: View {
     @Bindable var store: WorkspaceStore
+    /// The Overview's Mode A dependencies (Group 2) — threaded down to
+    /// whichever workspace's Overview tab renders. See
+    /// `WorkspaceOverviewView` for what each closure/store does.
+    let overview: WorkspaceOverviewDependencies
 
     var body: some View {
         ZStack {
@@ -18,7 +22,7 @@ struct WorkspaceTerminalContainer: View {
                 noWorkspacesState
             }
             ForEach(store.workspaces) { workspace in
-                WorkspaceBonsplitPane(session: store.session(for: workspace))
+                WorkspaceBonsplitPane(session: store.session(for: workspace), overview: overview)
                     .opacity(workspace.id == store.activeID ? 1 : 0)
                     .allowsHitTesting(workspace.id == store.activeID)
                     // Force the active workspace to the top of the ZStack
@@ -57,10 +61,11 @@ struct WorkspaceTerminalContainer: View {
 
 private struct WorkspaceBonsplitPane: View {
     @Bindable var session: WorkspaceSession
+    let overview: WorkspaceOverviewDependencies
 
     var body: some View {
         BonsplitView(controller: session.controller) { tab, paneId in
-            TabContentView(session: session, tabId: tab.id, paneId: paneId)
+            TabContentView(session: session, tabId: tab.id, paneId: paneId, overview: overview)
         } emptyPane: { paneId in
             EmptyPaneView {
                 session.controller.createTab(
@@ -78,10 +83,21 @@ private struct TabContentView: View {
     let session: WorkspaceSession
     let tabId: TabID
     let paneId: PaneID
+    let overview: WorkspaceOverviewDependencies
 
     var body: some View {
         if session.isOverviewTab(tabId) {
-            WorkspaceOverviewView(session: session)
+            WorkspaceOverviewView(
+                session: session,
+                docStore: overview.docStore,
+                planQueue: overview.planQueue,
+                repoStore: overview.repoStore,
+                featureName: overview.featureName,
+                onOpenDoc: overview.onOpenDoc,
+                onOpenDocAtLine: overview.onOpenDocAtLine,
+                makeRunControls: overview.makeRunControls,
+                gateActions: overview.gateActions
+            )
         } else if let tabSession = session.tabSession(for: tabId) {
             // Read inside `body` (not cached in `onAppear`/`onChange`) so
             // this view depends on `PaneState.selectedTabId` -- the same

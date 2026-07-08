@@ -301,7 +301,7 @@ struct ContentView: View {
     private var mainPane: some View {
         switch sidebarMode {
         case .workspace:
-            WorkspaceTerminalContainer(store: store)
+            WorkspaceTerminalContainer(store: store, overview: overviewDependencies)
         case .run(let workspaceID):
             RunSetupView(
                 project: repoStore.project,
@@ -705,6 +705,55 @@ struct ContentView: View {
             openDiff: { workspaceID in openGateDiff(workspaceID: workspaceID) },
             requestMerge: { workspaceID in requestGateMerge(workspaceID: workspaceID) },
             fetchDiffStat: { workspaceID in await gateDiffStat(workspaceID: workspaceID) }
+        )
+    }
+
+    // MARK: - Overview (Mode A)
+
+    /// Everything the active project's workspaces' Overview tabs need,
+    /// bundled once per render — see `WorkspaceOverviewDependencies`.
+    /// `gateActions` reuses `flowGateActions` verbatim so a merge from the
+    /// Overview and a merge from the Flows page can't drift.
+    private var overviewDependencies: WorkspaceOverviewDependencies {
+        WorkspaceOverviewDependencies(
+            docStore: docStore,
+            planQueue: planQueue,
+            repoStore: repoStore,
+            featureName: { (plan: PlanDoc) -> String? in planFeatureName(for: plan) },
+            onOpenDoc: openFile,
+            onOpenDocAtLine: { openFile($0, atLine: $1) },
+            makeRunControls: { overviewRunControls(for: $0) },
+            gateActions: flowGateActions
+        )
+    }
+
+    /// The feature a plan runs as (ledger record first, else filename-
+    /// derived branch) — same resolver `WorkspaceSidebar.featureName(for:)`
+    /// uses, rebuilt here since that one is private to the sidebar view.
+    private func planFeatureName(for plan: PlanDoc) -> String {
+        AdHocWorkspaces.featureName(
+            for: plan,
+            record: { docStore.ledger.recordForPlan(docStore.relativePath(of: $0)) })
+    }
+
+    /// The Overview's action-row run controls — the same shape
+    /// `WorkspaceSidebar.runControls(for:)` builds for the rail, minus the
+    /// switch-notice banner (the header's run cluster skips it too).
+    private func overviewRunControls(for workspace: Workspace) -> WorkspaceRunControls {
+        WorkspaceRunControls(
+            workspace: workspace,
+            runners: runners,
+            openServices: { runnerName in
+                let openable = runners.openableRunners(for: workspace)
+                let targets = runnerName == nil ? openable : openable.filter { $0.name == runnerName }
+                for runner in targets { runners.openNow(runner, on: workspace.name) }
+            },
+            start: { startHeaderRunners(for: workspace) },
+            stop: { stopHeaderRunners(for: workspace) },
+            configure: {
+                store.activate(workspace.id)
+                sidebarMode = .run(workspaceID: workspace.id)
+            }
         )
     }
 
