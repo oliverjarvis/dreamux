@@ -114,7 +114,9 @@ Snapshot of everything a scenario typically asserts on.
     "activeProject": {"id":"4B5C…","name":"demo","path":"…/demo"},
     "workspaces": [
       {"name":"feature-x","linkedRepoIDs":["webapp"],"isActive":true,
-       "webTabs":["http://localhost:4600/"]}
+       "webTabs":["http://localhost:4600/"],
+       "tabs":[{"title":"Overview","isOverview":true},
+               {"title":"shell","isOverview":false}]}
     ],
     "runners": [
       {
@@ -157,6 +159,15 @@ Field notes:
   or JSON `null` when no project window is registered.
 - `workspaces[].isActive` — the workspace currently selected in the
   sidebar.
+- `workspaces[].tabs` — the workspace's Bonsplit tab bar, in tab-bar
+  order: `{"title", "isOverview"}` per tab. Every workspace bootstraps
+  with its pinned, non-dismissable **Overview** tab created first
+  (`title: "Overview"`, `isOverview: true`) — this is how a scenario
+  confirms it exists and sits leftmost without a screenshot. Bootstrap
+  runs off a SwiftUI `onAppear` the moment the workspace's pane mounts
+  (which needs `sidebarMode` to be `"workspace"`), so a workspace
+  created moments ago may briefly report `tabs: []`; poll `state`
+  rather than assuming it's already there.
 - `runners` mirrors the parsed `run.toml`. `cwd`, `port`, `portEnv`
   are **omitted** when absent. `instances` holds one entry per
   (runner, branch) the manager has ever started this session:
@@ -272,6 +283,25 @@ is store-level and unchanged.
 ```
 → {"cmd":"createFeature","name":"feature-x","repos":["webapp"]}
 ← {"ok":true,"featureDirectory":"…/demo/features/feature-x"}
+```
+
+### `openMainWorkspace`
+
+Materialize (find-or-create) and activate the reserved **main**
+workspace — the same `WorkspaceStore.mainWorkspace` find-or-create plus
+activation the sidebar's permanent main row runs on click
+(`WorkspaceSidebar.openMainWorkspace()`). The sidebar has no other
+button a driver can press for it, so this is the only e2e path to the
+main workspace's Overview (Mode B's project mini-dashboard, Task 7).
+`name` is the first linked repo's default branch (`"main"` if there are
+none), matching what the row itself derives. Also switches
+`sidebarMode` to `"workspace"` (needed for the workspace's Bonsplit
+pane to mount and bootstrap its Overview tab — see `state`'s
+`workspaces[].tabs`).
+
+```
+→ {"cmd":"openMainWorkspace"}
+← {"ok":true,"name":"main"}
 ```
 
 ### `setSidebarMode`
@@ -606,6 +636,36 @@ anything the current plan already started (worktrees, terminals).
 
 ```
 → {"cmd":"stopQueue"}
+← {"ok":true}
+```
+
+### `skipQueueGate`
+
+Drop the current queued plan (`PlanQueueController.skipCurrent()`,
+e.g. one a prior scenario left parked `atGate`) and advance
+immediately — no merge, no git dependency. The real UI has no button
+for this (a stuck gate is meant to be resolved via the merge sheet,
+not abandoned); it exists purely as a test-only escape hatch so a
+scenario can free the single-lane queue of a leftover plan another
+scenario left blocking it, without reimplementing that scenario's own
+merge/cleanup.
+
+```
+→ {"cmd":"skipQueueGate"}
+← {"ok":true}
+```
+
+### `dequeuePlan`
+
+Remove a plan from the queue's `entries` outright
+(`PlanQueueController.remove(path)`), clearing `currentPlanPath` too if it
+matched. Unlike `skipQueueGate`, this needs no `current` and launches
+nothing — the deterministic way to drain a plan a prior scenario left
+parked in `entries` after its `stopQueue` (which nulls `current` but keeps
+`entries`). Test-only; the real UI removes queued rows via the row's ✕.
+
+```
+→ {"cmd":"dequeuePlan","path":"docs/plans/2026-07-06-gate-demo.md"}
 ← {"ok":true}
 ```
 
