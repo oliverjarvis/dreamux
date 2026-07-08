@@ -228,6 +228,7 @@ struct WorkspaceSidebar: View {
                     else { return }
                     sidebarMode = .workspace
                     store.activate(workspace.id)
+                    store.session(for: workspace).focusOverview()
                 },
                 onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) },
                 featureName: { featureName(for: $0) },

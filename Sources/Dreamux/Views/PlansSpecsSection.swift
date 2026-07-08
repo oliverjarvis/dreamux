@@ -59,8 +59,11 @@ struct PlansSpecsSection: View {
     /// relative path, if any — rendered as an orange row caption.
     let autoRunFailure: (String) -> String?
     /// Resolve a task's recorded commits into a diff tab (or explain why
-    /// there's nothing to show) — the task row's context-menu item and
-    /// hover button both call straight through to this.
+    /// there's nothing to show). No caller in this view right now — its one
+    /// trigger, a hover button + context-menu item on the per-task row, went
+    /// with the rail's accordion (the checklist now lives on the workspace's
+    /// Overview, which doesn't yet have an equivalent per-task action).
+    /// Kept on the interface for that to wire up to.
     let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
     /// The pinned main row: is the reserved main workspace currently
     /// the active one (selection styling)?
@@ -85,14 +88,6 @@ struct PlansSpecsSection: View {
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
     @State private var hoveredChipURL: URL?
-    /// Plan rows expanded to their task list, keyed by plan file path.
-    /// Deliberately not persisted — a per-session affordance.
-    @State private var expandedPlans: Set<String> = []
-    /// User overrides of a phase group's expansion inside a plan's task
-    /// list, keyed by `<plan path>#<phase>`. Absence means "follow the
-    /// default" — only the phase holding the current task starts open.
-    /// Not persisted.
-    @State private var expandedPhaseOverrides: [String: Bool] = [:]
     /// User overrides of a multi-plan family's expansion, keyed by
     /// initiative id. Absence means "follow the default" — expanded while a
     /// child is in flight (see `isInitiativeExpanded`); once the user
@@ -104,10 +99,6 @@ struct PlansSpecsSection: View {
     /// The row a *Course correct…* was fired from, driving the sheet. One
     /// sheet behind all three entry points; the case carries the anchor.
     @State private var correcting: CorrectionTarget?
-    /// Task row currently under the pointer — drives the hover-revealed
-    /// "View changes" button (`taskRow`), keyed by the task's line so it
-    /// stays lightweight (no per-row `@State`).
-    @State private var hoveredTaskLine: Int?
     /// Hover state for the pinned main row — reveals its run controls.
     @State private var mainRowHovered = false
 
@@ -302,16 +293,13 @@ struct PlansSpecsSection: View {
         }
 
         VStack(spacing: 2) {
-            queueSection(showGateFallback: !isGateAnchoredToRenderedRow(active, statuses))
+            queueSection()
             ForEach(active) { initiative in
                 if initiative.plans.count > 1 {
                     multiPlanBlock(initiative, statuses: statuses)
                 } else if let plan = initiative.plans.first {
-                    planBlock(plan,
-                              status: statuses[plan.fileURL] ?? .ready,
-                              ordinal: nil,
-                              chips: docChips(for: initiative),
-                              blockedBy: nil)
+                    planRow(plan, status: statuses[plan.fileURL] ?? .ready,
+                            ordinal: nil, blockedBy: nil)
                 }
             }
             ForEach(needsPlan) { initiative in
@@ -329,7 +317,7 @@ struct PlansSpecsSection: View {
             if !done.isEmpty {
                 disclosure("Done (\(done.count))", isExpanded: $doneExpanded) {
                     ForEach(done) { plan in
-                        planBlock(plan, status: .merged, ordinal: nil, chips: [], blockedBy: nil)
+                        planRow(plan, status: .merged, ordinal: nil, blockedBy: nil)
                     }
                 }
             }
@@ -389,11 +377,8 @@ struct PlansSpecsSection: View {
                     let blockedBy = memberStatuses[index] == .merged
                         ? nil
                         : InitiativeProgress.blockingOrdinal(statuses: memberStatuses, index: index)
-                    planBlock(plan,
-                              status: memberStatuses[index],
-                              ordinal: index + 1,
-                              chips: [],
-                              blockedBy: blockedBy)
+                    planRow(plan, status: memberStatuses[index],
+                            ordinal: index + 1, blockedBy: blockedBy)
                         .padding(.leading, 14)
                 }
             }
@@ -504,7 +489,7 @@ struct PlansSpecsSection: View {
     // MARK: - Queue
 
     @ViewBuilder
-    private func queueSection(showGateFallback: Bool) -> some View {
+    private func queueSection() -> some View {
         if !queue.entries.isEmpty || queue.state != .idle {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -543,11 +528,11 @@ struct PlansSpecsSection: View {
                         ))
                 }
 
-                // The gate/attention card normally anchors to the plan row
-                // it concerns (see `planBlock`); this is the fallback copy
-                // for when that row isn't on screen (family collapsed, or
-                // the plan isn't in the doc scan).
-                if showGateFallback { gateCard() }
+                // The gate/attention card for the queue's current plan — the
+                // per-plan run dashboard (Overview) also surfaces it, but the
+                // queue box keeps its own copy so it's visible without
+                // opening that workspace.
+                gateCard()
             }
             .padding(.vertical, 6)
             .background(
@@ -581,9 +566,9 @@ struct PlansSpecsSection: View {
         .contentShape(Rectangle())
     }
 
-    /// The gate/attention action card for the queue's current plan. Rendered
-    /// either inline under the plan row it concerns (`planBlock`) or, when
-    /// that row isn't visible, as a fallback inside the queue box.
+    /// The gate/attention action card for the queue's current plan — the
+    /// queue box's own copy (the plan's workspace Overview carries the
+    /// primary one).
     @ViewBuilder
     private func gateCard() -> some View {
         if let path = queue.currentPlanPath,
@@ -646,21 +631,6 @@ struct PlansSpecsSection: View {
         )
     }
 
-    /// A plan row plus the pieces that hang beneath it: the doc-chip line
-    /// (first plan of an initiative), the queue gate card when this is the
-    /// current plan, and, when expanded, its task rows.
-    @ViewBuilder
-    private func planBlock(
-        _ plan: PlanDoc, status: PlanStatus, ordinal: Int?, chips: [Chip], blockedBy: Int?
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            planRow(plan, status: status, ordinal: ordinal, blockedBy: blockedBy)
-            if !chips.isEmpty { chipLine(chips) }
-            if shouldAnchorGate(under: plan, status: status) { gateCard() }
-            if expandedPlans.contains(plan.fileURL.path) { planTasks(plan) }
-        }
-    }
-
     /// Live claude-session status for this plan's workspace: ! waiting
     /// (needs you), ● running. Nothing when no live session lane exists.
     @ViewBuilder
@@ -683,13 +653,16 @@ struct PlansSpecsSection: View {
         return candidates.first { $0.status == .waiting } ?? candidates.first { $0.status == .running }
     }
 
-    /// An active plan renders as a small card: the title gets a full-width
-    /// line, the status/count a meta line, a full-width progress bar its
-    /// own line, and the primary actions (open, run/stop) a persistent
-    /// bottom row — so the title never fights the controls for width and
-    /// the actions don't hide behind hover. The disclosure chevron overlays
-    /// the leading gutter (a chevron click toggles tasks without opening
-    /// the doc).
+    /// An active plan renders as a compact run card: the title gets a
+    /// full-width line, the status/count a meta line, a full-width progress
+    /// bar its own line, a one-line "current: …" step (`PlanCurrentStep`),
+    /// and the primary actions (open, run/stop) a persistent bottom row —
+    /// so the title never fights the controls for width and the actions
+    /// don't hide behind hover. The full checklist lives on the workspace's
+    /// Overview now; this card is just enough to see what's in flight and
+    /// jump there. A single click activates the plan's workspace (and its
+    /// Overview) when one exists, else opens the plan doc — a not-yet-run
+    /// plan has no workspace to jump to.
     private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {
         let name = featureName(plan)
         let openableFeature = PlanWorkspacePresence.workspaceToOpen(
@@ -710,75 +683,79 @@ struct PlansSpecsSection: View {
         let hasActions = openableFeature != nil || workspace != nil || canRun
         let isHovered = hoveredDocURL == plan.fileURL
 
-        return ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 7) {
-                // Title + meta + progress — the whole block opens the doc.
-                Button { onOpenDoc(plan.fileURL) } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        Color.clear.frame(width: chevronColumnWidth, height: 18)
-                        Image(systemName: status.glyph)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(status == .running ? Color.green : Color.secondary)
-                            .frame(width: 18, height: 18)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 4) {
-                                if let ordinal {
-                                    Text("\(ordinal) ·")
-                                        .font(.callout.weight(.medium).monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text(plan.title)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .lineLimit(1).truncationMode(.tail)
-                                liveFlowDot(for: workspace)
-                                if showUnread {
-                                    Circle().fill(Color.red).frame(width: 5, height: 5)
-                                }
-                                Spacer(minLength: 0)
+        return VStack(alignment: .leading, spacing: 7) {
+            // Title + meta + progress + current step — the whole block
+            // activates the workspace (or opens the doc pre-run).
+            Button {
+                if let name, workspace != nil {
+                    onOpenFeature(name)
+                } else {
+                    onOpenDoc(plan.fileURL)
+                }
+            } label: {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: status.glyph)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(status == .running ? Color.green : Color.secondary)
+                        .frame(width: 18, height: 18)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            if let ordinal {
+                                Text("\(ordinal) ·")
+                                    .font(.callout.weight(.medium).monospacedDigit())
+                                    .foregroundStyle(.secondary)
                             }
-                            planMetaLine(plan, status: status, blockedBy: blockedBy,
-                                         afterCaption: afterCaption)
-                            if plan.totalSteps > 0 {
-                                ProgressView(value: Double(plan.checkedSteps),
-                                             total: Double(plan.totalSteps))
-                                    .controlSize(.mini)
-                                    .frame(maxWidth: .infinity)
+                            Text(plan.title)
+                                .font(.system(size: 15, weight: .medium))
+                                .lineLimit(1).truncationMode(.tail)
+                            liveFlowDot(for: workspace)
+                            if showUnread {
+                                Circle().fill(Color.red).frame(width: 5, height: 5)
                             }
+                            Spacer(minLength: 0)
+                        }
+                        planMetaLine(plan, status: status, blockedBy: blockedBy,
+                                     afterCaption: afterCaption)
+                        if plan.totalSteps > 0 {
+                            ProgressView(value: Double(plan.checkedSteps),
+                                         total: Double(plan.totalSteps))
+                                .controlSize(.mini)
+                                .frame(maxWidth: .infinity)
+                        }
+                        if let current = PlanCurrentStep.label(for: plan) {
+                            Text("current: \(current)")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.tail)
                         }
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    planContextMenu(plan, canRun: canRun,
-                                    openableFeature: openableFeature, workspace: workspace)
-                }
-
-                if hasActions {
-                    planActionRow(plan, canRun: canRun,
-                                  openableFeature: openableFeature, workspace: workspace)
-                }
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                if isHovered {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
-                        .padding(.horizontal, 4)
-                }
-            }
-            .onHover { hovering in
-                if hovering { hoveredDocURL = plan.fileURL }
-                else if hoveredDocURL == plan.fileURL { hoveredDocURL = nil }
+            .buttonStyle(.plain)
+            .contextMenu {
+                planContextMenu(plan, canRun: canRun,
+                                openableFeature: openableFeature, workspace: workspace)
             }
 
-            if !renderableTasks(plan).isEmpty {
-                planDisclosure(plan)
-                    .padding(.leading, 10)
-                    .padding(.top, 7)
+            if hasActions {
+                planActionRow(plan, canRun: canRun,
+                              openableFeature: openableFeature, workspace: workspace)
             }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if isHovered {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
+            }
+        }
+        .onHover { hovering in
+            if hovering { hoveredDocURL = plan.fileURL }
+            else if hoveredDocURL == plan.fileURL { hoveredDocURL = nil }
         }
     }
 
@@ -902,207 +879,11 @@ struct PlansSpecsSection: View {
         }
     }
 
-    /// Width of the leading column reserved for the disclosure chevron. The
-    /// overlaid chevron sits inside it (row content padding + this width),
-    /// so a plan with no tasks still aligns with one that has them.
+    /// Width of the leading column reserved for the multi-plan family's
+    /// disclosure chevron (`initiativeGroupingRow`) — plan cards no longer
+    /// have one of their own; the full checklist lives on the workspace's
+    /// Overview now.
     private let chevronColumnWidth: CGFloat = 10
-
-    private func planDisclosure(_ plan: PlanDoc) -> some View {
-        let expanded = expandedPlans.contains(plan.fileURL.path)
-        return Button {
-            withAnimation(.snappy(duration: 0.18)) { togglePlan(plan) }
-        } label: {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .rotationEffect(.degrees(expanded ? 90 : 0))
-                .frame(width: chevronColumnWidth, height: 18)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Show tasks")
-    }
-
-    /// Task rows for an expanded plan: ✓ (all steps checked), ▶ + `← current`
-    /// (first task with an unchecked step), else ○ — with per-task counts.
-    /// Single-file phased plans (tasks under two or more `## Phase …`
-    /// sections) get collapsible phase rows with per-phase rollups; the
-    /// phase holding the current task starts open.
-    @ViewBuilder
-    private func planTasks(_ plan: PlanDoc) -> some View {
-        let tasks = renderableTasks(plan)
-        if PlanPhases.shouldGroup(tasks) {
-            let groups = PlanPhases.groups(tasks)
-            let currentGroup = PlanPhases.currentGroupIndex(groups)
-            ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
-                phaseBlock(group, plan: plan, isCurrentGroup: index == currentGroup)
-            }
-        } else {
-            flatTaskRows(tasks, plan: plan, indent: 28)
-        }
-    }
-
-    @ViewBuilder
-    private func flatTaskRows(_ tasks: [PlanTask], plan: PlanDoc, indent: CGFloat) -> some View {
-        let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
-        ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
-            taskRow(task, plan: plan, isCurrent: index == currentIndex, indent: indent)
-        }
-    }
-
-    @ViewBuilder
-    private func phaseBlock(
-        _ group: PlanPhases.Group,
-        plan: PlanDoc,
-        isCurrentGroup: Bool
-    ) -> some View {
-        // The current phase starts open; a user toggle overrides.
-        let key = "\(plan.fileURL.path)#\(group.phase ?? "")"
-        let isExpanded = expandedPhaseOverrides[key] ?? isCurrentGroup
-        HStack(spacing: 0) {
-            Button {
-                withAnimation(.snappy(duration: 0.18)) {
-                    expandedPhaseOverrides[key] = !isExpanded
-                }
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    .frame(width: 16, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isExpanded ? "Collapse phase" : "Expand phase")
-
-            // The row itself jumps the plan doc to the phase's `## `
-            // heading and TOGGLES the phase — whatever a click opens, a
-            // click closes.
-            Button {
-                withAnimation(.snappy(duration: 0.18)) {
-                    expandedPhaseOverrides[key] = !isExpanded
-                }
-                if let line = group.tasks.first?.phaseLine ?? group.tasks.first?.line {
-                    onOpenDocAtLine(plan.fileURL, line)
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(group.phase ?? "Steps")
-                        .font(.callout.weight(.semibold))
-                        .lineLimit(1).truncationMode(.tail)
-                    if isCurrentGroup {
-                        Text("← current")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    Spacer(minLength: 0)
-                    Text("\(group.checkedSteps)/\(group.totalSteps)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tertiary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.leading, 28)
-        .padding(.trailing, 12)
-        .padding(.vertical, 4)
-        .contextMenu {
-            Button("Course correct…") {
-                correcting = CorrectionTarget(
-                    plan: plan,
-                    anchor: .phase(name: group.phase ?? ""),
-                    description: group.phase ?? "Steps")
-            }
-        }
-        if isExpanded {
-            flatTaskRows(group.tasks, plan: plan, indent: 46)
-        }
-    }
-
-    private func taskRow(
-        _ task: PlanTask,
-        plan: PlanDoc,
-        isCurrent: Bool,
-        indent: CGFloat
-    ) -> some View {
-        let checked = task.steps.filter(\.checked).count
-        let total = task.steps.count
-        let allChecked = checked == total
-        let glyph = allChecked ? "checkmark" : (isCurrent ? "arrowtriangle.right.fill" : "circle")
-        let tint = isCurrent
-            ? AnyShapeStyle(Color.accentColor)
-            : AnyShapeStyle(allChecked ? .secondary : .tertiary)
-        // Clicking a task opens the plan doc at its heading.
-        return Button {
-            onOpenDocAtLine(plan.fileURL, task.line)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: glyph)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 16)
-                Text(task.title.isEmpty ? "Steps" : task.title)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.tail)
-                if isCurrent {
-                    Text("← current")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer(minLength: 0)
-                // Hover button only when at least one step is checked — an
-                // untouched task can't have commits yet. Rendered whenever
-                // checked, faded by hover, so the count never shifts.
-                if checked > 0 {
-                    let show = hoveredTaskLine == task.line
-                    Button {
-                        onViewTaskChanges(plan, task)
-                    } label: {
-                        Image(systemName: "plus.forwardslash.minus")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 16, height: 16)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("View this task's changes")
-                    .opacity(show ? 1 : 0)
-                    .allowsHitTesting(show)
-                }
-                Text("\(checked)/\(total)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.leading, indent)
-            .padding(.trailing, 12)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("View changes") {
-                onViewTaskChanges(plan, task)
-            }
-            Button("Course correct…") {
-                correcting = CorrectionTarget(
-                    plan: plan,
-                    anchor: .task(line: task.line),
-                    description: task.title.isEmpty ? "this task" : task.title)
-            }
-        }
-        .onHover { inside in
-            if inside { hoveredTaskLine = task.line }
-            else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
-        }
-    }
-
-    /// Tasks worth a row: a heading with at least one checkbox step. A
-    /// `### Notes`-style section parses as a zero-step task and is skipped.
-    private func renderableTasks(_ plan: PlanDoc) -> [PlanTask] {
-        plan.tasks.filter { !$0.steps.isEmpty }
-    }
 
     // MARK: - Doc chips
 
@@ -1157,48 +938,6 @@ struct PlansSpecsSection: View {
         .padding(.leading, 28)
         .padding(.trailing, 12)
         .padding(.bottom, 2)
-    }
-
-    private func togglePlan(_ plan: PlanDoc) {
-        let key = plan.fileURL.path
-        if expandedPlans.contains(key) { expandedPlans.remove(key) }
-        else { expandedPlans.insert(key) }
-    }
-
-    // MARK: - Gate anchoring
-
-    /// Whether the queue's gate/attention card belongs under this plan row —
-    /// true when the queue is parked and this row is its current plan. A
-    /// `.merged` current plan never anchors: an out-of-band merge can leave
-    /// the queue parked on a plan that has since merged (e.g. `.attention`
-    /// isn't cleared by a tick), and a merged row — in `Done` or as a merged
-    /// phase under an active family — would otherwise double up with the
-    /// queue-box fallback. The fallback covers that window instead.
-    private func shouldAnchorGate(under plan: PlanDoc, status: PlanStatus) -> Bool {
-        status != .merged
-            && (queue.state == .atGate || queue.state == .attention)
-            && queue.currentPlanPath == docStore.relativePath(of: plan)
-    }
-
-    /// Whether the queue's current plan is on screen as a row that will
-    /// anchor the gate card, so the queue box drops its fallback copy. Kept
-    /// the exact complement of `shouldAnchorGate`: a `.merged` current plan
-    /// never anchors (even when its row is rendered — a merged phase under an
-    /// active family, or a row in `Done`), so the fallback must show. The row
-    /// shows when its single-plan initiative is active, or its multi-plan
-    /// family is active *and* expanded; anything else falls back.
-    private func isGateAnchoredToRenderedRow(_ active: [Initiative], _ statuses: [URL: PlanStatus]) -> Bool {
-        guard queue.state == .atGate || queue.state == .attention,
-              let current = queue.currentPlanPath,
-              let owner = active.first(where: { initiative in
-                  initiative.plans.contains { docStore.relativePath(of: $0) == current }
-              }),
-              let plan = owner.plans.first(where: { docStore.relativePath(of: $0) == current }),
-              statuses[plan.fileURL] != .merged
-        else { return false }
-        guard owner.plans.count > 1 else { return true }
-        let memberStatuses = owner.plans.map { statuses[$0.fileURL] ?? .ready }
-        return isInitiativeExpanded(owner, memberStatuses)
     }
 
     private func specOnlyRow(_ spec: PlanDoc) -> some View {
