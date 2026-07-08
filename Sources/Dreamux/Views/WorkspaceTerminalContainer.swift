@@ -99,7 +99,9 @@ private struct TabContentView: View {
                 makeRunControls: overview.makeRunControls,
                 gateActions: overview.gateActions,
                 onNewPlan: overview.onNewPlan,
-                onOpenRun: overview.onOpenRun
+                onOpenRun: overview.onOpenRun,
+                onViewTaskChanges: overview.onViewTaskChanges,
+                onCourseCorrectionNudge: overview.onCourseCorrectionNudge
             )
         } else if let tabSession = session.tabSession(for: tabId) {
             // Read inside `body` (not cached in `onAppear`/`onChange`) so

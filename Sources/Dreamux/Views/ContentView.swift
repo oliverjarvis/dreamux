@@ -42,6 +42,11 @@ struct ContentView: View {
     /// `NewPlanSheet` `WorkspaceSidebar`'s `+` opens, independent local
     /// state like `showCreateProject`/`ProjectsRail.showCreate`.
     @State private var showNewPlan = false
+    /// Feedback for a failed Overview checklist action (view-changes with
+    /// no commits found, etc.) — this view's own copy of
+    /// `WorkspaceSidebar`'s `addError`, since the Overview tab is hosted
+    /// outside that view's tree.
+    @State private var overviewTaskChangesError: String?
     /// The active workspace's git HEAD summary (header chip) — polled.
     @State private var gitStatus: GitHeadStatus?
     /// The worktree the chip's `gitStatus` was resolved against — stashed
@@ -239,6 +244,18 @@ struct ContentView: View {
                 },
                 onCancel: { showNewPlan = false }
             )
+        }
+        .alert(
+            "Couldn't apply change",
+            isPresented: Binding(
+                get: { overviewTaskChangesError != nil },
+                set: { if !$0 { overviewTaskChangesError = nil } }
+            ),
+            presenting: overviewTaskChangesError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error)
         }
         // The file explorer is toggled from the View menu (⌥⌘E, see
         // `FileExplorerCommands`) rather than a toolbar-item shortcut: a
@@ -746,7 +763,12 @@ struct ContentView: View {
             makeRunControls: { overviewRunControls(for: $0) },
             gateActions: flowGateActions,
             onNewPlan: { showNewPlan = true },
-            onOpenRun: { plan in openRunFromOverview(plan) }
+            onOpenRun: { plan in openRunFromOverview(plan) },
+            onViewTaskChanges: { plan, task in viewTaskChangesFromOverview(plan: plan, task: task) },
+            onCourseCorrectionNudge: { plan, summary, priority in
+                session.enqueueCourseCorrectionNudge(
+                    plan: plan, summary: summary, priority: priority)
+            }
         )
     }
 
@@ -774,6 +796,56 @@ struct ContentView: View {
         AdHocWorkspaces.featureName(
             for: plan,
             record: { docStore.ledger.recordForPlan(docStore.relativePath(of: $0)) })
+    }
+
+    /// The Overview checklist's "View changes" (hover button + context-menu
+    /// item): resolve a task's recorded commits in each of its feature's
+    /// repo worktrees and open a diff tab per repo with matches. Mirrors
+    /// `WorkspaceSidebar.viewTaskChanges` line-for-line — that copy is
+    /// private to the rail's view and the Overview tab is hosted outside
+    /// it, so this is the Overview's own trigger onto the same
+    /// `TaskDiffResolver`/`GitOperations` primitives. No matches anywhere →
+    /// explain via `overviewTaskChangesError` instead of silently doing
+    /// nothing.
+    private func viewTaskChangesFromOverview(plan: PlanDoc, task: PlanTask) {
+        let feature = planFeatureName(for: plan)
+        guard let workspace = store.featureWorkspace(named: feature) else {
+            overviewTaskChangesError = "No workspace for this plan yet — run the plan first."
+            return
+        }
+        let repos = repoStore.repositories.filter {
+            workspace.linkedRepoIDs.contains($0.name)
+        }
+        // The resolver matches on the heading verbatim (what the agent
+        // actually commits); "this task" is display-only, for the rare
+        // blank heading.
+        let matchTitle = task.title
+        let displayTitle = task.title.isEmpty ? "this task" : task.title
+        Task { @MainActor in
+            var opened = 0
+            for repo in repos {
+                guard let worktree = await GitOperations.worktreeURL(
+                    forBranch: feature, in: repo.rootURL) else { continue }
+                let log = await GitOperations.commitLog(
+                    in: worktree, baseBranch: repo.defaultBranch)
+                guard let range = TaskDiffResolver.range(for: matchTitle, in: log)
+                else { continue }
+                // range.from is "<oldest>^" — invalid when oldest is the
+                // root commit; parentRevision maps that to the empty tree.
+                let oldestSHA = String(range.from.dropLast())
+                let fromRevision = await GitOperations.parentRevision(
+                    of: oldestSHA, in: worktree)
+                store.session(for: workspace).openDiffTab(DiffRequest(
+                    worktreeURL: worktree,
+                    fromRevision: fromRevision,
+                    toRevision: range.to,
+                    title: repos.count > 1 ? "\(displayTitle) — \(repo.name)" : displayTitle))
+                opened += 1
+            }
+            if opened == 0 {
+                overviewTaskChangesError = "No commits recorded for \"\(displayTitle)\" yet. The agent commits when the task's boxes are ticked (auto-commit is \(WorkflowSettings.autoCommitEnabled ? "on" : "OFF — see Settings → Workflow"))."
+            }
+        }
     }
 
     /// The Overview's action-row run controls — the same shape

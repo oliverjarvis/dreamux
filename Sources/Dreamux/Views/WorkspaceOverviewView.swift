@@ -30,6 +30,16 @@ struct WorkspaceOverviewDependencies {
     /// `store.featureWorkspace`/`store.activate`/`focusOverview` wiring
     /// so this view stays store-free like its sibling closures.
     let onOpenRun: (PlanDoc) -> Void
+    /// Resolve a task's recorded commits into a diff tab (or explain why
+    /// there's nothing to show) — the checklist's per-task hover button
+    /// and context-menu item both call straight through to this. Mirrors
+    /// `WorkspaceSidebar.viewTaskChanges` (this is the checklist's only
+    /// remaining trigger for it now that the rail's own task row is gone).
+    let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
+    /// Enqueue a course-correction nudge on the project's `PlanNudgeCenter`
+    /// — forwarded straight into the checklist's own course-correct sheet,
+    /// the same way `WorkspaceSidebar` forwards it into `PlansSpecsSection`.
+    let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
 }
 
 /// The workspace's home dashboard — its pinned, non-dismissable first
@@ -77,12 +87,36 @@ struct WorkspaceOverviewView: View {
     /// Main's mini-dashboard row action — see
     /// `WorkspaceOverviewDependencies.onOpenRun`.
     let onOpenRun: (PlanDoc) -> Void
+    /// See `WorkspaceOverviewDependencies.onViewTaskChanges`.
+    let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
+    /// See `WorkspaceOverviewDependencies.onCourseCorrectionNudge`.
+    let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
 
     /// Mode B's working-tree summary — loaded once on appear (no poller;
     /// unlike the header chip's 5s loop, this tab isn't always on
     /// screen), keyed to the workspace so it reloads if this view instance
     /// ever gets reused for a different workspace.
     @State private var headStatus: GitHeadStatus?
+    /// Task row currently under the pointer — drives the hover-revealed
+    /// "View changes" button, keyed by the task's line (mirrors the
+    /// rail's now-deleted `hoveredTaskLine`).
+    @State private var hoveredTaskLine: Int?
+    /// The row a *Course correct…* was fired from, driving the sheet —
+    /// this view's own copy of `PlansSpecsSection.CorrectionTarget` (the
+    /// checklist's task/phase rows are its only remaining trigger for
+    /// those two anchors; the plan-level `.currentPhase` entry stays on
+    /// the rail's context menu).
+    @State private var correcting: CorrectionTarget?
+
+    /// See `PlansSpecsSection.CorrectionTarget` — the same shape, kept as
+    /// this view's own private copy rather than a shared type so the two
+    /// views' course-correct wiring stays independently editable.
+    private struct CorrectionTarget: Identifiable {
+        let id = UUID()
+        let plan: PlanDoc
+        let anchor: CourseCorrection.Anchor
+        let description: String
+    }
 
     private var resolvedPlan: PlanDoc? {
         WorkspacePlanResolver.plan(
@@ -92,10 +126,43 @@ struct WorkspaceOverviewView: View {
     }
 
     var body: some View {
-        if let plan = resolvedPlan {
-            modeA(plan)
-        } else {
-            modeB()
+        Group {
+            if let plan = resolvedPlan {
+                modeA(plan)
+            } else {
+                modeB()
+            }
+        }
+        .sheet(item: $correcting) { target in
+            CourseCorrectSheet(
+                anchorDescription: target.description,
+                onSubmit: { text, priority in
+                    submitCorrection(target, text: text, priority: priority)
+                },
+                onCancel: { correcting = nil }
+            )
+        }
+    }
+
+    /// Write the fix-task at the target's anchor, then — only for a plan
+    /// with a live agent — enqueue the priority-worded nudge. Mirrors
+    /// `PlansSpecsSection.submitCorrection`; this view needs its own copy
+    /// since the checklist's task/phase rows are its only remaining
+    /// trigger for these two anchors.
+    private func submitCorrection(
+        _ target: CorrectionTarget, text: String, priority: CorrectionPriority
+    ) {
+        correcting = nil
+        let summary = CourseCorrection.summaryLine(from: text)
+        let date = CourseCorrection.markerDate()
+        try? CourseCorrection.apply(
+            to: target.plan.fileURL, anchor: target.anchor,
+            summary: summary, body: text, date: date)
+        // Nudge only a running plan (its agent is live to receive it);
+        // idle plans just get the tracked fix-task the write above added.
+        let status = docStore.status(for: target.plan, featureExists: featureExists)
+        if status == .running || status == .awaitingReview {
+            onCourseCorrectionNudge(target.plan, summary, priority)
         }
     }
 
@@ -272,6 +339,14 @@ struct WorkspaceOverviewView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                Button("Course correct…") {
+                    correcting = CorrectionTarget(
+                        plan: plan,
+                        anchor: .phase(name: group.phase ?? ""),
+                        description: group.phase ?? "Steps")
+                }
+            }
             taskRows(group.tasks, plan: plan)
         }
     }
@@ -311,6 +386,26 @@ struct WorkspaceOverviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
+                // Hover button only when at least one step is checked — an
+                // untouched task can't have commits yet. Rendered whenever
+                // checked, faded by hover, so the count never shifts
+                // (mirrors the rail's now-deleted task row).
+                if checked > 0 {
+                    let show = hoveredTaskLine == task.line
+                    Button {
+                        onViewTaskChanges(plan, task)
+                    } label: {
+                        Image(systemName: "plus.forwardslash.minus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("View this task's changes")
+                    .opacity(show ? 1 : 0)
+                    .allowsHitTesting(show)
+                }
                 Text("\(checked)/\(total)")
                     .font(.system(size: 13).monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -325,6 +420,21 @@ struct WorkspaceOverviewView: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.accentColor.opacity(0.08))
             }
+        }
+        .contextMenu {
+            Button("View changes") {
+                onViewTaskChanges(plan, task)
+            }
+            Button("Course correct…") {
+                correcting = CorrectionTarget(
+                    plan: plan,
+                    anchor: .task(line: task.line),
+                    description: task.title.isEmpty ? "this task" : task.title)
+            }
+        }
+        .onHover { inside in
+            if inside { hoveredTaskLine = task.line }
+            else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
         }
     }
 

@@ -96,14 +96,18 @@ struct PlansSpecsSection: View {
     @State private var hoveredInitiativeID: String?
     /// Queue row currently being dragged for reorder — see `queueSection`.
     @State private var draggingQueueItem: QueueItem?
-    /// The row a *Course correct…* was fired from, driving the sheet. One
-    /// sheet behind all three entry points; the case carries the anchor.
+    /// The row a *Course correct…* was fired from, driving the sheet. Only
+    /// the plan-level entry (`.currentPhase`, on `planContextMenu`) lives
+    /// here now — the task/phase-level entries moved to the workspace
+    /// Overview's checklist along with the rest of the accordion (Task 6),
+    /// which owns its own `correcting`/sheet for those two anchors.
     @State private var correcting: CorrectionTarget?
     /// Hover state for the pinned main row — reveals its run controls.
     @State private var mainRowHovered = false
 
-    /// The plan + anchor + header a course correction is being filed against.
-    /// Built at the clicked row (task / phase / plan), consumed on submit.
+    /// The plan + anchor + header a course correction is being filed
+    /// against. Built at the clicked row — only the plan row (`.currentPhase`)
+    /// builds one in this file now; see the doc comment on `correcting`.
     private struct CorrectionTarget: Identifiable {
         let id = UUID()
         let plan: PlanDoc
