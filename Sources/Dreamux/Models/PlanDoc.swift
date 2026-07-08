@@ -102,6 +102,13 @@ struct PlanDoc: Identifiable, Equatable {
         self.tasks = tasks
     }
 
+    /// A `Task N:` / `Task N.M:` heading (any depth), the marker that opens
+    /// a task whether it's written at H3 (`### Task 0.1:`, the phased
+    /// convention) or H2 (`## Task 1:`, a flat-tasks plan).
+    private static func isTaskHeading(_ heading: String) -> Bool {
+        heading.range(of: #"^Task\s+\d+(?:\.\d+)*\s*[:—]"#, options: .regularExpression) != nil
+    }
+
     static func parse(fileURL: URL, contents: String) -> PlanDoc {
         let lines = contents.components(separatedBy: .newlines)
 
@@ -165,7 +172,7 @@ struct PlanDoc: Identifiable, Equatable {
                 let heading = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
                 // Dotted numbering (`Task 0.1:`) is what phased
                 // single-file plans produce — accept any depth.
-                if heading.range(of: #"^Task\s+\d+(?:\.\d+)*\s*[:—]"#, options: .regularExpression) != nil {
+                if isTaskHeading(heading) {
                     hasTaskHeading = true
                     tasks.append((title: heading, phase: currentPhase, line: lineNumber,
                                   phaseLine: currentPhaseLine, steps: []))
@@ -180,11 +187,27 @@ struct PlanDoc: Identifiable, Equatable {
             }
 
             if line.hasPrefix("## ") {
-                // H2 opens a section; tasks record the one they fall
-                // under. Generic sections (Global Constraints, …) carry
-                // no tasks, so they never surface as phases.
-                currentPhase = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-                currentPhaseLine = lineNumber
+                let heading = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                if isTaskHeading(heading) {
+                    // A plan may put its tasks at H2 (`## Task 1:`) with no
+                    // separate phase level, rather than the `## Phase` +
+                    // `### Task` convention. Treat such a heading as a task,
+                    // not a phase, and drop any preceding generic section
+                    // (Global Constraints, …) so these tasks render flat
+                    // (ungrouped) instead of collapsing into one "Steps"
+                    // bucket.
+                    hasTaskHeading = true
+                    currentPhase = nil
+                    currentPhaseLine = nil
+                    tasks.append((title: heading, phase: nil, line: lineNumber,
+                                  phaseLine: nil, steps: []))
+                } else {
+                    // H2 opens a section; tasks record the one they fall
+                    // under. Generic sections (Global Constraints, …) carry
+                    // no tasks, so they never surface as phases.
+                    currentPhase = heading
+                    currentPhaseLine = lineNumber
+                }
                 continue
             }
 

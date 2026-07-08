@@ -45,6 +45,40 @@ final class PlanDocTests: XCTestCase {
         XCTAssertEqual(d.specReference, "docs/specs/2026-07-02-widgets-design.md")
     }
 
+    /// A flat-tasks plan writes its tasks at H2 (`## Task N:`) with no phase
+    /// level. The parser must still break them into tasks rather than
+    /// collapse every checkbox into one untitled "Steps" bucket, and those
+    /// tasks are ungrouped (never filed under a preceding generic section).
+    func testH2TaskHeadingsParseAsUngroupedTasks() {
+        let d = doc("2026-07-04-readme.md", """
+        # README Generator — Implementation Plan
+
+        ## Global Constraints
+
+        - **Deterministic:** a bullet, not a checkbox.
+
+        ## Task 1: Scaffold
+
+        - [x] Step one
+        - [ ] Step two
+
+        ## Task 2: Data sections
+
+        - [ ] Step three
+        """)
+        XCTAssertEqual(d.tasks.count, 2)
+        XCTAssertEqual(d.tasks[0].title, "Task 1: Scaffold")
+        XCTAssertEqual(d.tasks[1].title, "Task 2: Data sections")
+        // Ungrouped — not filed under the preceding "Global Constraints".
+        XCTAssertNil(d.tasks[0].phase)
+        XCTAssertNil(d.tasks[1].phase)
+        XCTAssertEqual(d.tasks[0].steps.count, 2)
+        XCTAssertEqual(d.tasks[1].steps.count, 1)
+        XCTAssertEqual(d.totalSteps, 3)
+        XCTAssertEqual(d.checkedSteps, 1)
+        assertCountsMatchSteps(d)
+    }
+
     /// `**Spec:**` lines often carry a trailing qualifier; resolving the
     /// whole string as a path silently breaks backlink pairing, so only
     /// the `.md` token survives.
