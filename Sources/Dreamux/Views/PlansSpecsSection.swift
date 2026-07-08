@@ -15,8 +15,6 @@ struct PlansSpecsSection: View {
     /// `ObservableObject` (unlike the `@Observable` stores above), so its own
     /// property wrapper.
     @ObservedObject var flows: FlowStore
-    /// Jump to the full Flows page (the section is a live preview of it).
-    let onViewAllFlows: () -> Void
     let featureExists: (String) -> Bool
     let onOpenDoc: (URL) -> Void
     /// Open a doc jumped to a 1-based line — phase/task rows open the
@@ -97,6 +95,8 @@ struct PlansSpecsSection: View {
     @State private var correcting: CorrectionTarget?
     /// Hover state for the pinned main row — reveals its run controls.
     @State private var mainRowHovered = false
+    /// Hover state for the borderless "＋ New workspace" row.
+    @State private var newWorkspaceHovered = false
 
     /// The plan + anchor + header a course correction is being filed
     /// against. Built at the clicked row — only the plan row (`.currentPhase`)
@@ -109,30 +109,24 @@ struct PlansSpecsSection: View {
     }
 
     var body: some View {
-        // The reserved main worktree — and the queue riding alongside it —
-        // are project-level, not a peer of the plan run-cards below, so they
-        // sit above the FLOWS header as an always-visible anchor. A hairline
-        // divider and generous outer spacing (independent of the tighter
-        // inner spacing each block uses) mark the seam; FLOWS collapsing
-        // only ever hides plan cards, never the anchor.
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                mainRow
-                queueSection()
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 4) {
-                header
-                if layout.plansExpanded {
-                    if docStore.plans.isEmpty && docStore.unpairedSpecs.isEmpty
-                        && docStore.otherDocs.isEmpty {
-                        emptyState
-                    } else {
-                        rows
-                    }
+        // One section for every workspace: `main` (the base worktree) is the
+        // first row, the run queue rides beneath it, and the plan-run cards
+        // follow. `main` and the runs are the same kind of thing (a worktree
+        // you can open), so they share one header — "Workspaces", not "Flows",
+        // since `main` is not a run. The chevron collapses only the run list;
+        // `main` + queue stay pinned as the always-present anchor.
+        VStack(alignment: .leading, spacing: 4) {
+            header
+            mainRow
+            queueSection()
+            if layout.plansExpanded {
+                if docStore.plans.isEmpty && docStore.unpairedSpecs.isEmpty
+                    && docStore.otherDocs.isEmpty {
+                    emptyState
+                } else {
+                    rows
                 }
+                newWorkspaceRow
             }
         }
         .onAppear { docStore.startWatching() }
@@ -172,61 +166,58 @@ struct PlansSpecsSection: View {
     // MARK: - Pieces
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Button {
-                withAnimation(.snappy(duration: 0.18)) { layout.plansExpanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(layout.plansExpanded ? 90 : 0))
-                    Text("Flows")
-                        .font(.system(size: 13, weight: .semibold))
-                        .kerning(0.4)
-                        .textCase(.uppercase)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            // Jump to the full Flows page — the section is a live preview.
-            Button(action: onViewAllFlows) {
-                HStack(spacing: 3) {
-                    Text("View all")
-                        .font(.system(size: 12, weight: .medium))
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundStyle(.tertiary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Open the Flows page")
-
-            Button { docStore.refresh() } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 20, height: 20)
+        // Just the collapse control now — no per-header action icons. Docs
+        // auto-rescan via `docStore.startWatching()` (no manual refresh), and
+        // "New workspace" lives as a labelled row at the foot of the list.
+        Button {
+            withAnimation(.snappy(duration: 0.18)) { layout.plansExpanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Rescan docs")
-
-            Button(action: onNewPlan) {
-                Image(systemName: "plus")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 20, height: 20)
+                    .rotationEffect(.degrees(layout.plansExpanded ? 90 : 0))
+                Text("Workspaces")
+                    .font(.system(size: 13, weight: .semibold))
+                    .kerning(0.4)
+                    .textCase(.uppercase)
                     .foregroundStyle(.secondary)
-                    .contentShape(Rectangle())
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .help("New plan… (opens a planning session)")
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .padding(.vertical, 2)
+    }
+
+    /// Borderless "＋ New workspace" row at the foot of the list — a plain
+    /// plus (no circle, no box), highlighting only on hover, mirroring the
+    /// Repositories section's add row. Opens a planning session, which mints
+    /// the new run's workspace.
+    private var newWorkspaceRow: some View {
+        Button(action: onNewPlan) {
+            HStack(spacing: 11) {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                Text("New workspace")
+                    .font(.system(size: 15))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if newWorkspaceHovered {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
+            }
+        }
+        .onHover { newWorkspaceHovered = $0 }
     }
 
     /// The permanent main-branch row — a place, not a plan: no status
@@ -263,8 +254,9 @@ struct PlansSpecsSection: View {
             .padding(.vertical, 7)
             .contentShape(Rectangle())
             .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(mainWorkspaceActive ? Color.primary.opacity(0.08) : .clear))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(mainWorkspaceActive ? Color.primary.opacity(0.08)
+                          : (mainRowHovered ? Color.primary.opacity(0.04) : .clear)))
         }
         .buttonStyle(.plain)
         .onHover { mainRowHovered = $0 }

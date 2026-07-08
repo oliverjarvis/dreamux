@@ -209,7 +209,6 @@ struct WorkspaceSidebar: View {
                 docStore: docStore,
                 layout: layout,
                 flows: flows,
-                onViewAllFlows: { sidebarMode = .flows },
                 featureExists: { name in store.featureNames.contains(name) },
                 onOpenDoc: onOpenDoc,
                 onOpenDocAtLine: onOpenDocAtLine,
