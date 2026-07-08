@@ -10,6 +10,12 @@ struct WorkspaceOverviewDependencies {
     let planQueue: PlanQueueController
     let repoStore: RepoStore
     let featureName: (PlanDoc) -> String?
+    /// Whether a feature name currently has a live workspace — the same
+    /// closure `PlansSpecsSection.featureExists` is, needed so main's
+    /// mini-dashboard (Group 3) can derive each plan's real status
+    /// rather than assuming the feature exists (Mode A can assume it
+    /// for the workspace it's rendering; the summary list can't).
+    let featureExists: (String) -> Bool
     let onOpenDoc: (URL) -> Void
     let onOpenDocAtLine: (URL, Int) -> Void
     let makeRunControls: (Workspace) -> WorkspaceRunControls
@@ -18,6 +24,12 @@ struct WorkspaceOverviewDependencies {
     /// `+` opens (`WorkspaceSidebar`'s `showNewPlan`), triggered a second
     /// way from a plain workspace's Overview.
     let onNewPlan: () -> Void
+    /// Main's mini-dashboard row action: jump to a run's workspace and
+    /// focus its Overview, or (no workspace yet) open the plan doc —
+    /// same fallback the rail's not-yet-run click uses. Owns the
+    /// `store.featureWorkspace`/`store.activate`/`focusOverview` wiring
+    /// so this view stays store-free like its sibling closures.
+    let onOpenRun: (PlanDoc) -> Void
 }
 
 /// The workspace's home dashboard — its pinned, non-dismissable first
@@ -45,6 +57,9 @@ struct WorkspaceOverviewView: View {
     /// else filename-derived branch) — matched against
     /// `session.workspace.name` via `WorkspacePlanResolver`.
     let featureName: (PlanDoc) -> String?
+    /// Main's mini-dashboard status derivation — see
+    /// `WorkspaceOverviewDependencies.featureExists`.
+    let featureExists: (String) -> Bool
     let onOpenDoc: (URL) -> Void
     /// Open a doc jumped to a 1-based line — the checklist's phase/task
     /// rows open the plan at the clicked section.
@@ -59,6 +74,9 @@ struct WorkspaceOverviewView: View {
     let gateActions: FlowGateActions
     /// Mode B's "Plan something here".
     let onNewPlan: () -> Void
+    /// Main's mini-dashboard row action — see
+    /// `WorkspaceOverviewDependencies.onOpenRun`.
+    let onOpenRun: (PlanDoc) -> Void
 
     /// Mode B's working-tree summary — loaded once on appear (no poller;
     /// unlike the header chip's 5s loop, this tab isn't always on
@@ -357,6 +375,10 @@ struct WorkspaceOverviewView: View {
                 headerB()
                 Divider()
                 actionsRowB()
+                if session.workspace.isMain {
+                    Divider()
+                    projectRunsSection()
+                }
                 Spacer(minLength: 0)
             }
             .padding(24)
@@ -446,6 +468,88 @@ struct WorkspaceOverviewView: View {
             Spacer(minLength: 0)
         }
         .controlSize(.regular)
+    }
+
+    // MARK: - Main's mini-dashboard (project runs, Group 3)
+
+    /// Every active (non-merged) plan across the project as a compact
+    /// run row, most-urgent first — `main`'s home turf, so it doubles
+    /// as a project-wide status board.
+    @ViewBuilder
+    private func projectRunsSection() -> some View {
+        let runs = ProjectRunsSummary.runs(
+            plans: docStore.plans,
+            status: { docStore.status(for: $0, featureExists: featureExists) },
+            featureName: featureName,
+            relativePath: { docStore.relativePath(of: $0) })
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Project Runs")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .kerning(0.4)
+                .textCase(.uppercase)
+            if runs.isEmpty {
+                Text("No active runs. Kick one off from a plan in the sidebar.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(runs) { run in
+                        projectRunRow(run)
+                    }
+                }
+            }
+        }
+    }
+
+    private func projectRunRow(_ run: ProjectRun) -> some View {
+        let flow = flowStatus(for: run.status)
+        return Button { openRun(run) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: FlowStatusGlyph.symbol(flow))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(FlowStatusGlyph.color(flow))
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(run.title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1).truncationMode(.tail)
+                    HStack(spacing: 6) {
+                        Text(run.status.label)
+                        if run.total > 0 {
+                            Text("·").foregroundStyle(.tertiary)
+                            Text("\(run.checked)/\(run.total)")
+                        }
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    if run.total > 0 {
+                        ProgressView(value: Double(run.checked), total: Double(run.total))
+                            .controlSize(.mini)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.03)))
+    }
+
+    /// Resolve the row back to its `PlanDoc` (matched on `run.id`, the
+    /// relative path `ProjectRunsSummary` derived it from) and hand off
+    /// to the injected jump — this view never touches `WorkspaceStore`
+    /// directly, matching every other action here.
+    private func openRun(_ run: ProjectRun) {
+        guard let plan = docStore.plans.first(where: { docStore.relativePath(of: $0) == run.id })
+        else { return }
+        onOpenRun(plan)
     }
 }
 

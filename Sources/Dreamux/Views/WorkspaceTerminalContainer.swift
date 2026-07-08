@@ -93,11 +93,13 @@ private struct TabContentView: View {
                 planQueue: overview.planQueue,
                 repoStore: overview.repoStore,
                 featureName: overview.featureName,
+                featureExists: overview.featureExists,
                 onOpenDoc: overview.onOpenDoc,
                 onOpenDocAtLine: overview.onOpenDocAtLine,
                 makeRunControls: overview.makeRunControls,
                 gateActions: overview.gateActions,
-                onNewPlan: overview.onNewPlan
+                onNewPlan: overview.onNewPlan,
+                onOpenRun: overview.onOpenRun
             )
         } else if let tabSession = session.tabSession(for: tabId) {
             // Read inside `body` (not cached in `onAppear`/`onChange`) so

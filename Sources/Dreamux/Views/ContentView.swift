@@ -740,12 +740,31 @@ struct ContentView: View {
             planQueue: planQueue,
             repoStore: repoStore,
             featureName: { (plan: PlanDoc) -> String? in planFeatureName(for: plan) },
+            featureExists: { name in store.featureNames.contains(name) },
             onOpenDoc: openFile,
             onOpenDocAtLine: { openFile($0, atLine: $1) },
             makeRunControls: { overviewRunControls(for: $0) },
             gateActions: flowGateActions,
-            onNewPlan: { showNewPlan = true }
+            onNewPlan: { showNewPlan = true },
+            onOpenRun: { plan in openRunFromOverview(plan) }
         )
+    }
+
+    /// Main's mini-dashboard row action: jump to a run's workspace and
+    /// focus its Overview — same activation shape as
+    /// `WorkspaceSidebar`'s `onOpenFeature` / Flows' `onJumpToTerminal`,
+    /// plus focusing the Overview tab. A plan with no workspace yet
+    /// (never run) falls back to opening the doc, mirroring the rail's
+    /// not-yet-run click rule (Run provisions the workspace).
+    private func openRunFromOverview(_ plan: PlanDoc) {
+        let feature = planFeatureName(for: plan)
+        if let workspace = store.featureWorkspace(named: feature) {
+            sidebarMode = .workspace
+            store.activate(workspace.id)
+            store.session(for: workspace).focusOverview()
+        } else {
+            openFile(plan.fileURL)
+        }
     }
 
     /// The feature a plan runs as (ledger record first, else filename-
