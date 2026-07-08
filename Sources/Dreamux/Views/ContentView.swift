@@ -37,6 +37,11 @@ struct ContentView: View {
     @State private var fileTreeDragBaseWidth: CGFloat?
     /// New Project sheet fired from the collapsed rail stub.
     @State private var showCreateProject = false
+    /// New Plan sheet fired from a plain workspace's Overview (Mode B's
+    /// "Plan something here") — a second trigger for the same
+    /// `NewPlanSheet` `WorkspaceSidebar`'s `+` opens, independent local
+    /// state like `showCreateProject`/`ProjectsRail.showCreate`.
+    @State private var showNewPlan = false
     /// The active workspace's git HEAD summary (header chip) — polled.
     @State private var gitStatus: GitHeadStatus?
     /// The worktree the chip's `gitStatus` was resolved against — stashed
@@ -218,6 +223,21 @@ struct ContentView: View {
                 onPickSymbol: { projects.setSymbol($0, for: project.id) },
                 onPickTintHex: { projects.setTintHex($0, for: project.id) },
                 onDismiss: { customizingProject = nil }
+            )
+        }
+        .sheet(isPresented: $showNewPlan) {
+            NewPlanSheet(
+                autoRunParallel: Binding(
+                    get: { layout.autoRunParallel },
+                    set: { layout.autoRunParallel = $0 }
+                ),
+                onSubmit: { idea in
+                    showNewPlan = false
+                    openOverviewPlanningSession { digest in
+                        PlanPrompts.brainstormKickoff(idea: idea, intakeDigest: digest)
+                    }
+                },
+                onCancel: { showNewPlan = false }
             )
         }
         // The file explorer is toggled from the View menu (⌥⌘E, see
@@ -723,7 +743,8 @@ struct ContentView: View {
             onOpenDoc: openFile,
             onOpenDocAtLine: { openFile($0, atLine: $1) },
             makeRunControls: { overviewRunControls(for: $0) },
-            gateActions: flowGateActions
+            gateActions: flowGateActions,
+            onNewPlan: { showNewPlan = true }
         )
     }
 
@@ -755,6 +776,45 @@ struct ContentView: View {
                 sidebarMode = .run(workspaceID: workspace.id)
             }
         )
+    }
+
+    /// Mode B's "Plan something here" kickoff — the same planning-session
+    /// bootstrap `WorkspaceSidebar.openPlanningSession(buildPrompt:)` runs
+    /// for the rail's `+`, duplicated here (not shared) since that method
+    /// is private to the sidebar view and everything it touches (`store`,
+    /// `repoStore`, `docStore`, `sidebarMode`) is already available on
+    /// `ContentView` too.
+    private func openOverviewPlanningSession(buildPrompt: @escaping (String?) -> String) {
+        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        let session = store.session(for: workspace)
+        DocStore.ensureDocsHome(at: repoStore.project.rootPath)
+        docStore.refresh()
+        MCPInstaller.installIfNeeded(at: repoStore.project.rootPath.path)
+        guard let tab = session.reuseOrOpenPlanningTab(
+            at: repoStore.project.rootPath.path) else { return }
+        tab.startIfNeeded()
+        Task {
+            let prompt = buildPrompt(await overviewIntakeDigest())
+            ClaudePromptDriver.send(prompt, into: tab)
+        }
+    }
+
+    /// Mirrors `WorkspaceSidebar.intakeDigest()` — same reasoning as
+    /// `openOverviewPlanningSession` above.
+    private func overviewIntakeDigest() async -> String? {
+        let featureExists: (String) -> Bool = { name in
+            store.featureNames.contains(name)
+        }
+        guard docStore.plans.contains(where: {
+            docStore.status(for: $0, featureExists: featureExists) != .merged
+        }) else { return nil }
+        return await IntakeDigest.build(
+            docStore: docStore,
+            repos: repoStore.repositories,
+            queue: planQueue.entries,
+            featureExists: featureExists)
     }
 
     /// The spec's front door: when this lane IS the queue's current

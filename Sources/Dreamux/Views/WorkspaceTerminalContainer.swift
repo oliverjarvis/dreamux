@@ -96,7 +96,8 @@ private struct TabContentView: View {
                 onOpenDoc: overview.onOpenDoc,
                 onOpenDocAtLine: overview.onOpenDocAtLine,
                 makeRunControls: overview.makeRunControls,
-                gateActions: overview.gateActions
+                gateActions: overview.gateActions,
+                onNewPlan: overview.onNewPlan
             )
         } else if let tabSession = session.tabSession(for: tabId) {
             // Read inside `body` (not cached in `onAppear`/`onChange`) so

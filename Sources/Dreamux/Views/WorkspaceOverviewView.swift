@@ -14,6 +14,10 @@ struct WorkspaceOverviewDependencies {
     let onOpenDocAtLine: (URL, Int) -> Void
     let makeRunControls: (Workspace) -> WorkspaceRunControls
     let gateActions: FlowGateActions
+    /// Mode B's "Plan something here" — the same New Plan sheet the rail's
+    /// `+` opens (`WorkspaceSidebar`'s `showNewPlan`), triggered a second
+    /// way from a plain workspace's Overview.
+    let onNewPlan: () -> Void
 }
 
 /// The workspace's home dashboard — its pinned, non-dismissable first
@@ -24,15 +28,18 @@ struct WorkspaceOverviewDependencies {
 ///   header, spec/progress, the relocated task checklist (sized up from
 ///   the rail's cramped accordion), and the run/terminal/diff/gate
 ///   actions.
-/// - **Mode B** (Group 3): no plan resolves — falls back to the plain
-///   placeholder below until Task 4 fills it in.
+/// - **Mode B** (this file, Group 3): no plan resolves — a lighter
+///   overview for a plain workspace (main, scratch): branch/working-tree
+///   header and quick actions (shell, services, diff, plan something
+///   here).
 struct WorkspaceOverviewView: View {
     @Bindable var session: WorkspaceSession
     let docStore: DocStore
     let planQueue: PlanQueueController
-    /// Threaded ahead for Mode B's working-tree header (Task 4) — Mode A
-    /// doesn't read it (the branch-vs-base diff goes through `gateActions`
-    /// instead, which already resolves worktrees itself).
+    /// Mode B's working-tree header resolves this workspace's worktree
+    /// through it (mirrors `ContentView.resolveGitStatus`'s repo lookup) —
+    /// Mode A doesn't read it (the branch-vs-base diff goes through
+    /// `gateActions` instead, which already resolves worktrees itself).
     let repoStore: RepoStore
     /// The same feature-name resolver the rail uses (ledger record first,
     /// else filename-derived branch) — matched against
@@ -50,6 +57,14 @@ struct WorkspaceOverviewView: View {
     /// gate cards (`ContentView.flowGateActions`) so a merge here and a
     /// merge from Flows can't drift.
     let gateActions: FlowGateActions
+    /// Mode B's "Plan something here".
+    let onNewPlan: () -> Void
+
+    /// Mode B's working-tree summary — loaded once on appear (no poller;
+    /// unlike the header chip's 5s loop, this tab isn't always on
+    /// screen), keyed to the workspace so it reloads if this view instance
+    /// ever gets reused for a different workspace.
+    @State private var headStatus: GitHeadStatus?
 
     private var resolvedPlan: PlanDoc? {
         WorkspacePlanResolver.plan(
@@ -62,10 +77,7 @@ struct WorkspaceOverviewView: View {
         if let plan = resolvedPlan {
             modeA(plan)
         } else {
-            VStack {
-                Text("Overview")
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            modeB()
         }
     }
 
@@ -335,6 +347,105 @@ struct WorkspaceOverviewView: View {
            planQueue.currentPlanPath == docStore.relativePath(of: plan) {
             GateActionCard(workspaceID: session.workspace.id, mergeActionable: true, actions: gateActions)
         }
+    }
+
+    // MARK: - Mode B (plain workspace: no plan behind it)
+
+    private func modeB() -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                headerB()
+                Divider()
+                actionsRowB()
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: session.workspace.id) {
+            headStatus = await resolveWorktreeGitStatus(for: session.workspace)
+        }
+    }
+
+    /// Branch name, linked repos, and working-tree status — the same
+    /// data the header git chip shows for the *active* workspace
+    /// (`ContentView.resolveGitStatus`), resolved here for *this*
+    /// workspace specifically since the Overview can be any workspace's
+    /// tab, active or not.
+    private func headerB() -> some View {
+        let flow: FlowStatus = headStatus.map {
+            ($0.insertions > 0 || $0.deletions > 0) ? .running : .done
+        } ?? .queued
+        return HStack(alignment: .top, spacing: 14) {
+            Image(systemName: FlowStatusGlyph.symbol(flow))
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(FlowStatusGlyph.color(flow))
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(session.workspace.name)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.primary)
+                HStack(spacing: 6) {
+                    if let headStatus {
+                        Text(headStatus.shortSHA)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                        Text("·").foregroundStyle(.tertiary)
+                        if headStatus.insertions > 0 || headStatus.deletions > 0 {
+                            Text("+\(headStatus.insertions)").foregroundStyle(.green)
+                            Text("−\(headStatus.deletions)").foregroundStyle(.red)
+                        } else {
+                            Text("Clean")
+                        }
+                    }
+                    if !session.workspace.linkedRepoIDs.isEmpty {
+                        Text("·").foregroundStyle(.tertiary)
+                        Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+                    }
+                }
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// This workspace's worktree, resolved the same way the header chip
+    /// resolves the *active* workspace's (`ContentView.resolveGitStatus`):
+    /// first the linked repos' checkout of this branch, else (scratch
+    /// workspaces) the first repo's default-branch checkout.
+    private func resolveWorktreeGitStatus(for workspace: Workspace) async -> GitHeadStatus? {
+        let repos = repoStore.repositories
+        let candidates = workspace.linkedRepoIDs.isEmpty
+            ? repos
+            : repos.filter { workspace.linkedRepoIDs.contains($0.name) }
+        guard let repo = candidates.first else { return nil }
+        var worktree = await GitOperations.worktreeURL(forBranch: workspace.name, in: repo.rootURL)
+        if worktree == nil {
+            worktree = await GitOperations.worktreeURL(forBranch: repo.defaultBranch, in: repo.rootURL)
+        }
+        guard let worktree else { return nil }
+        return await GitOperations.headStatus(in: worktree)
+    }
+
+    private func actionsRowB() -> some View {
+        HStack(spacing: 12) {
+            makeRunControls(session.workspace)
+            Button(action: session.createTab) {
+                Label("Open terminal", systemImage: "terminal")
+            }
+            .buttonStyle(.bordered)
+            BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
+            Button(action: onNewPlan) {
+                Label("Plan something here", systemImage: "sparkles")
+            }
+            .buttonStyle(.bordered)
+            Spacer(minLength: 0)
+        }
+        .controlSize(.regular)
     }
 }
 
