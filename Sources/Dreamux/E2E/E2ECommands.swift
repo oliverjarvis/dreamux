@@ -59,6 +59,8 @@ enum E2ECommands {
             return try await addLocalRepo(request: request)
         case "createFeature":
             return try await createFeature(request: request)
+        case "openMainWorkspace":
+            return try openMainWorkspace()
         case "setSidebarMode":
             return try setSidebarMode(request: request)
         case "switchProject":
@@ -105,6 +107,10 @@ enum E2ECommands {
             return handleQueueMutation(request) { queue, _ in queue.start() }
         case "stopQueue":
             return handleQueueMutation(request) { queue, _ in queue.stopQueue() }
+        case "skipQueueGate":
+            return handleQueueMutation(request) { queue, _ in queue.skipCurrent() }
+        case "dequeuePlan":
+            return handleQueueMutation(request) { $0.remove($1) }
         case "queueState":
             return handleQueueState()
         case "flowsState":
@@ -156,16 +162,26 @@ enum E2ECommands {
 
         if let store = handles.workspaceStore {
             payload["workspaces"] = store.workspaces.map { workspace in
-                [
+                let session = store.session(for: workspace)
+                return [
                     "name": workspace.name,
                     "linkedRepoIDs": workspace.linkedRepoIDs,
                     "isActive": workspace.id == store.activeID,
                     // In-app browser tabs (runner `open` URLs land here)
                     // — scenarios assert each worktree previews its own
                     // port.
-                    "webTabs": store.session(for: workspace).webTabURLs
-                        .map(\.absoluteString),
-                    "fileTabs": store.session(for: workspace).fileTabSummaries,
+                    "webTabs": session.webTabURLs.map(\.absoluteString),
+                    "fileTabs": session.fileTabSummaries,
+                    // Bonsplit tab bar summary, in tab-bar order — how a
+                    // scenario asserts the pinned Overview tab exists and
+                    // sits first (Task 7) without a screenshot.
+                    "tabs": session.controller.allTabIds.compactMap { id -> [String: Any]? in
+                        guard let tab = session.controller.tab(id) else { return nil }
+                        return [
+                            "title": tab.title,
+                            "isOverview": session.isOverviewTab(id),
+                        ]
+                    },
                 ] as [String: Any]
             }
         } else {
@@ -367,6 +383,22 @@ enum E2ECommands {
         )
         store.registerFeature(name: name, featureDirectory: dir, linkedRepoIDs: repoIDs)
         return ["ok": true, "featureDirectory": dir.path]
+    }
+
+    /// Materialize (find-or-create) and activate the reserved main
+    /// workspace — the same `WorkspaceSidebar.openMainWorkspace()` the
+    /// permanent rail row's click runs. Nothing else ever creates this
+    /// workspace, so this is the only e2e path to Mode B's "main" Overview
+    /// (Task 7): the sidebar has no button a driver can click.
+    private static func openMainWorkspace() throws -> [String: Any] {
+        let (handles, store, repoStore) = try projectStores()
+        let workspace = store.mainWorkspace(
+            name: repoStore.repositories.first?.defaultBranch ?? "main",
+            workingDirectory: repoStore.project.rootPath.path,
+            linkedRepoIDs: repoStore.repositories.map(\.name))
+        handles.bridge.pendingSidebarMode = .workspace
+        store.activate(workspace.id)
+        return ["ok": true, "name": workspace.name]
     }
 
     // MARK: - Project switching & terminal readback
@@ -632,11 +664,12 @@ enum E2ECommands {
         return ["ok": true, "path": path, "nudged": nudged]
     }
 
-    /// Shared plumbing for `enqueuePlan`/`startQueue`/`stopQueue`: resolve
-    /// the registered queue, run the mutation (with `request["path"]`, or
-    /// `""` when the command doesn't take one), and reply. Failures never
-    /// throw — like `handleListDocs`/`handleRunPlan`, a missing queue is
-    /// reported inline rather than via `CommandError`.
+    /// Shared plumbing for `enqueuePlan`/`startQueue`/`stopQueue`/
+    /// `skipQueueGate`/`dequeuePlan`: resolve the registered queue, run the
+    /// mutation (with `request["path"]`, or `""` when the command doesn't
+    /// take one), and reply. Failures never throw — like
+    /// `handleListDocs`/`handleRunPlan`, a missing queue is reported
+    /// inline rather than via `CommandError`.
     private static func handleQueueMutation(
         _ request: [String: Any],
         _ mutate: (PlanQueueController, String) -> Void

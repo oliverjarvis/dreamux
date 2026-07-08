@@ -37,6 +37,11 @@ final class WorkspaceSession {
     /// stale id.
     private(set) var lastCreatedTabID: TabID?
 
+    /// Set by `bootstrapIfNeeded()` just before it creates the Overview
+    /// tab, so `handleDidCreateTab` can recognize and claim it instead
+    /// of spawning it a shell. Read once and cleared there.
+    private var nextTabIsOverview = false
+
     /// True when this workspace is the one currently visible in its window.
     /// The store flips this on selection changes; while false, bell events
     /// always mark tabs unread (the user can't see them yet). While true,
@@ -48,6 +53,10 @@ final class WorkspaceSession {
     /// workspace's name in the Work Items rail. Cleared when the user
     /// switches into this workspace (re-entering "reads" the message).
     var lastActivityMessage: String? = nil
+
+    /// Tab id of this workspace's pinned Overview tab, set the moment
+    /// `bootstrapIfNeeded()` creates it. Nil before bootstrap.
+    private(set) var overviewTabId: TabID?
 
     init(workspace: Workspace) {
         self.workspace = workspace
@@ -82,11 +91,35 @@ final class WorkspaceSession {
         // under the same post-mount conditions.
     }
 
-    /// Idempotent — call from BonsplitView's `onAppear`.
+    /// Idempotent — call from BonsplitView's `onAppear`. Creates the
+    /// pinned Overview tab first (claimed via `nextTabIsOverview`, the
+    /// same "claim the next created tab id" pattern `nextTabFileURL`/
+    /// `nextTabWebURL`/`nextDiffRequest` use — needed because
+    /// `overviewTabId` can't be assigned from `createTab`'s return value:
+    /// `didCreateTab` fires *inside* that call, before it returns, and
+    /// `handleDidCreateTab` needs to recognize the overview tab right
+    /// then to skip spawning it a shell), then the shell tab, then
+    /// re-selects the Overview so the workspace opens on its dashboard.
     func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
+        nextTabIsOverview = true
+        controller.createTab(title: "Overview", icon: "house.fill")
         controller.createTab(title: "shell", icon: "terminal.fill")
+        if let overviewTabId {
+            controller.selectTab(overviewTabId)
+        }
+    }
+
+    /// True when `id` is this workspace's pinned Overview tab.
+    func isOverviewTab(_ id: TabID) -> Bool {
+        id == overviewTabId
+    }
+
+    /// Select the Overview tab, if bootstrap has run.
+    func focusOverview() {
+        guard let overviewTabId else { return }
+        controller.selectTab(overviewTabId)
     }
 
     func tabSession(for tabId: TabID) -> TabSession? {
@@ -165,13 +198,31 @@ final class WorkspaceSession {
 
     // MARK: - Delegate handling (called from main actor)
 
-    private func handleDidCreateTab(_ tab: Tab) {
+    private func handleDidCreateTab(_ tab: Tab, inPane pane: PaneID) {
         guard tabSessions[tab.id] == nil,
               webTabSessions[tab.id] == nil,
               fileTabSessions[tab.id] == nil,
               diffTabSessions[tab.id] == nil else { return }
 
         lastCreatedTabID = tab.id
+
+        // Overview tab: claimed via the pending flag set by
+        // `bootstrapIfNeeded()` just before `createTab` — it gets no
+        // TabSession (no shell spawned for it; `TabContentView` renders
+        // `WorkspaceOverviewView` for it instead).
+        if nextTabIsOverview {
+            nextTabIsOverview = false
+            overviewTabId = tab.id
+            return
+        }
+
+        // Keep the Overview pinned leftmost: any other tab that ends up
+        // at index 0 in the pane that holds it (a drag reorder, or a
+        // fresh tab created while nothing is selected) gets bumped
+        // behind it. No-op if this pane doesn't contain the Overview.
+        if let overviewTabId, controller.tabs(inPane: pane).first?.id != overviewTabId {
+            controller.moveTab(overviewTabId, toIndex: 0, inPane: pane)
+        }
 
         // File tab: the pending file URL (set by openFileTab just before
         // createTab) claims this tab id.
@@ -248,8 +299,13 @@ final class WorkspaceSession {
             }
             // Bonsplit's select doesn't touch AppKit's responder chain —
             // wire focus to the new tab's terminal so keystrokes land
-            // without the user having to click in.
-            TerminalFocus.focusVisibleTerminal()
+            // without the user having to click in. Only for terminal-backed
+            // tabs: the Overview (or any other non-terminal tab) has no
+            // Ghostty surface to focus, and grabbing one anyway steals focus
+            // from whatever terminal was last active elsewhere.
+            if tabSession(for: tab.id) != nil {
+                TerminalFocus.focusVisibleTerminal()
+            }
         }
     }
 
@@ -507,9 +563,15 @@ final class WorkspaceSession {
 /// is itself `@MainActor` and always calls us from the main actor.
 extension WorkspaceSession: BonsplitDelegate {
     nonisolated func splitTabBar(_ controller: BonsplitController,
+                                 shouldCloseTab tab: Tab,
+                                 inPane pane: PaneID) -> Bool {
+        MainActor.assumeIsolated { tab.id != self.overviewTabId }
+    }
+
+    nonisolated func splitTabBar(_ controller: BonsplitController,
                                  didCreateTab tab: Tab,
                                  inPane pane: PaneID) {
-        MainActor.assumeIsolated { self.handleDidCreateTab(tab) }
+        MainActor.assumeIsolated { self.handleDidCreateTab(tab, inPane: pane) }
     }
 
     nonisolated func splitTabBar(_ controller: BonsplitController,

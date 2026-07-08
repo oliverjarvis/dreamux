@@ -68,3 +68,44 @@ and routed edge waypoints. Draw edges as smoothed splines through those
 waypoints with arrowheads into the target border; don't fall back to
 straight center-to-center lines. Self-loops are excluded from dagre and
 drawn as a self-arc by the view.
+
+### Name the shared concept instead of splitting a section
+
+The work-items rail felt "cursed" because the `main` worktree (a pure
+place, no plan) sat among plan-run cards under a header called **FLOWS** —
+as if `main` were a run. The fix was *not* to pull `main` into its own
+`MAIN` section: that just traded one seam for two headers, a redundant
+label ("MAIN" over a `main` row), and an orphaned divider — each of which
+felt off in turn. The fix was to **rename the section to the concept that
+spans both**: `main` and every run are *workspaces* (worktrees you can
+open), so one **Workspaces** section holds `main` as its first row and the
+runs beneath it. When a list feels like it's mixing kinds, first ask
+whether one honest name encompasses them — reframing beats partitioning.
+
+### One hover wash for every row; no rules under headers
+
+Every clickable row uses the same wash: `Color.primary.opacity(0.04)` on
+hover, `0.08` when selected, on a `RoundedRectangle(cornerRadius: 8)`. The
+base `main` row is **not** exempt — a row that doesn't light up on hover
+like its neighbours reads as dead. Sections are delineated by their
+uppercase header (13pt semibold, kern ~0.4) and generous spacing **alone**
+— never a `Divider()` under a header. A rule beneath one section's title
+makes it read as a different *kind* of element than its peers.
+
+### Add-actions are labelled rows at the foot of the list, not header icons
+
+"New workspace" / "Add repository" live as a **borderless row at the bottom
+of their list** — a plain `plus` (no circle, no box), 15pt label, hover-only
+background — not a `+` icon crammed into the section header. And drop
+controls a watcher makes redundant: with `docStore.startWatching()`
+auto-rescanning on file changes, there is no manual "refresh" button.
+
+### Master–detail: the rail launches, the Overview tab holds the detail
+
+A ~260px rail can't render a plan → phases → tasks tree without truncating.
+Detail lives on each workspace's always-present, non-closable **Overview
+tab** (Mode A for a plan-backed run, Mode B for `main`/scratch); the rail
+stays a compact launcher/monitor — status glyph, title, progress bar, and a
+single "current: Phase · Task" line. Clicking a run activates its workspace
+and focuses that Overview; per-task "View changes" and "Course correct"
+live on the Overview's checklist, not the rail.

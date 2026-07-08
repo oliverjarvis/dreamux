@@ -37,6 +37,16 @@ struct ContentView: View {
     @State private var fileTreeDragBaseWidth: CGFloat?
     /// New Project sheet fired from the collapsed rail stub.
     @State private var showCreateProject = false
+    /// New Plan sheet fired from a plain workspace's Overview (Mode B's
+    /// "Plan something here") — a second trigger for the same
+    /// `NewPlanSheet` `WorkspaceSidebar`'s `+` opens, independent local
+    /// state like `showCreateProject`/`ProjectsRail.showCreate`.
+    @State private var showNewPlan = false
+    /// Feedback for a failed Overview checklist action (view-changes with
+    /// no commits found, etc.) — this view's own copy of
+    /// `WorkspaceSidebar`'s `addError`, since the Overview tab is hosted
+    /// outside that view's tree.
+    @State private var overviewTaskChangesError: String?
     /// The active workspace's git HEAD summary (header chip) — polled.
     @State private var gitStatus: GitHeadStatus?
     /// The worktree the chip's `gitStatus` was resolved against — stashed
@@ -220,6 +230,33 @@ struct ContentView: View {
                 onDismiss: { customizingProject = nil }
             )
         }
+        .sheet(isPresented: $showNewPlan) {
+            NewPlanSheet(
+                autoRunParallel: Binding(
+                    get: { layout.autoRunParallel },
+                    set: { layout.autoRunParallel = $0 }
+                ),
+                onSubmit: { idea in
+                    showNewPlan = false
+                    openOverviewPlanningSession { digest in
+                        PlanPrompts.brainstormKickoff(idea: idea, intakeDigest: digest)
+                    }
+                },
+                onCancel: { showNewPlan = false }
+            )
+        }
+        .alert(
+            "Couldn't apply change",
+            isPresented: Binding(
+                get: { overviewTaskChangesError != nil },
+                set: { if !$0 { overviewTaskChangesError = nil } }
+            ),
+            presenting: overviewTaskChangesError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error)
+        }
         // The file explorer is toggled from the View menu (⌥⌘E, see
         // `FileExplorerCommands`) rather than a toolbar-item shortcut: a
         // `.keyboardShortcut` on a toolbar item isn't dispatched when the
@@ -301,7 +338,7 @@ struct ContentView: View {
     private var mainPane: some View {
         switch sidebarMode {
         case .workspace:
-            WorkspaceTerminalContainer(store: store)
+            WorkspaceTerminalContainer(store: store, overview: overviewDependencies)
         case .run(let workspaceID):
             RunSetupView(
                 project: repoStore.project,
@@ -706,6 +743,143 @@ struct ContentView: View {
             requestMerge: { workspaceID in requestGateMerge(workspaceID: workspaceID) },
             fetchDiffStat: { workspaceID in await gateDiffStat(workspaceID: workspaceID) }
         )
+    }
+
+    // MARK: - Overview (Mode A)
+
+    /// Everything the active project's workspaces' Overview tabs need,
+    /// bundled once per render — see `WorkspaceOverviewDependencies`.
+    /// `gateActions` reuses `flowGateActions` verbatim so a merge from the
+    /// Overview and a merge from the Flows page can't drift.
+    private var overviewDependencies: WorkspaceOverviewDependencies {
+        WorkspaceOverviewDependencies(
+            docStore: docStore,
+            planQueue: planQueue,
+            repoStore: repoStore,
+            featureName: { (plan: PlanDoc) -> String? in planFeatureName(for: plan) },
+            featureExists: { name in store.featureNames.contains(name) },
+            onOpenDoc: openFile,
+            onOpenDocAtLine: { openFile($0, atLine: $1) },
+            makeRunControls: { overviewRunControls(for: $0) },
+            gateActions: flowGateActions,
+            onNewPlan: { showNewPlan = true },
+            onOpenRun: { plan in openRunFromOverview(plan) },
+            onViewTaskChanges: { plan, task in viewTaskChangesFromOverview(plan: plan, task: task) },
+            onCourseCorrectionNudge: { plan, summary, priority in
+                session.enqueueCourseCorrectionNudge(
+                    plan: plan, summary: summary, priority: priority)
+            }
+        )
+    }
+
+    /// Main's mini-dashboard row action: jump to a run's workspace and
+    /// focus its Overview — same activation shape as
+    /// `WorkspaceSidebar`'s `onOpenFeature` / Flows' `onJumpToTerminal`,
+    /// plus focusing the Overview tab. A plan with no workspace yet
+    /// (never run) falls back to opening the doc, mirroring the rail's
+    /// not-yet-run click rule (Run provisions the workspace).
+    private func openRunFromOverview(_ plan: PlanDoc) {
+        let feature = planFeatureName(for: plan)
+        if let workspace = store.featureWorkspace(named: feature) {
+            sidebarMode = .workspace
+            store.activate(workspace.id)
+            store.session(for: workspace).focusOverview()
+        } else {
+            openFile(plan.fileURL)
+        }
+    }
+
+    /// The feature a plan runs as (ledger record first, else filename-
+    /// derived branch) — same resolver `WorkspaceSidebar.featureName(for:)`
+    /// uses, rebuilt here since that one is private to the sidebar view.
+    private func planFeatureName(for plan: PlanDoc) -> String {
+        AdHocWorkspaces.featureName(
+            for: plan,
+            record: { docStore.ledger.recordForPlan(docStore.relativePath(of: $0)) })
+    }
+
+    /// The Overview checklist's "View changes" (hover button + context-menu
+    /// item): resolve a task's recorded commits in each of its feature's
+    /// repo worktrees and open a diff tab per repo with matches. Mirrors
+    /// `WorkspaceSidebar.viewTaskChanges` line-for-line — that copy is
+    /// private to the rail's view and the Overview tab is hosted outside
+    /// it, so this is the Overview's own trigger onto the same
+    /// `TaskDiffResolver`/`GitOperations` primitives. No matches anywhere →
+    /// explain via `overviewTaskChangesError` instead of silently doing
+    /// nothing.
+    private func viewTaskChangesFromOverview(plan: PlanDoc, task: PlanTask) {
+        let feature = planFeatureName(for: plan)
+        guard let workspace = store.featureWorkspace(named: feature) else {
+            overviewTaskChangesError = "No workspace for this plan yet — run the plan first."
+            return
+        }
+        let repos = repoStore.repositories.filter {
+            workspace.linkedRepoIDs.contains($0.name)
+        }
+        // The resolver matches on the heading verbatim (what the agent
+        // actually commits); "this task" is display-only, for the rare
+        // blank heading.
+        let matchTitle = task.title
+        let displayTitle = task.title.isEmpty ? "this task" : task.title
+        Task { @MainActor in
+            var opened = 0
+            for repo in repos {
+                guard let worktree = await GitOperations.worktreeURL(
+                    forBranch: feature, in: repo.rootURL) else { continue }
+                let log = await GitOperations.commitLog(
+                    in: worktree, baseBranch: repo.defaultBranch)
+                guard let range = TaskDiffResolver.range(for: matchTitle, in: log)
+                else { continue }
+                // range.from is "<oldest>^" — invalid when oldest is the
+                // root commit; parentRevision maps that to the empty tree.
+                let oldestSHA = String(range.from.dropLast())
+                let fromRevision = await GitOperations.parentRevision(
+                    of: oldestSHA, in: worktree)
+                store.session(for: workspace).openDiffTab(DiffRequest(
+                    worktreeURL: worktree,
+                    fromRevision: fromRevision,
+                    toRevision: range.to,
+                    title: repos.count > 1 ? "\(displayTitle) — \(repo.name)" : displayTitle))
+                opened += 1
+            }
+            if opened == 0 {
+                overviewTaskChangesError = "No commits recorded for \"\(displayTitle)\" yet. The agent commits when the task's boxes are ticked (auto-commit is \(WorkflowSettings.autoCommitEnabled ? "on" : "OFF — see Settings → Workflow"))."
+            }
+        }
+    }
+
+    /// The Overview's action-row run controls — the same shape
+    /// `WorkspaceSidebar.runControls(for:)` builds for the rail, minus the
+    /// switch-notice banner (the header's run cluster skips it too).
+    private func overviewRunControls(for workspace: Workspace) -> WorkspaceRunControls {
+        WorkspaceRunControls(
+            workspace: workspace,
+            runners: runners,
+            openServices: { runnerName in
+                let openable = runners.openableRunners(for: workspace)
+                let targets = runnerName == nil ? openable : openable.filter { $0.name == runnerName }
+                for runner in targets { runners.openNow(runner, on: workspace.name) }
+            },
+            start: { startHeaderRunners(for: workspace) },
+            stop: { stopHeaderRunners(for: workspace) },
+            configure: {
+                store.activate(workspace.id)
+                sidebarMode = .run(workspaceID: workspace.id)
+            }
+        )
+    }
+
+    /// Mode B's "Plan something here" kickoff — the same shared
+    /// `PlanningSessionLauncher` the rail's `+` uses, so the two entry
+    /// points can't drift.
+    private func openOverviewPlanningSession(buildPrompt: @escaping (String?) -> String) {
+        PlanningSessionLauncher.open(
+            store: store,
+            repoStore: repoStore,
+            docStore: docStore,
+            planQueue: planQueue,
+            sidebarMode: $sidebarMode,
+            buildPrompt: buildPrompt)
     }
 
     /// The spec's front door: when this lane IS the queue's current

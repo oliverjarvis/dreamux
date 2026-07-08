@@ -18,8 +18,9 @@ enum PlanLaneAssembler {
         docStore.plans.map { plan in
             let path = docStore.relativePath(of: plan)
             let status = docStore.status(for: plan) { name in store.featureNames.contains(name) }
-            // Mirrors PlansSpecsSection.renderableTasks: a heading with no
-            // checkbox steps (e.g. `### Notes`) isn't a row worth counting.
+            // Mirrors the same task filter used elsewhere (the Overview's
+            // checklist, `PlanCurrentStep`): a heading with no checkbox
+            // steps (e.g. `### Notes`) isn't a row worth counting.
             let tasks = plan.tasks.filter { !$0.steps.isEmpty }
             let phaseSummaries: [PlanPhaseSummary]
             if PlanPhases.shouldGroup(tasks) {

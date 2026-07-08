@@ -209,7 +209,6 @@ struct WorkspaceSidebar: View {
                 docStore: docStore,
                 layout: layout,
                 flows: flows,
-                onViewAllFlows: { sidebarMode = .flows },
                 featureExists: { name in store.featureNames.contains(name) },
                 onOpenDoc: onOpenDoc,
                 onOpenDocAtLine: onOpenDocAtLine,
@@ -228,6 +227,7 @@ struct WorkspaceSidebar: View {
                     else { return }
                     sidebarMode = .workspace
                     store.activate(workspace.id)
+                    store.session(for: workspace).focusOverview()
                 },
                 onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) },
                 featureName: { featureName(for: $0) },
@@ -245,9 +245,6 @@ struct WorkspaceSidebar: View {
                 gateCloseWorkspaceID: $gateCloseWorkspaceID,
                 onCourseCorrectionNudge: onCourseCorrectionNudge,
                 autoRunFailure: autoRunFailure,
-                onViewTaskChanges: { plan, task in
-                    viewTaskChanges(plan: plan, task: task)
-                },
                 mainWorkspaceActive: store.workspaces.first(where: \.isMain).map(isWorkspaceActive) ?? false,
                 mainWorktreeIssue: mainWorktreeIssue,
                 onOpenMain: { openMainWorkspace() },
@@ -974,55 +971,6 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// Resolve the commits recorded for a task (agent + backstop) in each
-    /// of the feature's repo worktrees and open a diff tab per repo with
-    /// matches. No matches anywhere → explain instead of silently doing
-    /// nothing (the task row's "View changes" hover button + context-menu
-    /// item both call through here).
-    private func viewTaskChanges(plan: PlanDoc, task: PlanTask) {
-        let feature = featureName(for: plan)
-        guard let workspace = store.featureWorkspace(named: feature)
-        else {
-            addError = "No workspace for this plan yet — run the plan first."
-            return
-        }
-        let repos = repoStore.repositories.filter {
-            workspace.linkedRepoIDs.contains($0.name)
-        }
-        // The resolver matches on the heading verbatim (what the agent
-        // actually commits); "this task" is display-only, for the rare
-        // blank heading.
-        let matchTitle = task.title
-        let displayTitle = task.title.isEmpty ? "this task" : task.title
-        Task { @MainActor in
-            var opened = 0
-            for repo in repos {
-                guard let worktree = await GitOperations.worktreeURL(
-                    forBranch: feature, in: repo.rootURL) else { continue }
-                let log = await GitOperations.commitLog(
-                    in: worktree, baseBranch: repo.defaultBranch)
-                guard let range = TaskDiffResolver.range(for: matchTitle, in: log)
-                else { continue }
-                // range.from is "<oldest>^" — invalid when oldest is the
-                // root commit; parentRevision maps that to the empty tree.
-                let oldestSHA = String(range.from.dropLast())
-                let fromRevision = await GitOperations.parentRevision(
-                    of: oldestSHA, in: worktree)
-                sidebarMode = .workspace
-                store.activate(workspace.id)
-                store.session(for: workspace).openDiffTab(DiffRequest(
-                    worktreeURL: worktree,
-                    fromRevision: fromRevision,
-                    toRevision: range.to,
-                    title: repos.count > 1 ? "\(displayTitle) — \(repo.name)" : displayTitle))
-                opened += 1
-            }
-            if opened == 0 {
-                addError = "No commits recorded for \"\(displayTitle)\" yet. The agent commits when the task's boxes are ticked (auto-commit is \(WorkflowSettings.autoCommitEnabled ? "on" : "OFF — see Settings → Workflow"))."
-            }
-        }
-    }
-
     // MARK: - e2e bridge
 
     /// Bridge for this project window — `nil` when the e2e harness is
@@ -1059,52 +1007,17 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// One planning terminal per project, cwd at the project root where
-    /// `repos/<repo>/<default>/` checkouts and `docs/` are visible.
-    /// Reuses the existing tab when it's still open (tracked on the
-    /// session — see `planningTabID` below); the kickoff prompt is typed
-    /// via the shared driver either way.
-    ///
-    /// `buildPrompt` receives the intake digest (nil on a project with no
-    /// plans in flight) and returns the kickoff text. The digest is
-    /// assembled *after* the `docStore.refresh()` below so it reflects the
-    /// freshest inventory at send time; the driver's own quiescence gate
-    /// (`ClaudePromptDriver.send`) is left entirely untouched.
+    /// One planning terminal per project — delegates to the shared
+    /// `PlanningSessionLauncher` (also used by the Overview's Mode B
+    /// "Plan something here") so the two entry points can't drift.
     private func openPlanningSession(buildPrompt: @escaping (String?) -> String) {
-        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
-        store.activate(workspace.id)
-        sidebarMode = .workspace
-        let session = store.session(for: workspace)
-        DocStore.ensureDocsHome(at: repoStore.project.rootPath)
-        docStore.refresh()
-        MCPInstaller.installIfNeeded(at: repoStore.project.rootPath.path)
-        guard let tab = session.reuseOrOpenPlanningTab(
-            at: repoStore.project.rootPath.path) else { return }
-        tab.startIfNeeded()
-        Task {
-            let prompt = buildPrompt(await intakeDigest())
-            ClaudePromptDriver.send(prompt, into: tab)
-        }
-    }
-
-    /// Assemble the intake digest for a kickoff prompt, or nil when the
-    /// project has no non-merged plans (the prompt then reproduces its
-    /// pre-intake form). Reads the live `DocStore` inventory and, for
-    /// running plans, worktree territory via `IntakeDigest.build`
-    /// (`<repoRoot>/<feature>` per repo, diffed against each repo's
-    /// default branch).
-    private func intakeDigest() async -> String? {
-        let featureExists: (String) -> Bool = { name in
-            store.featureNames.contains(name)
-        }
-        guard docStore.plans.contains(where: {
-            docStore.status(for: $0, featureExists: featureExists) != .merged
-        }) else { return nil }
-        return await IntakeDigest.build(
+        PlanningSessionLauncher.open(
+            store: store,
+            repoStore: repoStore,
             docStore: docStore,
-            repos: repoStore.repositories,
-            queue: planQueue.entries,
-            featureExists: featureExists)
+            planQueue: planQueue,
+            sidebarMode: $sidebarMode,
+            buildPrompt: buildPrompt)
     }
 
     private func handleCreateFeature(name: String, repoIDs: [String]) {

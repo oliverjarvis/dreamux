@@ -1275,6 +1275,165 @@ def scenario_plan_gate(d):
     d.cmd("stopQueue")
 
 
+def resolve_stuck_gate(d):
+    """scenario_plan_gate leaves the queue parked atGate on its own plan
+    when it finishes -- the queue is a single lane, so an unresolved
+    gate blocks EVERY plan behind it, including this scenario's.
+    mergeFeature+cleanupFeature can't reliably clear it here: the queue
+    only advances past a gate once its own tick() reads the plan as
+    `.merged`, on a LATER poll -- not deterministic enough for a
+    scenario to wait on. `dequeuePlan` (test-only, see PROTOCOL.md) removes a
+    plan from the queue's `entries` outright, so we clear every parked plan
+    before enqueuing our own.
+
+    NB: neither `state == "atGate"` nor `current` is reliable here.
+    scenario_plan_gate ends with `stopQueue`, which sets state=idle AND
+    `currentPlanPath=nil` but leaves the plan in `entries`; a later
+    `startQueue` (ours) would run that leftover head and it would re-gate.
+    `skipQueueGate`/`skipCurrent` can't touch it (they need `currentPlanPath`,
+    now nil), so drain `entries` directly with `dequeuePlan`."""
+    for _ in range(6):
+        entries = d.cmd("queueState").get("entries") or []
+        if not entries:
+            return
+        for path in entries:
+            d.cmd("dequeuePlan", path=path)
+    raise AssertionError(
+        f"resolve_stuck_gate: queue still not empty: {d.cmd('queueState').get('entries')}")
+
+
+def scenario_overview(d):
+    """Workspace Overview tab (Task 7): a plan-backed run's Mode A
+    dashboard, the reserved main workspace's Mode B + project mini-
+    dashboard, and the simplified FLOWS rail (compact cards, no
+    accordion) those two modes replaced. Runs a real 2-phase plan
+    through the queue -- same mechanism as scenario_plan_gate -- so the
+    Overview's checklist has real phases/tasks/progress to show."""
+    d.cmd("setSidebarMode", mode="workspace")
+    resolve_stuck_gate(d)
+
+    plans_dir = os.path.join(PROJECT_DIR, "docs", "plans")
+    os.makedirs(plans_dir, exist_ok=True)
+    plan_rel = "docs/plans/2026-07-08-overview-demo.md"
+    plan_abs = os.path.join(PROJECT_DIR, plan_rel)
+    with open(plan_abs, "w", encoding="utf-8") as f:
+        f.write(
+            "# Overview Demo Plan\n\n"
+            "**Goal:** Exercise the workspace Overview tab's Mode A "
+            "dashboard end-to-end.\n\n"
+            "## Phase 0 — Scaffold\n\n"
+            "### Task 1: Set up scaffolding\n\n"
+            "- [x] Step 1: Create the module skeleton\n"
+            "- [x] Step 2: Wire up the entry point\n\n"
+            "## Phase 1 — Build the feature\n\n"
+            "### Task 2: Implement the core behavior\n\n"
+            "- [x] Step 1: Write the happy path\n"
+            "- [ ] Step 2: Handle the edge cases\n"
+            "- [ ] Step 3: Add logging\n\n"
+            "### Task 3: Polish\n\n"
+            "- [ ] Step 1: Tidy up naming\n"
+            "- [ ] Step 2: Update the docs\n")
+
+    docs = d.cmd("listDocs")
+    entry = next((doc for doc in docs["docs"] if doc["path"] == plan_rel), None)
+    require(entry is not None and entry["status"] == "ready",
+            f"overview-demo plan should be ready, got {entry}")
+
+    d.cmd("enqueuePlan", path=plan_rel)
+    d.cmd("startQueue")
+
+    def queue_running():
+        qs = d.cmd("queueState")
+        return qs if qs["state"] == "running" and qs.get("current") == plan_rel else None
+    d.wait_until(queue_running, 30.0, "queue running the overview-demo plan")
+
+    # Same provisioning race scenario_plan_gate guards against: wait for
+    # the doc's status to leave "ready" before touching the worktree.
+    def plan_provisioned():
+        docs = d.cmd("listDocs")
+        entry = next((doc for doc in docs["docs"] if doc["path"] == plan_rel), None)
+        return entry if entry and entry["status"] != "ready" else None
+    d.wait_until(plan_provisioned, 30.0,
+                 "overview-demo plan status to leave ready (worktree provisioned)")
+
+    # A real commit so the Overview's "View changes" action has a
+    # non-zero diff to show, same as scenario_plan_gate's gate card.
+    wt = worktree("portenv-server", "overview-demo")
+    with open(os.path.join(wt, "OVERVIEW-NOTES.md"), "w", encoding="utf-8") as f:
+        f.write("overview tab e2e payload\n")
+    git("add", "-A", cwd=wt)
+    git("commit", "-m", "overview-demo: sample commit", cwd=wt)
+
+    def workspace_entry(name):
+        state = d.state()
+        return next((w for w in state.get("workspaces", []) if w["name"] == name), None)
+
+    # A workspace's Bonsplit pane only mounts (and bootstraps its pinned
+    # Overview tab) once it's actually rendered -- an onAppear this
+    # driver can't force, only wait out. `tabs[0]` is the state-level
+    # proof Task 1 asked for: present, first, titled "Overview".
+    def overview_tab_first(name):
+        def probe():
+            ws = workspace_entry(name)
+            if ws and ws.get("tabs"):
+                first = ws["tabs"][0]
+                if first.get("isOverview") and first.get("title") == "Overview":
+                    return ws
+            return None
+        return probe
+
+    ws = d.wait_until(overview_tab_first("overview-demo"), 20.0,
+                       "overview-demo workspace to bootstrap its pinned Overview tab first")
+    require(len(ws["tabs"]) >= 2, f"overview-demo should have >=2 tabs, got {ws['tabs']}")
+
+    # Activate it. No extra "focus the Overview" step: bootstrap's own
+    # tail (WorkspaceSession.bootstrapIfNeeded) re-selects the Overview
+    # tab after the plan's agent terminal -- created first, before this
+    # workspace's pane ever mounted -- stole selection by existing first.
+    d.cmd("setSidebarMode", mode="workspace", workspace="overview-demo")
+    state = d.state()
+    ws = next(w for w in state["workspaces"] if w["name"] == "overview-demo")
+    require(ws["isActive"], "overview-demo should be the active workspace")
+    time.sleep(1.0)
+    d.screenshot("overview-plan")
+
+    # A second, un-run plan behind it in the queue -- proves the rail's
+    # queue section survived the accordion removal (spec decision:
+    # "queue stays in the rail").
+    followup_rel = "docs/plans/2026-07-08-overview-followup.md"
+    followup_abs = os.path.join(PROJECT_DIR, followup_rel)
+    with open(followup_abs, "w", encoding="utf-8") as f:
+        f.write(
+            "# Overview Followup Plan\n\n"
+            "**Goal:** Sit behind overview-demo in the queue so the "
+            "rail still shows a queued row.\n\n"
+            "### Task 1: Do the follow-up work\n\n"
+            "- [ ] Step 1: Placeholder step\n")
+    d.cmd("enqueuePlan", path=followup_rel)
+
+    def followup_queued():
+        qs = d.cmd("queueState")
+        return qs if followup_rel in qs["entries"] else None
+    d.wait_until(followup_queued, 10.0, "overview-followup to land in the queue")
+
+    time.sleep(0.5)
+    d.screenshot("rail-compact")
+
+    # Mode B: the reserved main workspace has no button an e2e driver
+    # can click, so `openMainWorkspace` is the only path onto it.
+    resp = d.cmd("openMainWorkspace")
+    main_name = resp["name"]
+
+    ws = d.wait_until(overview_tab_first(main_name), 20.0,
+                       "main workspace to bootstrap its pinned Overview tab first")
+    require(len(ws["tabs"]) >= 2, f"main should have >=2 tabs, got {ws['tabs']}")
+    require(ws["isActive"], "main should be the active workspace after openMainWorkspace")
+    time.sleep(1.0)
+    d.screenshot("overview-main")
+
+    d.cmd("stopQueue")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -1292,6 +1451,7 @@ SCENARIOS = [
     ("publish-pr", scenario_publish_pr),
     ("flows", scenario_flows),
     ("plan-gate", scenario_plan_gate),
+    ("overview", scenario_overview),
     ("quit", scenario_quit),
 ]
 
