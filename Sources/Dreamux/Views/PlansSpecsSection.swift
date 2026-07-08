@@ -58,13 +58,6 @@ struct PlansSpecsSection: View {
     /// The failure message of a fizzled auto-run launch for a plan
     /// relative path, if any — rendered as an orange row caption.
     let autoRunFailure: (String) -> String?
-    /// Resolve a task's recorded commits into a diff tab (or explain why
-    /// there's nothing to show). No caller in this view right now — its one
-    /// trigger, a hover button + context-menu item on the per-task row, went
-    /// with the rail's accordion (the checklist now lives on the workspace's
-    /// Overview, which doesn't yet have an equivalent per-task action).
-    /// Kept on the interface for that to wire up to.
-    let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
     /// The pinned main row: is the reserved main workspace currently
     /// the active one (selection styling)?
     let mainWorkspaceActive: Bool

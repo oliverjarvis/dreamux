@@ -246,9 +246,6 @@ struct WorkspaceSidebar: View {
                 gateCloseWorkspaceID: $gateCloseWorkspaceID,
                 onCourseCorrectionNudge: onCourseCorrectionNudge,
                 autoRunFailure: autoRunFailure,
-                onViewTaskChanges: { plan, task in
-                    viewTaskChanges(plan: plan, task: task)
-                },
                 mainWorkspaceActive: store.workspaces.first(where: \.isMain).map(isWorkspaceActive) ?? false,
                 mainWorktreeIssue: mainWorktreeIssue,
                 onOpenMain: { openMainWorkspace() },
@@ -972,55 +969,6 @@ struct WorkspaceSidebar: View {
             : openable.filter { $0.name == runnerName }
         for runner in targets {
             runners.openNow(runner, on: workspace.name)
-        }
-    }
-
-    /// Resolve the commits recorded for a task (agent + backstop) in each
-    /// of the feature's repo worktrees and open a diff tab per repo with
-    /// matches. No matches anywhere → explain instead of silently doing
-    /// nothing (the task row's "View changes" hover button + context-menu
-    /// item both call through here).
-    private func viewTaskChanges(plan: PlanDoc, task: PlanTask) {
-        let feature = featureName(for: plan)
-        guard let workspace = store.featureWorkspace(named: feature)
-        else {
-            addError = "No workspace for this plan yet — run the plan first."
-            return
-        }
-        let repos = repoStore.repositories.filter {
-            workspace.linkedRepoIDs.contains($0.name)
-        }
-        // The resolver matches on the heading verbatim (what the agent
-        // actually commits); "this task" is display-only, for the rare
-        // blank heading.
-        let matchTitle = task.title
-        let displayTitle = task.title.isEmpty ? "this task" : task.title
-        Task { @MainActor in
-            var opened = 0
-            for repo in repos {
-                guard let worktree = await GitOperations.worktreeURL(
-                    forBranch: feature, in: repo.rootURL) else { continue }
-                let log = await GitOperations.commitLog(
-                    in: worktree, baseBranch: repo.defaultBranch)
-                guard let range = TaskDiffResolver.range(for: matchTitle, in: log)
-                else { continue }
-                // range.from is "<oldest>^" — invalid when oldest is the
-                // root commit; parentRevision maps that to the empty tree.
-                let oldestSHA = String(range.from.dropLast())
-                let fromRevision = await GitOperations.parentRevision(
-                    of: oldestSHA, in: worktree)
-                sidebarMode = .workspace
-                store.activate(workspace.id)
-                store.session(for: workspace).openDiffTab(DiffRequest(
-                    worktreeURL: worktree,
-                    fromRevision: fromRevision,
-                    toRevision: range.to,
-                    title: repos.count > 1 ? "\(displayTitle) — \(repo.name)" : displayTitle))
-                opened += 1
-            }
-            if opened == 0 {
-                addError = "No commits recorded for \"\(displayTitle)\" yet. The agent commits when the task's boxes are ticked (auto-commit is \(WorkflowSettings.autoCommitEnabled ? "on" : "OFF — see Settings → Workflow"))."
-            }
         }
     }
 
