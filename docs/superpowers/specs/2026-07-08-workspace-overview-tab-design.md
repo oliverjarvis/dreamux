@@ -152,12 +152,20 @@ With detail relocated, the rail becomes a compact monitor:
 - No new git or session machinery — the Overview is a new front door onto
   existing plan/worktree/queue/diff state.
 
-## Open questions for planning
+## Resolved decisions (planning inputs)
 
-- Overview tab **icon** and whether the title is literally "Overview" vs the
-  branch name.
-- Whether the queue section and doc-chip line stay in the rail or also move
-  into the Overview.
-- Whether selecting a run in the rail should *auto-activate* the workspace
-  (switch the main pane to its Overview) or only on explicit Open — leaning
-  auto on single click, matching master-detail.
+- **Auto-activate on single click.** Clicking a run that *has a workspace*
+  (running / awaiting review / gated) activates that workspace and switches
+  the main pane to its Overview; "Open" is the explicit equivalent. A
+  **not-yet-run plan has no workspace**, so clicking it opens the plan doc
+  (preview) and **Run** is what provisions the workspace (whose Overview
+  then becomes home). This nudges FLOWS toward *runs*; ready plans are
+  launched from Context / the Run button. No "preview Overview" for
+  un-run plans in this pass.
+- **Queue stays in the rail; the doc-chip (spec/roadmap) line moves to the
+  Overview header.** The queue is a compact project-level control and not
+  the cursed part; the per-plan spec chip is detail that belongs in the
+  Overview and keeps the rail card compact.
+- **Tab title "Overview", icon `house.fill`.** Short and identical across
+  workspaces — the workspace identity is already carried by the project
+  header and rail selection.
