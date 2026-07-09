@@ -174,7 +174,7 @@ yourself).
 ```js
 const res = await dreamux.shell.exec('ls -la', {
   cwd: undefined,     // default: the project root
-  timeout: undefined, // default: 60_000 ms
+  timeout: undefined, // default: 60 seconds
 });
 // { stdout: string, stderr: string, code: number }
 ```
@@ -183,7 +183,7 @@ const res = await dreamux.shell.exec('ls -la', {
 |---|---|
 | `cmd` | shell command string (required) |
 | `opts.cwd` | working directory; defaults to the project's root |
-| `opts.timeout` | milliseconds before the process is killed; default 60s |
+| `opts.timeout` | seconds before the process is killed; default 60 |
 
 Resolves with `{ stdout, stderr, code }` even for a non-zero exit code
 — check `code` yourself. A timed-out or unstartable process rejects the
