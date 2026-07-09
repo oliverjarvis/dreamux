@@ -1,7 +1,21 @@
 import SwiftUI
 import Bonsplit
 
+/// Process entry point. A CLI subcommand (`dreamux clone …`, `add …`, `list`)
+/// runs headless and exits before any GUI is created; anything else launches
+/// the SwiftUI app as usual. Sharing one binary keeps the CLI byte-compatible
+/// with the app's own project store and git layout — no duplicate logic.
 @main
+struct DreamuxMain {
+    static func main() {
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if let command = arguments.first, DreamuxCLI.commandNames.contains(command) {
+            exit(DreamuxCLI.run(arguments))
+        }
+        DreamuxApp.main()
+    }
+}
+
 struct DreamuxApp: App {
     @State private var projects = ProjectStore()
 

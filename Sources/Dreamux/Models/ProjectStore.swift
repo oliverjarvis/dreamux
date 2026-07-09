@@ -63,9 +63,22 @@ final class ProjectStore {
         try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
         self.storeURL = appDir.appendingPathComponent("projects.json")
 
-        let projectsRoot: URL
+        self.projectsRoot = Self.projectsRootURL()
+
+        load()
+        refresh()
+    }
+
+    /// The directory every project folder lives under — `~/Documents/Dreamux`
+    /// by default, or `$DREAMUX_PROJECTS_ROOT`. Created if absent. Nonisolated
+    /// and static so the `dreamux` CLI resolves the exact same root the app
+    /// scans, without needing a main-actor `ProjectStore`.
+    nonisolated static func projectsRootURL() -> URL {
+        let fm = FileManager.default
+        let env = ProcessInfo.processInfo.environment
+        let root: URL
         if let override = env["DREAMUX_PROJECTS_ROOT"], !override.isEmpty {
-            projectsRoot = URL(fileURLWithPath: override, isDirectory: true)
+            root = URL(fileURLWithPath: override, isDirectory: true)
         } else {
             let documents = (try? fm.url(
                 for: .documentDirectory,
@@ -74,13 +87,10 @@ final class ProjectStore {
                 create: true
             )) ?? URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent("Documents")
-            projectsRoot = documents.appendingPathComponent("Dreamux", isDirectory: true)
+            root = documents.appendingPathComponent("Dreamux", isDirectory: true)
         }
-        try? fm.createDirectory(at: projectsRoot, withIntermediateDirectories: true)
-        self.projectsRoot = projectsRoot
-
-        load()
-        refresh()
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
     }
 
     func project(id: UUID) -> Project? {
