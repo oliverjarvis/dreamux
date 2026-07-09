@@ -89,7 +89,14 @@ final class AppLibraryStore {
             origin: nil
         )
         let folderURL = root.appendingPathComponent(slug, isDirectory: true)
-        try AppletScaffold.write(to: folderURL, manifest: manifest)
+        do {
+            try AppletScaffold.write(to: folderURL, manifest: manifest)
+        } catch {
+            // Roll back a partial scaffold — a junk folder would squat
+            // the slug (and surface as a broken row) forever.
+            try? FileManager.default.removeItem(at: folderURL)
+            throw error
+        }
         refresh()
         return Applet(manifest: manifest, folderURL: folderURL)
     }

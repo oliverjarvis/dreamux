@@ -78,13 +78,21 @@ final class ProjectAppletStore {
 
         let fm = FileManager.default
         try fm.createDirectory(at: appsDir, withIntermediateDirectories: true)
-        try fm.copyItem(at: library.folderURL, to: destination)
 
         var manifest = library.manifest
         manifest.id = UUID()
         manifest.slug = slug
         manifest.origin = AppletManifest.Origin(id: library.id, hash: sourceHash, adoptedAt: Date())
-        try manifest.write(to: destination)
+        do {
+            try fm.copyItem(at: library.folderURL, to: destination)
+            try manifest.write(to: destination)
+        } catch {
+            // Roll back a partial adopt: without this, a failed manifest
+            // rewrite would leave a folder still carrying the LIBRARY
+            // applet's identity (its id/slug) inside this project.
+            try? fm.removeItem(at: destination)
+            throw error
+        }
 
         refresh()
         return Applet(manifest: manifest, folderURL: destination)
@@ -104,7 +112,14 @@ final class ProjectAppletStore {
             origin: nil
         )
         let folderURL = appsDir.appendingPathComponent(slug, isDirectory: true)
-        try AppletScaffold.write(to: folderURL, manifest: manifest)
+        do {
+            try AppletScaffold.write(to: folderURL, manifest: manifest)
+        } catch {
+            // Roll back a partial scaffold — a junk folder would squat
+            // the slug (and surface as a broken row) forever.
+            try? FileManager.default.removeItem(at: folderURL)
+            throw error
+        }
         refresh()
         return Applet(manifest: manifest, folderURL: folderURL)
     }
@@ -138,19 +153,31 @@ final class ProjectAppletStore {
 
         let fm = FileManager.default
         try fm.createDirectory(at: library.root, withIntermediateDirectories: true)
-        try fm.copyItem(at: applet.folderURL, to: destination)
 
         var libraryManifest = applet.manifest
         libraryManifest.id = UUID()
         libraryManifest.slug = slug
         libraryManifest.origin = nil
-        try libraryManifest.write(to: destination)
-        library.refresh()
+        // All fallible steps happen before any refresh, so a failure at
+        // ANY of them rolls back the library copy and leaves both sides
+        // consistent — otherwise a failed local origin stamp would orphan
+        // a library entry nothing points at, and a retry would mint a
+        // duplicate slug.
+        do {
+            try fm.copyItem(at: applet.folderURL, to: destination)
+            try libraryManifest.write(to: destination)
 
-        let publishedHash = AppletContentHash.hash(of: destination)
-        var localManifest = applet.manifest
-        localManifest.origin = AppletManifest.Origin(id: libraryManifest.id, hash: publishedHash, adoptedAt: Date())
-        try localManifest.write(to: applet.folderURL)
+            let publishedHash = AppletContentHash.hash(of: destination)
+            var localManifest = applet.manifest
+            localManifest.origin = AppletManifest.Origin(
+                id: libraryManifest.id, hash: publishedHash, adoptedAt: Date())
+            try localManifest.write(to: applet.folderURL)
+        } catch {
+            try? fm.removeItem(at: destination)
+            throw error
+        }
+
+        library.refresh()
         refresh()
 
         return Applet(manifest: libraryManifest, folderURL: destination)

@@ -69,6 +69,8 @@ final class ProjectAppletStoreTests: XCTestCase {
         // The project copy now records its lineage.
         let refreshed = try XCTUnwrap(store.applets.first)
         XCTAssertEqual(refreshed.manifest.origin?.id, published.id)
+        XCTAssertEqual(refreshed.manifest.origin?.hash,
+                       AppletContentHash.hash(of: published.folderURL))
     }
 
     func testDataDirIsUnderDreamuxAppdata() throws {
