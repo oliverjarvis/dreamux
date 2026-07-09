@@ -40,6 +40,20 @@ final class AppLibraryStoreTests: XCTestCase {
         XCTAssertEqual(store.applets, [])
     }
 
+    func testCreateUniquesSlugAgainstLiveDiskState() throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = AppLibraryStore(root: root)
+        // A folder appears out-of-band (another store instance, or a
+        // manifest-less directory) after this store's last refresh. We do
+        // NOT refresh the store manually — createApplet must handle it.
+        let squatter = root.appendingPathComponent("kanban", isDirectory: true)
+        try FileManager.default.createDirectory(at: squatter, withIntermediateDirectories: true)
+        let applet = try store.createApplet(name: "Kanban", description: "d", icon: "s")
+        XCTAssertEqual(applet.slug, "kanban-2")
+        // The squatting folder is untouched — nothing was written into it.
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: squatter.path), [])
+    }
+
     func testAppsFolderIsReservedProjectName() {
         XCTAssertTrue(ProjectStore.isReservedProjectFolderName("Apps"))
         XCTAssertFalse(ProjectStore.isReservedProjectFolderName("apps-thing"))

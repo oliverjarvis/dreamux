@@ -66,9 +66,19 @@ final class AppLibraryStore {
 
     /// Scaffold a new canonical applet (slug uniqued against current
     /// library slugs), refresh, return it.
+    ///
+    /// The slug is uniqued against *live disk state*, not just the
+    /// in-memory cache: another store instance over the same root (App
+    /// Studio window vs. main window) may have created a folder since our
+    /// last refresh, and `AppletScaffold.write` would silently clobber it.
+    /// On-disk subdirectory names count even without a loadable manifest,
+    /// so a broken folder is never overwritten either.
     @discardableResult
     func createApplet(name: String, description: String, icon: String) throws -> Applet {
-        let slug = AppletSlug.unique(AppletSlug.slugify(name), existing: Set(applets.map(\.slug)))
+        refresh()
+        let onDiskNames = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        let taken = Set(applets.map(\.slug)).union(onDiskNames)
+        let slug = AppletSlug.unique(AppletSlug.slugify(name), existing: taken)
         let manifest = AppletManifest(
             id: UUID(),
             name: name,
