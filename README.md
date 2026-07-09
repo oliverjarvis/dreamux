@@ -13,12 +13,27 @@ app programmatically — e.g. creating projects from a script. A recognized
 subcommand runs headless and exits; any other invocation launches the GUI as
 usual, so it's the same one binary.
 
-The binary lives inside the app bundle; alias it for convenience:
+### Install
 
 ```sh
-alias dreamux="/Applications/Dreamux.app/Contents/MacOS/Dreamux"
-# …or wherever your build is, e.g. ./Dreamux.app/Contents/MacOS/Dreamux
+curl -fsSL https://raw.githubusercontent.com/oliverjarvis/dreamux/main/install.sh | bash
 ```
+
+This links the `dreamux` command onto your PATH (`/usr/local/bin` or
+`~/.local/bin`). It requires Dreamux.app to be installed first — drop it in
+`/Applications`, or build it with `./Scripts/make-app.sh`. Prefer to do it by
+hand:
+
+```sh
+ln -sf "/Applications/Dreamux.app/Contents/MacOS/Dreamux" /usr/local/bin/dreamux
+# …or, without touching PATH, just alias it:
+alias dreamux="/Applications/Dreamux.app/Contents/MacOS/Dreamux"
+```
+
+> Because the CLI is currently the app's own binary, "installing" just wires
+> up the command from your installed app — the same way VS Code installs
+> `code`. A standalone, `curl`-downloads-a-binary install will come if/when the
+> CLI ships as its own release.
 
 ### Commands
 
