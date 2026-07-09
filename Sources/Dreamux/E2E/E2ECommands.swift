@@ -285,6 +285,7 @@ enum E2ECommands {
         case .signals: return "signals"
         case .flows: return "flows"
         case .library: return "library"
+        case .app: return "app"
         }
     }
 

@@ -29,6 +29,16 @@ final class ProjectSession {
     let planQueue: PlanQueueController
     let nudgeCenter: PlanNudgeCenter
     let flows: FlowStore
+    /// App Studio applets living under `<project>/apps/` (adopted + local-born).
+    let applets: ProjectAppletStore
+    /// The global App Studio applet library — the source for the Adopt path
+    /// and the destination for Publish.
+    let appLibrary: AppLibraryStore
+
+    /// Live sessions for open applets, cached by applet id so a `WKWebView`
+    /// and its builder-agent terminal survive SwiftUI redraws — the same
+    /// keep-it-alive discipline the workspace terminal sessions use.
+    @ObservationIgnored private var appletSessions: [UUID: AppletSession] = [:]
 
     /// Non-e2e channel for the plan queue's "merge and continue" gate
     /// action: `WorkspaceSidebar` owns the merge sheet's presentation
@@ -205,6 +215,8 @@ final class ProjectSession {
         self.planQueue = planQueue
         self.nudgeCenter = nudgeCenter
         self.flows = flows
+        self.applets = ProjectAppletStore(project: project)
+        self.appLibrary = AppLibraryStore()
 
         // Needs `self` for the gate channel, so it's wired after the
         // stored properties. Weak: the queue is owned by this bundle and
@@ -678,6 +690,30 @@ final class ProjectSession {
     /// `FlowTailerPool.releaseLazyTail`).
     func endFlowsZoom(sessionID: String) {
         flowTailerPool?.releaseLazyTail(sessionID: sessionID)
+    }
+
+    // MARK: - Applets
+
+    /// The live session for an open applet, created on first open and cached
+    /// by applet id — its `WKWebView` and builder-agent terminal must outlive
+    /// the host view's redraws (`AppletHostView` is rebuilt on every project
+    /// switch / mode flip).
+    func appletSession(for applet: Applet) -> AppletSession {
+        if let existing = appletSessions[applet.id] { return existing }
+        let session = AppletSession(
+            applet: applet,
+            dataDir: applets.dataDir(for: applet),
+            projectRoot: project.rootPath)
+        appletSessions[applet.id] = session
+        return session
+    }
+
+    /// Tear down and forget an applet's live session — called before its
+    /// folder is removed so the hot-reload poller and any builder agent stop
+    /// first (`AppletSession.stopAgent`).
+    func closeAppletSession(id: UUID) {
+        appletSessions[id]?.stopAgent()
+        appletSessions[id] = nil
     }
 }
 

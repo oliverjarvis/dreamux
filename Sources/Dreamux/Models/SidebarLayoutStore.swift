@@ -27,6 +27,10 @@ final class SidebarLayoutStore {
     var specFilesExpanded: Bool {
         didSet { if specFilesExpanded != oldValue { save() } }
     }
+    /// The Apps section (App Studio applets adopted/created in this project).
+    var appsExpanded: Bool {
+        didSet { if appsExpanded != oldValue { save() } }
+    }
     /// Auto-run parallel plans on discovery (spec: Decisions §1). Default
     /// OFF — a `**Runs:** parallel` plan lands `ready` for an explicit Run
     /// click until the user opts into zero-friction launching.
@@ -47,6 +51,7 @@ final class SidebarLayoutStore {
         contextExpanded = loaded?.contextExpanded ?? false
         planFilesExpanded = loaded?.planFilesExpanded ?? true
         specFilesExpanded = loaded?.specFilesExpanded ?? true
+        appsExpanded = loaded?.appsExpanded ?? true
         autoRunParallel = loaded?.autoRunParallel ?? false
     }
 
@@ -86,6 +91,7 @@ final class SidebarLayoutStore {
         var contextExpanded: Bool?
         var planFilesExpanded: Bool?
         var specFilesExpanded: Bool?
+        var appsExpanded: Bool?
         var autoRunParallel: Bool?
     }
 
@@ -110,6 +116,7 @@ final class SidebarLayoutStore {
                               contextExpanded: contextExpanded,
                               planFilesExpanded: planFilesExpanded,
                               specFilesExpanded: specFilesExpanded,
+                              appsExpanded: appsExpanded,
                               autoRunParallel: autoRunParallel)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

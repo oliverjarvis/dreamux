@@ -42,6 +42,18 @@ struct WorkspaceSidebar: View {
     /// Auto-run failure lookup (`ProjectSession.autoRunFailures`) —
     /// forwarded straight into `PlansSpecsSection`.
     let autoRunFailure: (String) -> String?
+    /// This project's App Studio applets (the APPS section's data).
+    @Bindable var applets: ProjectAppletStore
+    /// The global applet library — the New App sheet's Adopt source and the
+    /// Publish destination.
+    @Bindable var appLibrary: AppLibraryStore
+    /// Resolve (creating + caching) the live `AppletSession` behind an applet
+    /// — `ProjectSession.appletSession(for:)`, which the sidebar can't reach
+    /// directly (it never imports the bundle).
+    let appletSessionProvider: (Applet) -> AppletSession
+    /// Tear down an applet's live session before its folder is removed —
+    /// `ProjectSession.closeAppletSession(id:)`.
+    let closeAppletSession: (UUID) -> Void
 
     @State private var hoveredTile: SidebarTile?
     /// Hovered doc/config file row in the Plans/Specs/Project Files lists.
@@ -57,6 +69,8 @@ struct WorkspaceSidebar: View {
     @State private var switchNotice: SwitchNotice?
     @State private var runningPlan: PlanDoc?
     @State private var showNewPlan = false
+    /// The New App sheet (Create / Adopt) presentation state.
+    @State private var showNewApp = false
     /// Feature row currently under the pointer — drives hover-reveal of the
     /// run controls without giving every row its own `@State` (so the rows
     /// can stay lightweight builder methods).
@@ -147,6 +161,20 @@ struct WorkspaceSidebar: View {
                 onCancel: { showNewPlan = false }
             )
         }
+        .sheet(isPresented: $showNewApp) {
+            NewAppSheet(
+                library: appLibrary.applets,
+                onCreate: { name, description in
+                    showNewApp = false
+                    handleCreateApp(name: name, description: description)
+                },
+                onAdopt: { applet in
+                    showNewApp = false
+                    handleAdoptApp(applet)
+                },
+                onCancel: { showNewApp = false }
+            )
+        }
         .alert(
             "Close \(pendingClose?.name ?? "feature")?",
             isPresented: Binding(
@@ -205,6 +233,21 @@ struct WorkspaceSidebar: View {
                     tileRow(tile)
                 }
             }
+
+            AppsSection(
+                applets: applets,
+                layout: layout,
+                sidebarMode: $sidebarMode,
+                onOpenApplet: { sidebarMode = .app($0.id) },
+                onNewApp: {
+                    // The folder is the library's source of truth; refresh so
+                    // the Adopt list is current when the sheet opens.
+                    appLibrary.refresh()
+                    showNewApp = true
+                },
+                onRemove: { handleRemoveApp($0) },
+                onPublish: { handlePublishApp($0) }
+            )
 
             // The live work surface leads (running plans, queue, gates);
             // the reference file lists collapse below it.
@@ -928,6 +971,7 @@ struct WorkspaceSidebar: View {
         case .signals: return false
         case .flows: return false
         case .library: return false
+        case .app: return false
         }
     }
 
@@ -1068,6 +1112,57 @@ struct WorkspaceSidebar: View {
                 addError = error.localizedDescription
             }
             isWorking = false
+        }
+    }
+
+    // MARK: - Applets
+
+    /// New-app CREATE: scaffold a local-born applet, spawn its builder agent
+    /// with the description-seeded kickoff, and open its host. Every store
+    /// mutation is a synchronous `throws` — a failure lands in the shared
+    /// `addError` alert rather than crashing.
+    private func handleCreateApp(name: String, description: String) {
+        do {
+            let applet = try applets.createLocal(
+                name: name, description: description, icon: "shippingbox")
+            appletSessionProvider(applet).beginEditing(
+                kickoff: AppletScaffold.kickoffPrompt(
+                    appletName: name, description: description))
+            sidebarMode = .app(applet.id)
+        } catch {
+            addError = error.localizedDescription
+        }
+    }
+
+    /// ADOPT: copy a library applet into this project and open it (no agent).
+    private func handleAdoptApp(_ library: Applet) {
+        do {
+            let adopted = try applets.adopt(library)
+            sidebarMode = .app(adopted.id)
+        } catch {
+            addError = error.localizedDescription
+        }
+    }
+
+    /// Remove-from-project: stop the applet's live session first (poller +
+    /// builder agent), then delete its folder and data. If the removed applet
+    /// was on screen, fall back to the workspace pane.
+    private func handleRemoveApp(_ applet: Applet) {
+        closeAppletSession(applet.id)
+        do {
+            try applets.remove(applet)
+            if sidebarMode == .app(applet.id) { sidebarMode = .workspace }
+        } catch {
+            addError = error.localizedDescription
+        }
+    }
+
+    /// Publish a local-born applet up to the App Studio library.
+    private func handlePublishApp(_ applet: Applet) {
+        do {
+            _ = try applets.publish(applet, to: appLibrary)
+        } catch {
+            addError = error.localizedDescription
         }
     }
 

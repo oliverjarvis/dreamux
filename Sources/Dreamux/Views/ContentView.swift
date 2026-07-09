@@ -159,7 +159,11 @@ struct ContentView: View {
                             session.enqueueCourseCorrectionNudge(
                                 plan: plan, summary: summary, priority: priority)
                         },
-                        autoRunFailure: { session.autoRunFailures[$0] }
+                        autoRunFailure: { session.autoRunFailures[$0] },
+                        applets: session.applets,
+                        appLibrary: session.appLibrary,
+                        appletSessionProvider: { session.appletSession(for: $0) },
+                        closeAppletSession: { session.closeAppletSession(id: $0) }
                     )
                 }
                 .frame(width: workItemsWidth)
@@ -397,7 +401,34 @@ struct ContentView: View {
             )
         case .library:
             LibraryView(projectRoot: repoStore.project.rootPath)
+        case .app(let id):
+            // The applet's folder is the source of truth: a removed applet
+            // resolves to nil here and shows the missing state; the APPS
+            // section auto-heals on its next refresh.
+            if let applet = session.applets.applet(id: id) {
+                AppletHostView(session: session.appletSession(for: applet))
+            } else {
+                appletMissingState
+            }
         }
+    }
+
+    /// Shown when `.app(id)` points at an applet that no longer exists (it was
+    /// removed while open, or its manifest went invalid).
+    private var appletMissingState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 36))
+                .foregroundStyle(.tertiary)
+            Text("App not found")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+            Text("It may have been removed. The Apps list updates when its folder changes.")
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// The draggable seam between the work-items column and the content
@@ -1065,13 +1096,15 @@ struct ContentView: View {
 /// terminal pane for the active feature; `.run` shows the Run page scoped
 /// to a specific workspace (its play button was clicked); `.signals`
 /// shows the project-wide log stream; `.flows` shows the Flows overview
-/// board; `.library` shows the Skills & MCPs inventory page.
+/// board; `.library` shows the Skills & MCPs inventory page; `.app` hosts a
+/// project applet's preview (and, in Edit mode, its builder agent).
 enum SidebarMode: Hashable {
     case workspace
     case run(workspaceID: UUID)
     case signals
     case flows
     case library
+    case app(UUID)
 }
 
 // MARK: - Project glyph

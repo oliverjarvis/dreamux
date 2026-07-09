@@ -26,6 +26,7 @@ final class SidebarLayoutStoreTests: XCTestCase {
         let store = SidebarLayoutStore(project: project)
         XCTAssertEqual(store.tiles, SidebarTile.allCases)
         XCTAssertEqual(store.featureOrder, [])
+        XCTAssertTrue(store.appsExpanded, "the Apps section is expanded by default")
     }
 
     @MainActor func testOrderedAppliesSavedOrderThenAppendsNewAlphabetically() {
