@@ -47,10 +47,20 @@ struct AppletManifest: Codable, Equatable, Sendable {
 
     /// Decode `<folder>/manifest.json`; nil when missing/invalid (callers
     /// render a warning state, never crash). ISO-8601 dates.
+    ///
+    /// A decoded manifest whose slug isn't path-safe (`AppletSlug.isSafe`) is
+    /// treated as invalid too: the slug is user-editable JSON and every data
+    /// dir is built by appending it to a root (`.dreamux/appdata/<slug>`,
+    /// `AppStudioData/<slug>`), so a hand-edited `"../evil"` would escape the
+    /// data root. Rejecting it at this chokepoint makes a tampered folder an
+    /// `invalidFolder` everywhere, consistently.
     static func load(from folderURL: URL) -> AppletManifest? {
         let fileURL = folderURL.appendingPathComponent(manifestFileName)
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? makeDecoder().decode(AppletManifest.self, from: data)
+        guard let decoded = try? makeDecoder().decode(AppletManifest.self, from: data),
+              AppletSlug.isSafe(decoded.slug)
+        else { return nil }
+        return decoded
     }
 
     /// Write `manifest.json` (pretty, sorted keys, ISO-8601, atomic).
@@ -133,6 +143,16 @@ enum AppletSlug {
         }
         let trimmed = result.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return trimmed.isEmpty ? "applet" : trimmed
+    }
+
+    /// Whether a slug is safe to append as a single path component: exactly
+    /// `slugify`'s own output shape (non-empty, lowercase alphanumerics and
+    /// single interior dashes). `slugify` is idempotent on that shape, so
+    /// every slug the app ever generates passes; anything hand-edited into
+    /// a manifest with "/", "\\", ".", ".." or other separators — or any
+    /// string that could traverse out of a data root — does not.
+    static func isSafe(_ slug: String) -> Bool {
+        !slug.isEmpty && slug == slugify(slug)
     }
 
     /// First of base, base-2, base-3… not in `existing`.

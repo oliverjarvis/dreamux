@@ -53,4 +53,36 @@ final class AppletManifestTests: XCTestCase {
         XCTAssertEqual(AppletSlug.unique("kanban", existing: ["kanban"]), "kanban-2")
         XCTAssertEqual(AppletSlug.unique("kanban", existing: ["kanban", "kanban-2"]), "kanban-3")
     }
+
+    /// The slug is user-editable JSON that gets appended to data-dir roots,
+    /// so `isSafe` must accept every slug the app generates (slugify output)
+    /// and reject anything that could traverse or hide.
+    func testIsSafeAcceptsGeneratedSlugsAndRejectsTraversal() {
+        XCTAssertTrue(AppletSlug.isSafe("expo-status"))
+        XCTAssertTrue(AppletSlug.isSafe("kanban-2"))
+        XCTAssertFalse(AppletSlug.isSafe(""))
+        XCTAssertFalse(AppletSlug.isSafe(".."))
+        XCTAssertFalse(AppletSlug.isSafe("a/b"))
+        XCTAssertFalse(AppletSlug.isSafe("../evil"))
+        XCTAssertFalse(AppletSlug.isSafe(".hidden"))
+    }
+
+    /// The chokepoint: a hand-tampered manifest with a traversal slug must
+    /// fail to load entirely, so every consumer sees it as an invalid folder
+    /// and no data dir is ever built from the slug.
+    func testLoadReturnsNilForUnsafeSlug() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let json = """
+        {
+          "id": "\(UUID().uuidString)",
+          "name": "Evil",
+          "slug": "../evil",
+          "icon": "shippingbox",
+          "description": "",
+          "requiresCapabilities": []
+        }
+        """
+        try Data(json.utf8).write(to: dir.appendingPathComponent("manifest.json"))
+        XCTAssertNil(AppletManifest.load(from: dir))
+    }
 }

@@ -52,8 +52,10 @@ struct AppStudioView: View {
         ) { applet in
             Button("Delete", role: .destructive) { handleDelete(applet) }
             Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("Deletes the app folder and its data. This can't be undone.")
+        } message: { applet in
+            // `library.delete` trashes the folder (fm.trashItem), so unlike
+            // AppsSection's hard remove, this IS recoverable — say so.
+            Text("Moves “\(applet.manifest.name)” to the Trash. You can restore it from Finder.")
         }
         .alert(
             "Couldn't complete action",
