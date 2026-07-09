@@ -17,7 +17,7 @@ enum PlanStatus: String, Sendable {
         case .specOnly: return "doc.badge.ellipsis"
         case .ready: return "circle.dotted"
         case .inProgress: return "circle.lefthalf.filled"
-        case .running: return "play.circle.fill"
+        case .running: return "bolt.fill"
         case .awaitingReview: return "checkmark.circle.badge.questionmark"
         case .merged: return "checkmark.seal.fill"
         }

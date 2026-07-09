@@ -14,6 +14,7 @@ enum FileTabKind: String, Sendable {
     case pdf            // PDFView
     case officePreview  // QLPreviewView (xlsx, docx, keynote, …), read-only
     case tabular        // CSV/TSV table with a Text (Monaco) toggle
+    case transcript     // .jsonl — rendered conversation (Claude transcripts)
 
     static func kind(forPathExtension ext: String) -> FileTabKind {
         let lower = ext.lowercased()
@@ -22,6 +23,8 @@ enum FileTabKind: String, Sendable {
             return .markdown
         case "csv", "tsv":
             return .tabular
+        case "jsonl":
+            return .transcript
         case "pdf":
             return .pdf
         case "xlsx", "xls", "docx", "doc", "pptx", "ppt",
@@ -62,6 +65,7 @@ enum FileTabKind: String, Sendable {
         case .pdf: return "doc.text.image"
         case .officePreview: return "tablecells"
         case .tabular: return "tablecells"
+        case .transcript: return "bubble.left.and.text.bubble.right"
         }
     }
 
@@ -71,7 +75,7 @@ enum FileTabKind: String, Sendable {
     var isMonacoBacked: Bool {
         switch self {
         case .code, .markdown, .tabular: return true
-        case .image, .video, .audio, .pdf, .officePreview: return false
+        case .image, .video, .audio, .pdf, .officePreview, .transcript: return false
         }
     }
 }

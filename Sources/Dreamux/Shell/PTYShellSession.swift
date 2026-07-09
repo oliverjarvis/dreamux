@@ -98,6 +98,17 @@ final class PTYShellSession: @unchecked Sendable {
         let argv = [shellPath, "-l"]
 
         var env = ProcessInfo.processInfo.environment
+        // Don't propagate the *launcher's* Claude-session identity into
+        // Dreamux's terminals. If the app was started from within a Claude
+        // Code session (e.g. launched from an agent's shell), these are
+        // inherited — and any `claude` run here would then register as a
+        // child/subagent of that session, writing no standalone transcript
+        // (so a run's "open transcript" points at a file that never exists).
+        // Strip them so every agent Dreamux spawns is a fresh top-level
+        // session with its own transcript.
+        for key in ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT"] {
+            env.removeValue(forKey: key)
+        }
         // Ghostty's `xterm-ghostty` terminfo lives inside Ghostty.app's
         // bundled Resources, not on the system path. Without it the shell
         // can't look up keymap capabilities (kbs / Backspace, cursor keys,

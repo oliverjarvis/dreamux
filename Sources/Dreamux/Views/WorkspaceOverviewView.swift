@@ -473,7 +473,7 @@ struct WorkspaceOverviewView: View {
             Button(action: openOrFocusTerminal) {
                 Label("Open terminal", systemImage: "terminal")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.soft)
             BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
             Spacer(minLength: 0)
         }
@@ -596,12 +596,12 @@ struct WorkspaceOverviewView: View {
             Button(action: session.createTab) {
                 Label("Open terminal", systemImage: "terminal")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.soft)
             BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
             Button(action: onNewPlan) {
                 Label("Plan something here", systemImage: "sparkles")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.soft)
             Spacer(minLength: 0)
         }
         .controlSize(.regular)
@@ -710,7 +710,7 @@ private struct BranchChangesButton: View {
                 }
             }
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.soft)
         .task { stat = await actions.fetchDiffStat(workspaceID) }
     }
 }

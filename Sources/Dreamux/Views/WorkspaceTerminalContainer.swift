@@ -214,7 +214,12 @@ private struct FileEditorView: View {
     @Bindable var session: FileEditorTabSession
 
     var body: some View {
-        if !session.isSupported || session.useQuickLookFallback {
+        if session.kind == .transcript {
+            // The transcript viewer reads the file itself (no Monaco 2 MB
+            // gate) and renders its own missing / too-large / empty states,
+            // so route to it before the generic supported-file check.
+            TranscriptView(fileURL: session.fileURL)
+        } else if !session.isSupported || session.useQuickLookFallback {
             if session.useQuickLookFallback {
                 QuickLookPreviewView(fileURL: session.fileURL)
             } else {
@@ -234,6 +239,8 @@ private struct FileEditorView: View {
                 PDFViewerView(fileURL: session.fileURL)
             case .officePreview:
                 QuickLookPreviewView(fileURL: session.fileURL)
+            case .transcript:
+                TranscriptView(fileURL: session.fileURL)
             case .code:
                 FileEditorWebView(webView: session.webView)
             }
