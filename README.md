@@ -62,3 +62,49 @@ dreamux clone https://github.com/owner/repo.git --name my-project
 dreamux add ~/code/existing-thing
 dreamux list
 ```
+
+## Applets & App Studio
+
+Instead of context-switching across a dozen SaaS dashboards, commission small
+bespoke dev tools — *applets* — right inside Dreamux. Describe what you need in
+a sentence and a Claude agent builds it; the applet renders in the app, lives
+in the sidebar's **APPS** section, and opens in the project's main pane like a
+workspace.
+
+An applet is a self-contained folder (`manifest.json` + `index.html` + assets)
+rendered in a locked-down web view. It's **buildless** — a vendored
+Preact + htm gives a React-like feel with no npm, bundler, or dev server, so
+applets are cheap to build, instant to run, and shareable by copying the
+folder. Examples: a kanban board, a component kitchen-sink, an Expo-deployments
+tracker, a deploy dashboard.
+
+**Where they live**
+
+- **App Studio** (a window off the projects rail) is a global library of
+  canonical applets, stored under `~/Documents/Dreamux/Apps/` (override with
+  `DREAMUX_APPS_ROOT`).
+- A project **adopts** an applet — a project-local copy under
+  `<project>/apps/<slug>/` that records its lineage and can be tailored
+  freely — or creates a **local-born** one in place (publishable to App Studio
+  later). Per-applet data lives at `<project>/.dreamux/appdata/<slug>/`.
+
+**The `window.dreamux` bridge**
+
+Applets reach real dev-machine power through a small, capability-gated native
+API — each method requires the matching entry in the manifest's
+`requiresCapabilities`, or the call is rejected:
+
+| Capability | API |
+|---|---|
+| — (always) | `dreamux.context()` → project name / root / data dir |
+| `kv` | `dreamux.kv.get/set/delete/list` — the applet's key-value store |
+| `fs` | `dreamux.fs.read/write/list/delete` — scoped to the applet's own files |
+| `http` | `dreamux.http.fetch(url, opts)` → `{status, headers, text}` (CORS-free; text responses) |
+| `shell` | `dreamux.shell.exec(cmd, {cwd, timeout})` → `{stdout, stderr, code}` (timeout in seconds, default 60) |
+| `notify` | `dreamux.notify(title, body)` |
+
+Because `shell` and `http` compose with any CLI or API on your machine, most
+applets need no changes to Dreamux itself. Capabilities that require an OS
+permission (screen capture, input control) are added to the bridge as
+deliberate Dreamux releases — see `docs/superpowers/specs/` for the design and
+the deferred roadmap (marketplace, adoption sync, entitled capabilities).
