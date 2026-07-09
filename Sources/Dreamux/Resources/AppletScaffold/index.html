@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{{NAME}}</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; font: 14px/1.5 -apple-system, sans-serif;
+         background: #1b1c20; color: #e8e8ea; }
+  main { padding: 24px; max-width: 720px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p.hint { color: #9a9aa2; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="./dreamux.js"></script>
+<script type="module">
+import { h, render } from './preact.mjs';
+import htm from './htm.mjs';
+const html = htm.bind(h);
+
+function App() {
+  return html`<main>
+    <h1>{{NAME}}</h1>
+    <p class="hint">Scaffolded applet — tell the builder agent what to make of it.</p>
+  </main>`;
+}
+render(html`<${App} />`, document.getElementById('app'));
+</script>
+</body>
+</html>

@@ -40,7 +40,7 @@ let package = Package(
             ],
             path: "Sources/Dreamux",
             exclude: ["Resources/Info.plist", "Resources/AppIcon.icns"],
-            resources: [.copy("Resources/Monaco")]
+            resources: [.copy("Resources/Monaco"), .copy("Resources/AppletScaffold")]
         ),
         .target(
             name: "DreamuxPTY",
