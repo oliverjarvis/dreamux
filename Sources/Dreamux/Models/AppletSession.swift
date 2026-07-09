@@ -127,8 +127,16 @@ final class AppletSession: @MainActor Identifiable {
     private func startHotReloadTimerIfNeeded() {
         guard hotReloadTimer == nil else { return }
         lastKnownModificationDate = Self.maxContentModificationDate(in: applet.folderURL)
-        hotReloadTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self else { return }
+        // Self-canceling: the run loop retains the timer (not the session),
+        // so a session dropped without `stopAgent()` would otherwise leave
+        // a phantom 1 Hz poller firing forever. `deinit` can't invalidate
+        // it — a @MainActor class's deinit is nonisolated under Swift 6 —
+        // so the first tick after deallocation kills the timer instead.
+        hotReloadTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
             Task { @MainActor in
                 self.checkForChanges()
             }
