@@ -17,6 +17,7 @@ struct ContentView: View {
     let projects: ProjectStore
     let onSwitchProject: (UUID?) -> Void
 
+    @Environment(\.openWindow) private var openWindow
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
     /// Flows pane zoom state: the lane id currently drilled into, or
@@ -470,6 +471,25 @@ struct ContentView: View {
                     ForEach(projects.projects) { project in
                         stubProjectButton(project)
                     }
+                    // App Studio rides above New Project — same dashed
+                    // tile shape, opening the global applet library window.
+                    Button {
+                        openWindow(id: "app-studio")
+                    } label: {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .strokeBorder(
+                                Color.white.opacity(0.18), style:
+                                StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .frame(width: 34, height: 34)
+                            .overlay {
+                                Image(systemName: "shippingbox")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("App Studio")
                     // New Project rides directly below the last glyph, a
                     // tile in the same shape as the project buttons.
                     Button {

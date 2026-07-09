@@ -52,6 +52,19 @@ struct ProjectsRail: View {
                     }
                 }
             }
+            // App Studio is pinned directly above New Project — a launcher
+            // row for the global applet library, same construction as the
+            // row below it (it isn't a project, so it stays out of the
+            // project list proper).
+            Button {
+                openWindow(id: "app-studio")
+            } label: {
+                Label("App Studio", systemImage: "shippingbox")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Open the App Studio applet library")
+
             // New Project rides directly below the last project, one of
             // the rows rather than a pinned bottom bar.
             Button {

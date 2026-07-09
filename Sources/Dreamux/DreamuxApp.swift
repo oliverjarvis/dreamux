@@ -62,6 +62,12 @@ struct DreamuxApp: App {
         Settings {
             SettingsView()
         }
+
+        // The global App Studio window — the canonical applet library,
+        // opened from the projects rail rather than any one project.
+        Window("App Studio", id: "app-studio") {
+            AppStudioView()
+        }
     }
 }
 

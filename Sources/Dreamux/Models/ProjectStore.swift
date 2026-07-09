@@ -44,6 +44,22 @@ final class ProjectStore {
     private let storeURL: URL
 
     init() {
+        let appDir = Self.stateRootURL()
+        self.storeURL = appDir.appendingPathComponent("projects.json")
+
+        self.projectsRoot = Self.projectsRootURL()
+
+        load()
+        refresh()
+    }
+
+    /// `~/Library/Application Support/Dreamux` by default, or
+    /// `$DREAMUX_STATE_DIR`. Created if absent. Nonisolated and static so
+    /// any caller that needs the same app-support root — the `dreamux` CLI,
+    /// or App Studio's scratch applet data (`AppStudioData/<slug>`) — gets
+    /// the exact directory this store's `projects.json` lives under,
+    /// without needing a main-actor `ProjectStore` instance.
+    nonisolated static func stateRootURL() -> URL {
         let fm = FileManager.default
         let env = ProcessInfo.processInfo.environment
 
@@ -61,12 +77,7 @@ final class ProjectStore {
             appDir = appSupport.appendingPathComponent("Dreamux", isDirectory: true)
         }
         try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
-        self.storeURL = appDir.appendingPathComponent("projects.json")
-
-        self.projectsRoot = Self.projectsRootURL()
-
-        load()
-        refresh()
+        return appDir
     }
 
     /// The directory every project folder lives under — `~/Documents/Dreamux`
