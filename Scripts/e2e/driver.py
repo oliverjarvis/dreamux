@@ -31,7 +31,20 @@ Environment contract (set by run-e2e.sh):
                        transcript + subagent meta under projects/<slug>/
                        for the zoomFlow lazy-replay step
 
-Exit status: 0 only when every scenario passed.
+Invocation:
+  python3 Scripts/e2e/driver.py            run every scenario in order
+  python3 Scripts/e2e/driver.py applets    run only the named scenario(s)
+                                            (space-separated); most existing
+                                            scenarios assume an already-live
+                                            app from an earlier scenario in
+                                            the chain, but scenario_applets
+                                            is self-contained -- it launches
+                                            the app itself when nothing is
+                                            connected yet, so it works both
+                                            standalone and as part of the
+                                            full run.
+
+Exit status: 0 only when every requested scenario passed.
 """
 
 import json
@@ -44,6 +57,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -61,6 +75,11 @@ EMIT_SOCKET_PATH = os.environ["E2E_EMIT_SOCKET"]
 
 PROJECTS_ROOT = os.path.join(SANDBOX, "projects")
 STATE_DIR = os.path.join(SANDBOX, "state")
+# App Studio's global applet library, sandboxed for the same reason
+# PROJECTS_ROOT/STATE_DIR are: without this, AppLibraryStore falls back to
+# the real ~/Documents/Dreamux/Apps and scenario_applets' adopt/remove
+# fixtures would land there.
+APPS_ROOT = os.path.join(SANDBOX, "apps-root")
 PROJECT_DIR = os.path.join(PROJECTS_ROOT, PROJECT_NAME)
 
 GIT_IDENTITY = [
@@ -120,6 +139,7 @@ class Driver:
             "DREAMUX_E2E_AUTOOPEN": PROJECT_NAME,
             "DREAMUX_PROJECTS_ROOT": PROJECTS_ROOT,
             "DREAMUX_STATE_DIR": STATE_DIR,
+            "DREAMUX_APPS_ROOT": APPS_ROOT,
             "DREAMUX_CLAUDE_BIN": CLAUDE_BIN,
             "DREAMUX_GH_BIN": GH_BIN,
             "DREAMUX_CLAUDE_HOME": CLAUDE_HOME,
@@ -395,6 +415,33 @@ def worktree(repo, branch):
 
 def feature_dir(name):
     return os.path.join(PROJECT_DIR, "features", name)
+
+
+def applet_dir(slug):
+    return os.path.join(PROJECT_DIR, "apps", slug)
+
+
+def applet_appdata_dir(slug):
+    return os.path.join(PROJECT_DIR, ".dreamux", "appdata", slug)
+
+
+def applet_kv_path(slug):
+    return os.path.join(applet_appdata_dir(slug), "kv.json")
+
+
+def read_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f)
+
+
+def write_text(path, text):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
 
 
 def run_toml_path():
@@ -1434,6 +1481,162 @@ def scenario_overview(d):
     d.cmd("stopQueue")
 
 
+def scenario_applets(d):
+    """App Studio applets (Task 10): create a local-born applet
+    deterministically (no builder-agent kickoff -- that's not
+    e2e-testable), then prove the REAL bridge round-trips end to end --
+    scheme handler serves the page, JS runs, the native bridge gates
+    capabilities, `AppletDataStore` persists to disk -- with a negative
+    capability-gate check, then the adopt/remove flows.
+
+    Self-contained: launches the app itself when it isn't already up (so
+    `python3 driver.py applets` works standalone), and is a no-op launch
+    when run as part of the full scenario chain.
+
+    WKWebView content is GPU-composited and comes out BLANK in the
+    in-process `screenshot` (see PROTOCOL.md's caveat) -- every assertion
+    below is on the DISK STATE the bridge produced
+    (.dreamux/appdata/<slug>/kv.json), never on webview pixels.
+    """
+    if d.sock is None:
+        d.launch_app()
+
+        def project_window_up():
+            state = d.state()
+            active = state.get("activeProject")
+            return active and active.get("name") == PROJECT_NAME
+        d.wait_until(project_window_up, 30.0, f"project window for {PROJECT_NAME}")
+
+    d.cmd("setSidebarMode", mode="workspace")
+
+    # 1/2. Create -- deterministic (createApplet never spawns the builder
+    # agent). Slug is the name, slugified.
+    resp = d.cmd("createApplet", name="Probe", description="e2e probe")
+    require(resp["slug"] == "probe", f"expected slug 'probe', got {resp!r}")
+    probe_id = resp["id"]
+
+    state = d.cmd("appletsState")
+    entry = next((a for a in state["projectApplets"] if a["slug"] == "probe"), None)
+    require(entry is not None, f"probe applet missing from appletsState: {state}")
+    require(entry["adopted"] is False,
+            f"freshly created local-born applet should not be adopted: {entry}")
+
+    # 3. Overwrite the scaffolded index.html with a kv round-trip probe
+    # (dreamux.js is untouched -- createLocal's scaffold already vendored
+    # it) and declare the one capability the probe calls.
+    probe_dir = applet_dir("probe")
+    write_text(os.path.join(probe_dir, "index.html"), (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<title>Probe</title></head>\n'
+        '<body><div id="out">waiting</div>\n'
+        '<script src="./dreamux.js"></script>\n'
+        '<script type="module">\n'
+        "  await window.dreamux.kv.set('probe', 'hello-from-applet');\n"
+        "  document.getElementById('out').textContent = await window.dreamux.kv.get('probe');\n"
+        '</script></body></html>\n'
+    ))
+    manifest_path = os.path.join(probe_dir, "manifest.json")
+    manifest = read_json(manifest_path)
+    manifest["requiresCapabilities"] = ["kv"]
+    write_json(manifest_path, manifest)
+
+    # 4. Open it -- drives sidebarMode = .app(id) through the same
+    # pending-mode channel setSidebarMode uses; the WKWebView loads
+    # index.html for the very first time here, so the manifest's
+    # capabilities (just rewritten above) must already be in effect.
+    resp = d.cmd("openApplet", slug="probe")
+    require(resp["id"] == probe_id, f"openApplet id mismatch: {resp!r}")
+
+    kv_path = applet_kv_path("probe")
+
+    def kv_probe_written():
+        try:
+            kv = read_json(kv_path)
+        except (OSError, json.JSONDecodeError):
+            return None
+        return kv if kv.get("probe") == "hello-from-applet" else None
+
+    d.wait_until(kv_probe_written, 15.0,
+                 "kv.json to gain probe=hello-from-applet (bridge round-trip)")
+
+    # The whole point of the disk assertion above: the webview's own
+    # pixels are GPU-composited and would come out blank here.
+    d.screenshot("applet-probe-open")
+
+    # 6. Negative capability-gate check: an UNDECLARED shell.exec must be
+    # rejected while kv (still declared) keeps working. manifest.json
+    # stays ["kv"] only -- no "shell" added.
+    write_text(os.path.join(probe_dir, "index.html"), (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<title>Probe</title></head>\n'
+        '<body><div id="out">waiting</div>\n'
+        '<script src="./dreamux.js"></script>\n'
+        '<script type="module">\n'
+        "try {\n"
+        "  await window.dreamux.shell.exec('echo x');\n"
+        "  await window.dreamux.kv.set('gate', 'LEAKED');\n"
+        "} catch {\n"
+        "  await window.dreamux.kv.set('gate', 'denied');\n"
+        "}\n"
+        '</script></body></html>\n'
+    ))
+    d.cmd("openApplet", slug="probe")
+
+    def kv_gate_written():
+        try:
+            kv = read_json(kv_path)
+        except (OSError, json.JSONDecodeError):
+            return None
+        return kv if "gate" in kv else None
+
+    kv = d.wait_until(kv_gate_written, 15.0,
+                       "kv.json to gain a 'gate' key after the negative capability check")
+    require(kv["gate"] == "denied",
+            f"undeclared shell.exec should have been rejected by the capability gate, "
+            f"kv={kv}")
+
+    # 7. Adopt/remove flows: a minimal library applet written straight to
+    # $DREAMUX_APPS_ROOT (never through the app) -- adopt it into the
+    # project, confirm it, then remove it and confirm it's gone from both
+    # app state and disk (folder + appdata).
+    lib_dir = os.path.join(APPS_ROOT, "lib-probe")
+    os.makedirs(lib_dir, exist_ok=True)
+    shutil.copy(os.path.join(probe_dir, "dreamux.js"), os.path.join(lib_dir, "dreamux.js"))
+    write_text(os.path.join(lib_dir, "index.html"),
+               "<!doctype html><html><body>lib probe</body></html>\n")
+    write_json(os.path.join(lib_dir, "manifest.json"), {
+        "id": str(uuid.uuid4()),
+        "name": "Lib Probe",
+        "slug": "lib-probe",
+        "icon": "shippingbox",
+        "description": "e2e library probe",
+        "requiresCapabilities": [],
+        "origin": None,
+    })
+
+    resp = d.cmd("adoptApplet", slug="lib-probe")
+    require(resp["slug"] == "lib-probe", f"adoptApplet slug mismatch: {resp!r}")
+
+    state = d.cmd("appletsState")
+    entry = next((a for a in state["projectApplets"] if a["slug"] == "lib-probe"), None)
+    require(entry is not None and entry["adopted"] is True,
+            f"lib-probe should show up adopted in appletsState: {state}")
+
+    d.cmd("removeApplet", slug="lib-probe")
+
+    state = d.cmd("appletsState")
+    require(all(a["slug"] != "lib-probe" for a in state["projectApplets"]),
+            f"lib-probe should be gone from appletsState after removeApplet: {state}")
+
+    def lib_probe_gone_from_disk():
+        return (
+            not os.path.exists(applet_dir("lib-probe"))
+            and not os.path.exists(applet_appdata_dir("lib-probe"))
+        )
+    d.wait_until(lib_probe_gone_from_disk, 5.0,
+                 "lib-probe folder + appdata to be gone from disk after removeApplet")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -1452,6 +1655,7 @@ SCENARIOS = [
     ("flows", scenario_flows),
     ("plan-gate", scenario_plan_gate),
     ("overview", scenario_overview),
+    ("applets", scenario_applets),
     ("quit", scenario_quit),
 ]
 
@@ -1472,14 +1676,32 @@ def dump_failure_context(d, scenario_name):
         pass
 
 
+def select_scenarios(names):
+    """Filter SCENARIOS to the requested names (order per SCENARIOS, not
+    argv), or the full list when none are given -- the default,
+    no-argument invocation `run-e2e.sh` uses stays exactly as before.
+    Raises SystemExit on an unknown name."""
+    if not names:
+        return SCENARIOS
+    known = {name for name, _ in SCENARIOS}
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        print(f"unknown scenario(s): {', '.join(unknown)}", file=sys.stderr)
+        print(f"available: {', '.join(name for name, _ in SCENARIOS)}", file=sys.stderr)
+        raise SystemExit(2)
+    wanted = set(names)
+    return [(name, fn) for name, fn in SCENARIOS if name in wanted]
+
+
 def main():
     os.makedirs(ARTIFACTS, exist_ok=True)
+    scenarios_to_run = select_scenarios(sys.argv[1:])
     driver = Driver()
     results = []
     failed = False
 
     try:
-        for name, scenario in SCENARIOS:
+        for name, scenario in scenarios_to_run:
             if failed:
                 results.append((name, "SKIP"))
                 print(f"SKIP {name}", flush=True)

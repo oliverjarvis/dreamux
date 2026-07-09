@@ -117,6 +117,16 @@ enum E2ECommands {
             return try flowsState(request: request)
         case "zoomFlow":
             return try zoomFlow(request: request)
+        case "createApplet":
+            return try createApplet(request: request)
+        case "openApplet":
+            return try openApplet(request: request)
+        case "adoptApplet":
+            return try adoptApplet(request: request)
+        case "removeApplet":
+            return try removeApplet(request: request)
+        case "appletsState":
+            return try appletsState()
         case "quit":
             return ["ok": true]
         default:
@@ -489,6 +499,11 @@ enum E2ECommands {
             handles.bridge.pendingSidebarMode = .flows
         case "library":
             handles.bridge.pendingSidebarMode = .library
+        case "app":
+            guard let idString = request["id"] as? String, let id = UUID(uuidString: idString) else {
+                throw CommandError(message: "\"app\" mode requires a UUID \"id\" parameter")
+            }
+            handles.bridge.pendingSidebarMode = .app(id)
         case "run":
             let workspace: Workspace?
             if let name = request["workspace"] as? String {
@@ -502,7 +517,7 @@ enum E2ECommands {
             store.activate(workspace.id)
             handles.bridge.pendingSidebarMode = .run(workspaceID: workspace.id)
         default:
-            throw CommandError(message: "mode must be \"workspace\", \"run\", \"signals\", \"flows\", or \"library\"")
+            throw CommandError(message: "mode must be \"workspace\", \"run\", \"signals\", \"flows\", \"library\", or \"app\"")
         }
         return ["ok": true]
     }
@@ -771,6 +786,107 @@ enum E2ECommands {
         let (handles, _, _) = try projectStores()
         handles.bridge.pendingFlowsZoomLaneID = (request["laneID"] as? String) ?? ""
         return ["ok": true]
+    }
+
+    // MARK: - Applets
+
+    /// Resolve the active project's live `ProjectSession` — the applets
+    /// commands need the whole per-project bundle, not just a store:
+    /// `appletSession(for:)`/`closeAppletSession(id:)` live there, not on
+    /// `applets`/`appLibrary` themselves.
+    private static func activeSession() throws -> (handles: E2EProjectHandles, session: ProjectSession) {
+        let handles = try activeHandles()
+        guard let session = handles.session else {
+            throw CommandError(message: "project session not registered yet")
+        }
+        return (handles, session)
+    }
+
+    /// Scaffold a local-born applet — `ProjectAppletStore.createLocal`,
+    /// the same call `WorkspaceSidebar.handleCreateApp` makes, MINUS its
+    /// builder-agent kickoff: the agent isn't e2e-testable (it shells out
+    /// to `claude`), so this command stays fully deterministic. Returns
+    /// the new applet's slug + id so a driver can immediately target it
+    /// with `openApplet`/`removeApplet`.
+    private static func createApplet(request: [String: Any]) throws -> [String: Any] {
+        let name = try string("name", in: request)
+        let description = try string("description", in: request)
+        let (_, session) = try activeSession()
+        let applet = try session.applets.createLocal(
+            name: name, description: description, icon: "shippingbox")
+        return ["ok": true, "slug": applet.slug, "id": applet.id.uuidString]
+    }
+
+    /// Open an applet's host view — the same `sidebarMode = .app(id)`
+    /// write `WorkspaceSidebar`'s row click (and its create/adopt handlers)
+    /// perform, driven through the same `pendingSidebarMode` channel
+    /// `setSidebarMode` uses. Refreshes `session.applets` first: a driver
+    /// may have just rewritten the applet's `manifest.json`/`index.html`
+    /// directly on disk (the e2e bridge round-trip probe), and the first
+    /// `AppletSession` this creates captures the manifest's capabilities
+    /// at construction time — a stale cache here would silently gate the
+    /// probe's own declared capability.
+    private static func openApplet(request: [String: Any]) throws -> [String: Any] {
+        let slug = try string("slug", in: request)
+        let (handles, session) = try activeSession()
+        session.applets.refresh()
+        guard let applet = session.applets.applets.first(where: { $0.slug == slug }) else {
+            throw CommandError(message: "no applet with slug \"\(slug)\" in this project")
+        }
+        handles.bridge.pendingSidebarMode = .app(applet.id)
+        return ["ok": true, "id": applet.id.uuidString]
+    }
+
+    /// Adopt a library applet into the project — `ProjectAppletStore.adopt`,
+    /// the same call `WorkspaceSidebar.handleAdoptApp` makes. Resolved
+    /// against a FRESH `AppLibraryStore()` (honors `$DREAMUX_APPS_ROOT`)
+    /// rather than the session's cached `appLibrary`, so a library folder
+    /// an e2e driver just wrote straight to disk is picked up immediately
+    /// — `AppLibraryStore.init` always calls `refresh()`.
+    private static func adoptApplet(request: [String: Any]) throws -> [String: Any] {
+        let slug = try string("slug", in: request)
+        let (_, session) = try activeSession()
+        let library = AppLibraryStore()
+        guard let libraryApplet = library.applets.first(where: { $0.slug == slug }) else {
+            throw CommandError(message: "no library applet with slug \"\(slug)\"")
+        }
+        let adopted = try session.applets.adopt(libraryApplet)
+        return ["ok": true, "slug": adopted.slug, "id": adopted.id.uuidString]
+    }
+
+    /// Remove an applet from the project — mirrors
+    /// `WorkspaceSidebar.handleRemoveApp`: stop its live session first
+    /// (builder agent + hot-reload poller), THEN delete its folder and
+    /// `.dreamux/appdata` — same order, so a live webview/agent never
+    /// outlives the folder it's rooted in.
+    private static func removeApplet(request: [String: Any]) throws -> [String: Any] {
+        let slug = try string("slug", in: request)
+        let (_, session) = try activeSession()
+        guard let applet = session.applets.applets.first(where: { $0.slug == slug }) else {
+            throw CommandError(message: "no applet with slug \"\(slug)\" in this project")
+        }
+        session.closeAppletSession(id: applet.id)
+        try session.applets.remove(applet)
+        return ["ok": true]
+    }
+
+    /// Snapshot of both applet lists — this project's own `apps/` folder
+    /// and the global library — so a driver can assert create/adopt/
+    /// remove without a screenshot (webview pixels aren't capturable
+    /// in-process; see `screenshot`). `libraryApplets` reads a fresh
+    /// `AppLibraryStore()` for the same reason `adoptApplet` does.
+    private static func appletsState() throws -> [String: Any] {
+        let (_, session) = try activeSession()
+        let library = AppLibraryStore()
+        return [
+            "ok": true,
+            "projectApplets": session.applets.applets.map { applet -> [String: Any] in
+                ["slug": applet.slug, "name": applet.manifest.name, "adopted": applet.isAdopted]
+            },
+            "libraryApplets": library.applets.map { applet -> [String: Any] in
+                ["slug": applet.slug, "name": applet.manifest.name]
+            },
+        ]
     }
 
     /// Play semantics — worktree-centric, never a question. Flexible

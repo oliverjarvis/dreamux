@@ -62,6 +62,10 @@ final class E2EProjectHandles {
     weak var planQueue: PlanQueueController?
     weak var nudgeCenter: PlanNudgeCenter?
     weak var flows: FlowStore?
+    /// The whole per-project session bundle — the applets commands need
+    /// more than a store: `appletSession(for:)`/`closeAppletSession(id:)`
+    /// live on `ProjectSession` itself, not on `applets`/`appLibrary`.
+    weak var session: ProjectSession?
     let bridge = E2EBridge()
 
     init(projectID: UUID) {
@@ -157,6 +161,17 @@ final class E2ERegistry {
         guard E2EMode.isActive else { return }
         let handles = handles(forProject: projectID)
         handles.flows = flows
+    }
+
+    /// Called from `ProjectSession.registerWithE2E()` alongside the other
+    /// per-project registrations — the applets commands (`createApplet`/
+    /// `openApplet`/`adoptApplet`/`removeApplet`/`appletsState`) reach
+    /// `session.applets`/`session.appLibrary` plus the session-scoped
+    /// `appletSession(for:)`/`closeAppletSession(id:)`.
+    func registerSession(projectID: UUID, session: ProjectSession) {
+        guard E2EMode.isActive else { return }
+        let handles = handles(forProject: projectID)
+        handles.session = session
     }
 
     func unregister(projectID: UUID) {

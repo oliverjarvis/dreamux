@@ -24,6 +24,7 @@ executable directly, or via `open --env`):
 | `DREAMUX_E2E_AUTOOPEN` | Folder name of a project to open a window for right after launch. The launch gate looks the name up in the projects root and opens that project's window directly, so drivers don't have to script project selection. Must match the project's directory name exactly. |
 | `DREAMUX_PROJECTS_ROOT` | Replaces `~/Documents/Dreamux` as the directory projects are discovered in / created under. Created on demand. Point it at a per-run sandbox so the user's real projects are never touched. |
 | `DREAMUX_STATE_DIR` | Replaces `~/Library/Application Support/Dreamux` as the home of `projects.json`. Point it at a per-run sandbox. |
+| `DREAMUX_APPS_ROOT` | Replaces `~/Documents/Dreamux/Apps` as the global App Studio applet library root (`AppLibraryStore`'s backing folder — see `adoptApplet`/`appletsState`). Point it at a per-run sandbox so `adoptApplet`/publish scenarios never touch the user's real library. Created on demand. |
 | `DREAMUX_CLAUDE_BIN` | Absolute path to the `claude` binary the Run pane's Detect / Isolate / Diagnose buttons paste into their embedded terminal (it is shell-quoted for you). Point it at `Tests/Fixtures/bin/claude` for deterministic agent behavior regardless of the user's PATH/zshrc. When unset, the bare word `claude` is used. |
 | `DREAMUX_GH_BIN` | Absolute path to the `gh` binary used by the merge sheet's "Create PR" path (`publishFeature`, `featurePRStatus`, and the sheet's own PR pre-check/polling). Point it at `Tests/Fixtures/bin/gh` — a fake that works against a **local bare repo as origin**, storing PR records inside the remote under `fake-prs/<branch>.json` and deriving MERGED from ref ancestry — so PR scenarios run with no network and no GitHub account. When unset, `gh` from PATH is used. |
 
@@ -34,6 +35,7 @@ DREAMUX_E2E_SOCKET=/tmp/dreamux-e2e.sock \
 DREAMUX_E2E_AUTOOPEN=demo \
 DREAMUX_PROJECTS_ROOT=/tmp/dreamux-e2e/projects \
 DREAMUX_STATE_DIR=/tmp/dreamux-e2e/state \
+DREAMUX_APPS_ROOT=/tmp/dreamux-e2e/apps-root \
 DREAMUX_CLAUDE_BIN="$REPO/Tests/Fixtures/bin/claude" \
 DREAMUX_GH_BIN="$REPO/Tests/Fixtures/bin/gh" \
   ./Dreamux.app/Contents/MacOS/Dreamux
@@ -177,8 +179,8 @@ Field notes:
   only when applicable.
 - `runToml` is omitted when the file doesn't exist
   (`runTomlExists: false`).
-- `sidebarMode` is `"workspace" | "run" | "signals"` — the pane the
-  project window currently shows.
+- `sidebarMode` is `"workspace" | "run" | "signals" | "flows" | "library" | "app"`
+  — the pane the project window currently shows.
 - `openedTargets` — every `open` target the runner manager fired this
   session, in order (a runner's `open` value with `{port}` resolved to
   the instance's effective port). URL targets open as in-app browser
@@ -307,19 +309,26 @@ pane to mount and bootstrap its Overview tab — see `state`'s
 ### `setSidebarMode`
 
 Switch the project window's main pane. `mode` is `"workspace"`,
-`"run"`, `"signals"`, `"flows"`, or `"library"` — `flows` shows the
-Flows observatory (see `flowsState`) and `library` the Skills & MCPs
-inventory page. The optional `"workspace"` parameter (a feature name)
-selects which workspace to activate (for `workspace` mode) or to scope
-the Run pane to (for `run` mode; defaults to the active workspace,
-then the first one — fails if there are none). `flows` and `library`
-ignore `workspace` — both panes are project-wide, not per-workspace.
+`"run"`, `"signals"`, `"flows"`, `"library"`, or `"app"` — `flows` shows
+the Flows observatory (see `flowsState`), `library` the Skills & MCPs
+inventory page, and `app` an open App Studio applet (requires a UUID
+`"id"` parameter — the applet's manifest id, as returned by
+`createApplet`/`openApplet`/`adoptApplet`; prefer `openApplet` with a
+`slug`, which resolves the id for you). The optional `"workspace"`
+parameter (a feature name) selects which workspace to activate (for
+`workspace` mode) or to scope the Run pane to (for `run` mode; defaults
+to the active workspace, then the first one — fails if there are
+none). `flows`, `library`, and `app` ignore `workspace` — none of the
+three are per-workspace.
 
 ```
 → {"cmd":"setSidebarMode","mode":"run","workspace":"feature-x"}
 ← {"ok":true}
 
 → {"cmd":"setSidebarMode","mode":"flows"}
+← {"ok":true}
+
+→ {"cmd":"setSidebarMode","mode":"app","id":"3FA85F64-5717-4562-B3FC-2C963F66AFA6"}
 ← {"ok":true}
 ```
 
@@ -826,6 +835,118 @@ stale zoomed lane; re-zoom explicitly if needed.
 
 → {"cmd":"zoomFlow","laneID":null}
 ← {"ok":true}
+```
+
+### App Studio applets
+
+Five commands cover the applet lifecycle a driver can reach without a
+mouse: scaffold, open (mount the live `WKWebView` + native bridge),
+adopt from the library, remove, and a state snapshot. All five operate
+on **the active project's** applets (`ProjectSession.applets`); slugs
+are matched exactly as returned by `createApplet`/`appletsState`.
+
+**Caveat shared by every one of these:** the applet preview is a real
+`WKWebView`, and WKWebView content is GPU-composited — it comes out
+**blank** in the in-process `screenshot` (same limitation as the
+embedded Ghostty terminals, see `screenshot` above). A `screenshot`
+after `openApplet` documents the chrome around it (the APPS section
+row, the host header/Edit/Reload/Reveal buttons) but proves nothing
+about what's rendered inside the preview. To assert the bridge actually
+worked, poll **disk state** instead: every `kv.*` call round-trips
+through `AppletDataStore` to `<project>/.dreamux/appdata/<slug>/kv.json`,
+so a scenario that has the applet's own JS write a marker value there
+can confirm the whole chain (scheme handler served the page → JS ran →
+bridge gated the capability → data store wrote) without ever looking at
+a pixel.
+
+#### `createApplet`
+
+Scaffold a local-born applet (no `origin`) via
+`ProjectAppletStore.createLocal` — the buildless HTML/JS template
+(vendored Preact + htm, the `window.dreamux` bridge shim, `APPLET.md`)
+under `<project>/apps/<slug>/`, slug uniqued from `name`. **No builder
+agent is kicked off** — unlike the real "New App" sheet
+(`WorkspaceSidebar.handleCreateApp`), this command never spawns
+`claude`, since the agent isn't e2e-testable. Icon is always
+`"shippingbox"`.
+
+```
+→ {"cmd":"createApplet","name":"Probe","description":"e2e probe"}
+← {"ok":true,"slug":"probe","id":"3FA85F64-5717-4562-B3FC-2C963F66AFA6"}
+```
+
+#### `openApplet`
+
+Mount an applet's host view (`AppletHostView` + its `WKWebView`) —
+resolves `slug` against the project's live `ProjectAppletStore`
+(refreshed first, so a manifest/index.html a driver just rewrote
+directly on disk is picked up before the first load) and drives
+`sidebarMode = .app(id)` through the same pending-mode channel
+`setSidebarMode` uses. The FIRST call for a given applet id creates its
+`AppletSession` (and therefore its `WKWebView`, loading `index.html` for
+the first time) with whatever capabilities `manifest.json` declares at
+that moment; later calls reuse the cached session — a manifest edited
+after the first open takes effect via the session's own 1s hot-reload
+poller (folder mtime), not by re-resolving here. Errors when `slug`
+doesn't match any applet in the project.
+
+```
+→ {"cmd":"openApplet","slug":"probe"}
+← {"ok":true,"id":"3FA85F64-5717-4562-B3FC-2C963F66AFA6"}
+
+→ {"cmd":"openApplet","slug":"nope"}
+← {"ok":false,"error":"no applet with slug \"nope\" in this project"}
+```
+
+#### `adoptApplet`
+
+Copy a library applet into the project — `ProjectAppletStore.adopt`,
+the same call `WorkspaceSidebar.handleAdoptApp` makes. Resolves `slug`
+against a **fresh** `AppLibraryStore()` (honors `$DREAMUX_APPS_ROOT`)
+rather than the session's cached one, so a library folder a driver just
+wrote straight to disk (bypassing the app entirely) is picked up
+immediately — `AppLibraryStore.init` always refreshes. Returns the new
+project-side copy's slug + id (uniqued against the project, may differ
+from the library applet's own slug on a collision).
+
+```
+→ {"cmd":"adoptApplet","slug":"lib-probe"}
+← {"ok":true,"slug":"lib-probe","id":"7C1B2E10-...-...-...-..."}
+
+→ {"cmd":"adoptApplet","slug":"nope"}
+← {"ok":false,"error":"no library applet with slug \"nope\""}
+```
+
+#### `removeApplet`
+
+Remove an applet from the project — mirrors
+`WorkspaceSidebar.handleRemoveApp`: stops its live session first
+(builder-agent terminal + hot-reload poller, via
+`ProjectSession.closeAppletSession`) and only then deletes its folder
+under `apps/` AND its `.dreamux/appdata/<slug>/` data dir
+(`ProjectAppletStore.remove`) — not Trash, permanent, same as the real
+remove action. Errors when `slug` doesn't match any applet in the
+project.
+
+```
+→ {"cmd":"removeApplet","slug":"lib-probe"}
+← {"ok":true}
+```
+
+#### `appletsState`
+
+Snapshot of both applet lists, for asserting create/adopt/remove
+without a screenshot: `projectApplets` (this project's `apps/` folder,
+`adopted` is `true` iff the applet's manifest carries an `origin`) and
+`libraryApplets` (the global library, read from a fresh
+`AppLibraryStore()` for the same live-disk-state reason `adoptApplet`
+uses one).
+
+```
+→ {"cmd":"appletsState"}
+← {"ok":true,
+   "projectApplets":[{"slug":"probe","name":"Probe","adopted":false}],
+   "libraryApplets":[{"slug":"lib-probe","name":"Lib Probe"}]}
 ```
 
 ### `courseCorrect`

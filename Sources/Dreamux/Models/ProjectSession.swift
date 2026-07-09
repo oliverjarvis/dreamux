@@ -672,6 +672,7 @@ final class ProjectSession {
             nudgeCenter: nudgeCenter
         )
         E2ERegistry.shared.registerFlowStore(projectID: project.id, flows: flows)
+        E2ERegistry.shared.registerSession(projectID: project.id, session: self)
     }
 
     /// The Flows detail view's zoom-in seam: `FlowDetailView` calls this
