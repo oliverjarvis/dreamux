@@ -93,6 +93,13 @@ final class ProjectStore {
         return root
     }
 
+    /// Folder names under `projectsRoot` that are NOT projects — currently
+    /// just "Apps", the App Studio applet library (`AppLibraryStore`).
+    /// Pure so it's testable without env plumbing.
+    nonisolated static func isReservedProjectFolderName(_ name: String) -> Bool {
+        name == "Apps"
+    }
+
     func project(id: UUID) -> Project? {
         projects.first { $0.id == id }
     }
@@ -151,6 +158,7 @@ final class ProjectStore {
         var refreshed: [Project] = []
         for url in contents {
             let standardized = url.standardizedFileURL
+            guard !Self.isReservedProjectFolderName(standardized.lastPathComponent) else { continue }
             let resources = try? standardized.resourceValues(forKeys: [
                 .isDirectoryKey, .creationDateKey,
             ])
