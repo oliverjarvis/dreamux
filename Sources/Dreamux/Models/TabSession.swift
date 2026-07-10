@@ -22,10 +22,11 @@ final class TabSession: Identifiable {
 
     init(
         cwd: String? = nil,
-        onActivity: @escaping @Sendable (String?) -> Void = { _ in }
+        onActivity: @escaping @Sendable (String?) -> Void = { _ in },
+        onControl: (@Sendable (String, Data) -> Void)? = nil
     ) {
         self.cwd = cwd
-        self.shell = PTYShellSession(cwd: cwd, onActivity: onActivity)
+        self.shell = PTYShellSession(cwd: cwd, onActivity: onActivity, onControl: onControl)
 
         // Ghostty ships with default `super+<letter>` keybinds (super+t,
         // super+d, super+w, …) for actions its own app shell implements.
