@@ -3,6 +3,18 @@ import Darwin
 import GhosttyTerminal
 import DreamuxPTY
 
+/// One attention/control event extracted from the PTY byte stream.
+enum ActivitySignal: Equatable, Sendable {
+    /// Bare BEL — generic ping, no payload.
+    case ping
+    /// OSC 9 / OSC 777;notify — human-readable notification body.
+    case notification(String)
+    /// OSC 777;dreamux;<verb>;<base64url-json> — structured event from
+    /// dreamux-hook, arriving inside the session's own PTY so it is
+    /// already correlated to this tab (session binding, chat state).
+    case control(verb: String, json: Data)
+}
+
 /// Bridges Ghostty's `InMemoryTerminalSession` to a real PTY-backed shell.
 ///
 /// `InMemoryTerminalSession` is a host-managed I/O backend: it tells us when
@@ -59,15 +71,18 @@ final class PTYShellSession: @unchecked Sendable {
     private let cwd: String?
     private let extraEnv: [String: String]
     private let onActivity: (@Sendable (String?) -> Void)?
+    private let onControl: (@Sendable (String, Data) -> Void)?
 
     init(
         cwd: String? = nil,
         extraEnv: [String: String] = [:],
-        onActivity: (@Sendable (String?) -> Void)? = nil
+        onActivity: (@Sendable (String?) -> Void)? = nil,
+        onControl: (@Sendable (String, Data) -> Void)? = nil
     ) {
         self.cwd = cwd
         self.extraEnv = extraEnv
         self.onActivity = onActivity
+        self.onControl = onControl
 
         // Capture into a holder so the closures can refer to the eventual
         // `self` without a chicken-and-egg with `terminalSession`.
@@ -236,6 +251,7 @@ final class PTYShellSession: @unchecked Sendable {
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: ioQueue)
         let session = terminalSession
         let activityHandler = onActivity
+        let controlHandler = onControl
         source.setEventHandler { [weak self] in
             var buffer = [UInt8](repeating: 0, count: 8192)
             let n = buffer.withUnsafeMutableBufferPointer { ptr -> Int in
@@ -255,8 +271,12 @@ final class PTYShellSession: @unchecked Sendable {
                 // (`ESC ] 777 ; notify ; <title> ; <body> BEL`) carries an
                 // actual message that we surface in the notification.
                 let signals = Self.extractActivitySignals(buffer.prefix(n))
-                for message in signals {
-                    activityHandler?(message)
+                for signal in signals {
+                    switch signal {
+                    case .ping: activityHandler?(nil)
+                    case .notification(let message): activityHandler?(message)
+                    case .control(let verb, let json): controlHandler?(verb, json)
+                    }
                 }
             } else if n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR) {
                 self?.handleEOF()
@@ -327,11 +347,12 @@ final class PTYShellSession: @unchecked Sendable {
     }
 
     /// Pulls attention signals out of a chunk of bytes. Returns one entry
-    /// per BEL/OSC terminator; the value is the text body if the BEL was
-    /// the tail of an iTerm2 (`OSC 9`) or rxvt (`OSC 777 ; notify`)
-    /// notification, otherwise `nil`.
-    static func extractActivitySignals(_ data: ArraySlice<UInt8>) -> [String?] {
-        var signals: [String?] = []
+    /// per BEL/OSC terminator: a bare BEL is `.ping`; the tail of an
+    /// iTerm2 (`OSC 9`) or rxvt (`OSC 777 ; notify`) notification is
+    /// `.notification`; the tail of a `OSC 777 ; dreamux ; …` control
+    /// escape is `.control`.
+    static func extractActivitySignals(_ data: ArraySlice<UInt8>) -> [ActivitySignal] {
+        var signals: [ActivitySignal] = []
         var i = data.startIndex
         while i < data.endIndex {
             let byte = data[i]
@@ -381,12 +402,18 @@ final class PTYShellSession: @unchecked Sendable {
                         && first.allSatisfy { $0.isASCII && $0.isNumber }
                     if !isNumericSubcommand {
                         let body = parts.dropFirst().joined(separator: ";")
-                        signals.append(body)
+                        signals.append(.notification(body))
                     }
+                } else if parts.first == "777", parts.count >= 4, parts[1] == "dreamux" {
+                    if let json = decodeBase64URL(parts[3]) {
+                        signals.append(.control(verb: parts[2], json: json))
+                    }
+                    // undecodable payload: drop silently — a control
+                    // event we can't parse must never become a banner.
                 } else if parts.first == "777",
                           parts.count >= 4,
                           parts[1] == "notify" {
-                    signals.append("\(parts[2]): \(parts[3])")
+                    signals.append(.notification("\(parts[2]): \(parts[3])"))
                 }
                 // Any other OSC sub-protocol (titles, hyperlinks,
                 // shell-integration markers, …) is left alone — no
@@ -397,7 +424,7 @@ final class PTYShellSession: @unchecked Sendable {
 
             // Bare BEL — generic ping with no payload
             if byte == 0x07 {
-                signals.append(nil)
+                signals.append(.ping)
                 i += 1
                 continue
             }
@@ -420,6 +447,13 @@ final class PTYShellSession: @unchecked Sendable {
         }
         parts.append(String(bytes: current, encoding: .utf8) ?? "")
         return parts
+    }
+
+    private static func decodeBase64URL(_ s: String) -> Data? {
+        var b64 = s.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        return Data(base64Encoded: b64)
     }
 }
 

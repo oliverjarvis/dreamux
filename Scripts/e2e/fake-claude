@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""fake-claude — a deterministic stand-in for the real `claude` CLI, for
+driving Dreamux's chat face end-to-end without a live model.
+
+Run it inside a Dreamux terminal tab (the same way a user runs `claude`):
+it announces a session, replays a fixed transcript timeline into a temp
+JSONL file that Dreamux's LiveConversation tails, asks one
+AskUserQuestion, waits for an answer on stdin, records the answer, and
+ends the session. Every phase transition the chat face reacts to —
+working -> waitingForUser -> idle -> ended — is produced deterministically.
+
+Two channels, exactly like a real claude session under Dreamux:
+
+  1. Control OSCs on stdout. When run in a tab, stdout IS the tab's PTY,
+     so Dreamux's PTY parser reads these directly — no /dev/tty dance is
+     needed (the real dreamux-hook prefers /dev/tty only because `claude`
+     captures its hooks' stdout; fake-claude owns the tab's stdout, so
+     stdout is the correct and only sink). The encoding is Task 1's
+     control-OSC: `OSC 777 ; dreamux ; <verb> ; <base64url-json> BEL`.
+     Verbs emitted: session-start, stop, session-end.
+
+  2. A session-registry file at $DREAMUX_SESSIONS_DIR/<pid>.json (only
+     when that env var is set — NEVER the real ~/.claude). Its `status`
+     field (busy -> waiting -> idle) is what ClaudeSessionBinding's
+     1s registry poll reconciles into `phase`. Removed on exit.
+
+Standalone smoke check (no tty required — the OSCs land on stdout):
+
+    printf '\\n' | Scripts/e2e/fake-claude | python3 -c '
+    import sys, re
+    out = sys.stdin.buffer.read().decode()
+    for verb in ("session-start", "stop", "session-end"):
+        assert re.search(r"\\x1b\\]777;dreamux;%s;" % verb, out), verb
+    print("fake-claude OK")'
+
+Usage: fake-claude [--transcript-fixture <path>]
+  --transcript-fixture  copy a JSONL fixture to the temp transcript as
+                        the session's starting history before the built-in
+                        timeline appends to it (optional; the built-in
+                        timeline is self-contained without it).
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import shutil
+import sys
+import tempfile
+import time
+import uuid
+
+SESSION_ID = "fake-" + uuid.uuid4().hex[:12]
+TOOL_USE_ID = "toolu_" + uuid.uuid4().hex[:16]
+
+
+# --- Task 1 control-OSC emitter (inlined; fake-claude is standalone) -------
+def control_emit(verb: str, payload: dict) -> None:
+    body = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    sys.stdout.write(f"\033]777;dreamux;{verb};{body}\a")
+    sys.stdout.flush()
+
+
+# --- Registry file (honors DREAMUX_SESSIONS_DIR; never touches ~/.claude) --
+def registry_path() -> str | None:
+    root = os.environ.get("DREAMUX_SESSIONS_DIR")
+    if not root:
+        return None
+    os.makedirs(root, exist_ok=True)
+    return os.path.join(root, f"{os.getpid()}.json")
+
+
+def write_registry(status: str) -> None:
+    path = registry_path()
+    if not path:
+        return
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"sessionId": SESSION_ID, "status": status}, f)
+
+
+def remove_registry() -> None:
+    path = registry_path()
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+# --- Transcript timeline ---------------------------------------------------
+def append_transcript(fh, entry: dict) -> None:
+    """Append one JSONL line and flush so LiveConversation's vnode watcher
+    fires and drains the new item promptly."""
+    fh.write(json.dumps(entry) + "\n")
+    fh.flush()
+    os.fsync(fh.fileno())
+
+
+def user_text(text: str) -> dict:
+    return {"type": "user", "message": {"content": [{"type": "text", "text": text}]}}
+
+
+def assistant_blocks(blocks: list) -> dict:
+    return {"type": "assistant", "message": {"content": blocks}}
+
+
+def ask_question() -> dict:
+    return assistant_blocks([{
+        "type": "tool_use",
+        "id": TOOL_USE_ID,
+        "name": "AskUserQuestion",
+        "input": {"questions": [{
+            "question": "How should dark mode behave?",
+            "multiSelect": False,
+            "options": [
+                {"label": "Follow system",
+                 "description": "Match the OS light/dark setting automatically."},
+                {"label": "Manual toggle",
+                 "description": "A switch in Settings the user flips themselves."},
+            ],
+        }]},
+    }])
+
+
+def tool_result(answer: str) -> dict:
+    return {"type": "user", "message": {"content": [{
+        "type": "tool_result",
+        "tool_use_id": TOOL_USE_ID,
+        "content": answer,
+        "is_error": False,
+    }]}}
+
+
+def main() -> None:
+    fixture = None
+    args = sys.argv[1:]
+    if args and args[0] == "--transcript-fixture" and len(args) > 1:
+        fixture = args[1]
+
+    cwd = os.getcwd()
+    fd, transcript_path = tempfile.mkstemp(prefix="fake-claude-", suffix=".jsonl")
+    os.close(fd)
+
+    try:
+        # Optional starting history.
+        if fixture and os.path.exists(fixture):
+            shutil.copyfile(fixture, transcript_path)
+
+        # 1. Announce the session (binding -> phase working, face flips to
+        #    chat on first bind) and register as busy.
+        control_emit("session-start", {
+            "session_id": SESSION_ID,
+            "transcript_path": transcript_path,
+            "cwd": cwd,
+            "source": "startup",
+            "claude_pid": os.getpid(),
+        })
+        write_registry("busy")
+
+        with open(transcript_path, "a", encoding="utf-8") as fh:
+            # 2. Replay the timeline: user turn, then the assistant thinks
+            #    and speaks, then asks a question.
+            append_transcript(fh, user_text("Add a dark mode toggle to the settings screen."))
+            time.sleep(0.3)
+            append_transcript(fh, assistant_blocks([
+                {"type": "thinking",
+                 "thinking": "Dark mode could follow the system appearance or be a manual "
+                             "switch. I should ask before wiring it up."},
+                {"type": "text",
+                 "text": "I can add that. One quick question before I start."},
+            ]))
+            time.sleep(0.3)
+            append_transcript(fh, ask_question())
+
+            # 3. Waiting on the user: registry -> waiting (binding ->
+            #    phase waitingForUser; the transcript's unanswered
+            #    AskUserQuestion drives pendingQuestion in the chat face).
+            write_registry("waiting")
+
+            # 4. Block until an answer arrives on stdin. In a tab, typing
+            #    into the terminal (or the chat composer's gated send)
+            #    lands here as a line.
+            answer_line = sys.stdin.readline()
+            if answer_line == "":
+                # EOF before any answer — end the session cleanly.
+                control_emit("session-end", {"session_id": SESSION_ID})
+                return
+            answer = answer_line.strip() or "Manual toggle"
+
+            # 5. Record the answer + a closing turn, then report the turn
+            #    complete (binding -> phase idle) and register idle.
+            append_transcript(fh, tool_result(answer))
+            append_transcript(fh, assistant_blocks([{
+                "type": "text",
+                "text": f"Got it — I'll add a {answer.lower()} in Settings. Starting now.",
+            }]))
+            control_emit("stop", {"session_id": SESSION_ID})
+            write_registry("idle")
+
+        # 6. Wait for EOF (or a second line) and end the session
+        #    (binding -> phase ended, face toggle stays visible).
+        sys.stdin.readline()
+        control_emit("session-end", {"session_id": SESSION_ID})
+    finally:
+        remove_registry()
+        try:
+            os.unlink(transcript_path)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    main()
