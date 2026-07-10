@@ -17,16 +17,24 @@ final class TabSession: Identifiable {
     /// user last looked at it. Drives the badge on the workspace tile.
     var hasUnread: Bool = false
 
+    let binding = ClaudeSessionBinding()
+
     private let shell: PTYShellSession
     private var didStart = false
 
     init(
         cwd: String? = nil,
-        onActivity: @escaping @Sendable (String?) -> Void = { _ in },
-        onControl: (@Sendable (String, Data) -> Void)? = nil
+        onActivity: @escaping @Sendable (String?) -> Void = { _ in }
     ) {
         self.cwd = cwd
-        self.shell = PTYShellSession(cwd: cwd, onActivity: onActivity, onControl: onControl)
+        let binding = self.binding
+        self.shell = PTYShellSession(
+            cwd: cwd,
+            onActivity: onActivity,
+            onControl: { verb, json in
+                Task { @MainActor in binding.handleControl(verb: verb, json: json) }
+            }
+        )
 
         // Ghostty ships with default `super+<letter>` keybinds (super+t,
         // super+d, super+w, …) for actions its own app shell implements.
