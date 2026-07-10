@@ -105,6 +105,10 @@ struct FileSecretStore: SecretStore {
     func set(_ token: String, for id: String) throws {
         let url = try fileURL(for: id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Atomic write then chmod leaves a brief window where the file exists
+        // at the default umask perms before being narrowed to 0600. Accepted:
+        // this store only ever holds test/e2e fixtures — production secrets go
+        // through the Keychain.
         try Data(token.utf8).write(to: url, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }

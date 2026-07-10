@@ -25,10 +25,37 @@ final class SecretStoreTests: XCTestCase {
         XCTAssertEqual(FileSecretStore(dir: dir).get("k"), "X")
     }
 
+    func testFileStoreRejectsUnsafeIDs() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("secrets-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileSecretStore(dir: dir)
+
+        // A traversal id is rejected before any path is derived: set/delete
+        // throw (they route through the isSafe guard), get returns nil. None
+        // of them touch anything outside `dir`.
+        XCTAssertThrowsError(try store.set("x", for: "../evil"))
+        XCTAssertNil(store.get("../evil"))
+        XCTAssertThrowsError(try store.delete("../evil"))
+
+        // Confirm nothing escaped `dir` — the sibling path a "../evil" id
+        // would have written to does not exist.
+        let escaped = dir.deletingLastPathComponent().appendingPathComponent("evil")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: escaped.path))
+
+        // A normal id still round-trips.
+        try store.set("SEKRET", for: "github")
+        XCTAssertEqual(store.get("github"), "SEKRET")
+    }
+
     func testFactoryHonorsEnvOverride() {
-        // With the override set, the default is file-backed (no Keychain in tests).
-        // (Documented behavior; asserted structurally — the override is read
-        //  from the process env, which the e2e harness sets.)
-        XCTAssertNotNil(SecretStoreFactory.makeDefault())
+        let key = "DREAMUX_CONNECTIONS_SECRET_DIR"
+        let saved = ProcessInfo.processInfo.environment[key]
+        defer { if let saved { setenv(key, saved, 1) } else { unsetenv(key) } }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("f-\(UUID().uuidString)")
+        setenv(key, dir.path, 1)
+        XCTAssertTrue(SecretStoreFactory.makeDefault() is FileSecretStore)
+        unsetenv(key)
+        XCTAssertTrue(SecretStoreFactory.makeDefault() is KeychainSecretStore)
     }
 }
