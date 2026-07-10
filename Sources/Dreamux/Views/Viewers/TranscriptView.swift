@@ -28,7 +28,14 @@ struct TranscriptView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
                         header
-                        ForEach(items) { TranscriptRow(item: $0) }
+                        ForEach(TranscriptRunGrouper.blocks(from: items)) { block in
+                            switch block {
+                            case .single(let item):
+                                TranscriptRow(item: item)
+                            case .toolRun(let runItems):
+                                ToolRunBlock(items: runItems) { TranscriptRow(item: $0) }
+                            }
+                        }
                     }
                     .padding(.horizontal, 28)
                     .padding(.vertical, 22)

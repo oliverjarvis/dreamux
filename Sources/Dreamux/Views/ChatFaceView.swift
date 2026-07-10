@@ -30,7 +30,6 @@ struct ChatFaceView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             conversation
             footer
         }
@@ -56,21 +55,7 @@ struct ChatFaceView: View {
         return binding.conversation?.pendingQuestion
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-            Text(statusLabel)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
+    // MARK: - Status (rendered as a chip inside the composer)
 
     private var statusColor: Color {
         switch binding.phase {
@@ -97,7 +82,18 @@ struct ChatFaceView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 22) {
-                    ForEach(items) { row(for: $0) }
+                    ForEach(TranscriptRunGrouper.blocks(from: items)) { block in
+                        switch block {
+                        case .single(let item):
+                            row(for: item)
+                        case .toolRun(let runItems):
+                            ToolRunBlock(
+                                items: runItems,
+                                isLive: binding.phase == .working
+                                    && runItems.last?.id == items.last?.id
+                            ) { row(for: $0) }
+                        }
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 28)
@@ -303,31 +299,52 @@ struct ChatFaceView: View {
 
     // MARK: Composer
 
+    /// One rounded container: the text field on top, and inside its
+    /// bottom edge the session-status chip (left) and a circular send —
+    /// or, mid-turn, stop — button (right).
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             TextField("Message Claude…", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 15))
                 .lineLimit(1...6)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(.secondary.opacity(0.3)))
                 .onSubmit { sendDraft() }
 
-            if binding.phase == .working {
-                Button { tab.interruptClaude() } label: {
-                    Image(systemName: "stop.circle").font(.system(size: 20))
+            HStack(spacing: 8) {
+                statusChip
+                Spacer()
+                if binding.phase == .working {
+                    CircleIconButton(systemImage: "stop.fill", prominent: false) {
+                        tab.interruptClaude()
+                    }
+                    .help("Interrupt the current turn (Esc)")
+                } else {
+                    CircleIconButton(systemImage: "arrow.up", prominent: canSend) {
+                        sendDraft()
+                    }
+                    .disabled(!canSend)
                 }
-                .buttonStyle(.soft)
-            } else {
-                Button { sendDraft() } label: {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 20))
-                }
-                .buttonStyle(.soft)
-                .disabled(!canSend)
             }
         }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.primary.opacity(0.04)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.secondary.opacity(0.25)))
+    }
+
+    private var statusChip: some View {
+        HStack(spacing: 6) {
+            Circle().fill(statusColor).frame(width: 7, height: 7)
+            Text(statusLabel)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.primary.opacity(0.05)))
     }
 
     // MARK: - Actions (every send routes through the gated TabSession API)
@@ -371,6 +388,27 @@ struct ChatFaceView: View {
     private func toggle(_ index: Int) {
         if multiSelection.contains(index) { multiSelection.remove(index) }
         else { multiSelection.insert(index) }
+    }
+}
+
+/// The composer's circular action button: filled accent when it will do
+/// something (send), quiet wash otherwise (disabled send, interrupt).
+private struct CircleIconButton: View {
+    let systemImage: String
+    var prominent: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(prominent ? Color.white : Color.secondary)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(
+                    prominent ? Color.accentColor : Color.primary.opacity(0.08)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
