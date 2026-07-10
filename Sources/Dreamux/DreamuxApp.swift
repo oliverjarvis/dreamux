@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Bonsplit
 
@@ -16,7 +17,27 @@ struct DreamuxMain {
     }
 }
 
+/// ⌘Q guard: quitting is instant when the app is idle, but killable work
+/// (agent runs, foreground terminal jobs) gets one native confirmation.
+/// Bypassed in e2e mode — automated runs quit programmatically and must
+/// never hang on a modal.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !E2EMode.isActive,
+              let summary = QuitGuard.shared.busySummary() else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Quit Dreamux?"
+        alert.informativeText = summary
+        // Cancel is first so it owns Return (Esc maps to it by title) —
+        // a panicked double-tap can't quit.
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit")
+        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+    }
+}
+
 struct DreamuxApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var projects = ProjectStore()
 
     init() {
