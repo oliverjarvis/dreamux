@@ -48,6 +48,15 @@ final class ClaudeSessionBinding {
             guard let sessionID = payload["session_id"] as? String, !sessionID.isEmpty else { return }
             bind(sessionID: sessionID, payload: payload)
         case "session-end":
+            // Async hook delivery can land the OLD session's end after a
+            // NEW session has already bound. A payload naming a specific
+            // session id that doesn't match the one we're bound to is
+            // stale — ignore it. An empty/missing session id (older
+            // callers, or best-effort emitters) unbinds conservatively.
+            if let payloadSessionID = payload["session_id"] as? String, !payloadSessionID.isEmpty,
+               payloadSessionID != sessionID {
+                return
+            }
             end()
         case "notify":
             guard isBound else { return }

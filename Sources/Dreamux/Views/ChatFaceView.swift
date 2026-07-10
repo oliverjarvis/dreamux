@@ -197,7 +197,7 @@ struct ChatFaceView: View {
                 if question.multiSelect {
                     Button("Submit") { submitMulti() }
                         .buttonStyle(.soft)
-                        .disabled(multiSelection.isEmpty)
+                        .disabled(multiSelection.isEmpty || answerInjectedAt != nil)
                 }
 
                 HStack(spacing: 8) {
@@ -209,9 +209,10 @@ struct ChatFaceView: View {
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .strokeBorder(.secondary.opacity(0.3)))
                         .onSubmit { submitOther() }
+                        .disabled(answerInjectedAt != nil)
                     Button("Send") { submitOther() }
                         .buttonStyle(.soft)
-                        .disabled(otherText.isEmpty)
+                        .disabled(otherText.isEmpty || answerInjectedAt != nil)
                 }
 
                 didNotLandNote
@@ -246,6 +247,7 @@ struct ChatFaceView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.soft)
+        .disabled(answerInjectedAt != nil)
     }
 
     /// The injection watchdog: after a successful answer, if the same
@@ -335,9 +337,11 @@ struct ChatFaceView: View {
     }
 
     /// Mirrors `TabSession.sendChatPrompt`'s gate so the send button is
-    /// disabled exactly when a send would be a no-op.
+    /// disabled exactly when a send would be a no-op. `.idle` only — a
+    /// `.waitingForUser` phase can mean a permission dialog is up, and
+    /// the composer must never blind-type into that.
     private var canSend: Bool {
-        (binding.phase == .idle || binding.phase == .waitingForUser)
+        binding.phase == .idle
             && binding.conversation?.pendingQuestion == nil
             && !draft.isEmpty
     }

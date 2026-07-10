@@ -203,9 +203,13 @@ final class TabSession: Identifiable {
 
     /// Send a composer prompt into the bound claude TUI. Returns false
     /// (and sends nothing) unless the session is at its input prompt.
+    /// `.waitingForUser` is deliberately excluded — it can mean a
+    /// permission dialog is up (the transcript stays silent, only the
+    /// Notification hook fires), and blind-typing a prompt there would
+    /// send its CR straight into the dialog.
     @discardableResult
     func sendChatPrompt(_ text: String) -> Bool {
-        guard binding.phase == .idle || binding.phase == .waitingForUser,
+        guard binding.phase == .idle,
               binding.conversation?.pendingQuestion == nil,
               !text.isEmpty else { return false }
         shell.send(PromptKeystrokeRecipes.promptSend(text))
