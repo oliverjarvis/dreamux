@@ -9,6 +9,11 @@ import SwiftUI
 /// Keychain and this view discards its own copy on dismiss.
 struct AddConnectionSheet: View {
     let store: ConnectionStore
+    /// Slot-provided provider hint (a connection slot's `suggests`) — when it
+    /// maps to a known CLI provider, the sheet opens on the Import-from-CLI
+    /// tab with that provider pre-selected. Optional/defaulted so the T7
+    /// Settings call site (which has no slot) compiles unchanged.
+    var suggestedProvider: String? = nil
     let onDone: () -> Void
 
     enum Mode: String, CaseIterable, Identifiable {
@@ -106,7 +111,29 @@ struct AddConnectionSheet: View {
         }
         .padding(20)
         .frame(width: 460)
-        .onAppear { focused = .label }
+        .onAppear {
+            // If the presenting slot suggests a provider we can import, land
+            // the user on that ready-to-import tab; otherwise keep defaults.
+            if let hint = suggestedProvider, let providerID = Self.resolveProvider(hint) {
+                mode = .importFromCLI
+                selectedProviderID = providerID
+            }
+            focused = .label
+        }
+    }
+
+    /// Maps a slot's `suggests` hint to a known `CLICredentialImporter`
+    /// provider id, accepting both manifest conventions for each pair
+    /// (`"github"`/`"gh"` → `"gh"`, `"expo"`/`"eas"` → `"expo"`), then falling
+    /// back to a direct provider-id match. Returns nil when nothing lines up,
+    /// so the sheet keeps its default tab/provider rather than guessing.
+    private static func resolveProvider(_ hint: String) -> String? {
+        switch hint.lowercased() {
+        case "github", "gh": return "gh"
+        case "expo", "eas": return "expo"
+        default:
+            return CLICredentialImporter.providers.contains { $0.id == hint } ? hint : nil
+        }
     }
 
     // MARK: - Import section

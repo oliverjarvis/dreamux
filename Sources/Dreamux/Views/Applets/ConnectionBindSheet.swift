@@ -64,7 +64,7 @@ struct ConnectionBindSheet: View {
         .padding(20)
         .frame(width: 440)
         .sheet(isPresented: $showingAddSheet) {
-            AddConnectionSheet(store: store, onDone: {
+            AddConnectionSheet(store: store, suggestedProvider: slot.suggests, onDone: {
                 showingAddSheet = false
                 if let created = store.connections.first(where: { !idsBeforeCreate.contains($0.id) }) {
                     onBind(created.id)
