@@ -151,9 +151,15 @@ struct AddConnectionSheet: View {
                     mode = .manual
                 }
             }
-            // If the presenting slot suggests a provider we can import, land
-            // the user on that ready-to-import tab; otherwise keep defaults.
-            if let hint = suggestedProvider, let providerID = Self.resolveProvider(hint) {
+            // If the presenting slot suggests a provider we can import — and
+            // no recipe already drove the landing tab above — land the user
+            // on that ready-to-import tab; otherwise keep defaults. This is
+            // strictly the no-recipe fallback: a slot carrying an `authKind`
+            // or `importCommand` keeps its recipe-driven landing (e.g. a
+            // recipe's Manual landing isn't silently overwritten by a
+            // `suggests` hint that would flip it back to Import).
+            let hasRecipe = prefillSlot?.authKind != nil || prefillSlot?.importCommand != nil
+            if !hasRecipe, let hint = suggestedProvider, let providerID = Self.resolveProvider(hint) {
                 mode = .importFromCLI
                 selectedProviderID = providerID
             }
