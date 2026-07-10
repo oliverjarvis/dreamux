@@ -47,4 +47,6 @@ struct ConnectionSlot: Codable, Equatable, Sendable {
     var label: String
     var hosts: [String]       // advisory: what the applet intends to call
     var suggests: String?     // provider hint for the bind UI ("github"/"expo")
+    var authKind: AuthKind? = nil      // the exact auth shape the applet's service needs
+    var importCommand: String? = nil   // a suggested command that prints the token
 }

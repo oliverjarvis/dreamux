@@ -272,6 +272,56 @@ if (!status.bound) {
 expose only non-secret binding state (or open the bind UI), never a
 token.
 
+### Declaring a connection recipe
+
+A slot can go further than `id`/`label`/`hosts`/`suggests`: add
+`authKind` and `importCommand` to tell Dreamux exactly how your
+service's credential is shaped. When a slot carries a recipe, binding
+pre-fills the auth kind and (if present) offers the import command as
+a one-click "import token" action — the user supplies only the secret
+itself, not the shape around it.
+
+```json
+{ "id": "linear", "label": "Linear API key", "hosts": ["api.linear.app"],
+  "authKind": { "header": { "headerName": "Authorization", "valueTemplate": "{token}" } } }
+```
+
+```json
+{ "id": "gh", "label": "GitHub", "hosts": ["api.github.com"],
+  "authKind": { "header": { "headerName": "Authorization", "valueTemplate": "Bearer {token}" } },
+  "importCommand": "gh auth token" }
+```
+
+`authKind` is the JSON shape of the `AuthKind` enum — exactly one of:
+
+```json
+{ "header": { "headerName": "Authorization", "valueTemplate": "Bearer {token}" } }
+{ "basic": { "username": "me" } }
+{ "query": { "param": "api_key" } }
+{ "env": { "vars": ["GH_TOKEN", "GITHUB_TOKEN"] } }
+```
+
+| Shape | Meaning |
+|---|---|
+| `header` | Sets an HTTP header named `headerName` to `valueTemplate` with `{token}` substituted for the secret (a raw API-key header uses `"{token}"`; a bearer scheme uses `"Bearer {token}"`; a GitHub classic PAT uses `"token {token}"`). |
+| `basic` | HTTP Basic auth: header `Authorization` = `Basic base64(username:token)`. |
+| `query` | Appends `param={token}` to the request URL's query string (legacy APIs). |
+| `env` | Injects the token as each of `vars` in the environment of a single `shell.exec` call — HTTP-only slots can't use this kind. |
+
+**Rule: a `header` `valueTemplate` MUST contain `{token}`.** It's the
+placeholder Dreamux substitutes the secret into — a template without
+it silently drops the credential.
+
+`importCommand` is a shell command that, when run, prints the token to
+stdout — a hint the bind sheet can offer so the user doesn't have to
+go find their token by hand (e.g. `"gh auth token"`, `"linear-cli
+token"`). **An `importCommand` is only ever run when the user clicks
+it — Dreamux never runs it automatically.**
+
+Both fields are optional, and both are new: a slot with just
+`id`/`label`/`hosts`/`suggests` (the shape most applets already use)
+still works exactly as before.
+
 ## UI: vendored Preact + htm
 
 There's no JSX/build step, so UI is written with
