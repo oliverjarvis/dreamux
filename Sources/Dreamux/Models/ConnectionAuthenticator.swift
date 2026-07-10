@@ -24,6 +24,16 @@ enum ConnectionAuthenticator {
         return allowed.contains(host)
     }
 
+    /// The full send-safety predicate: https-only AND exact-host allowlist —
+    /// the same two conditions `authorize` enforces on the initial request,
+    /// as a single reusable Bool for contexts that only need a go/no-go
+    /// (the redirect guard). Kept separate from `authorize`'s two discrete
+    /// throwing guards so that error discrimination (`.notHTTPS` vs
+    /// `.hostNotAllowed`) stays intact for callers that need it.
+    static func isAllowedTarget(_ url: URL, hosts: [String]) -> Bool {
+        url.scheme?.lowercased() == "https" && hostAllowed(url, hosts: hosts)
+    }
+
     /// Apply an HTTP kind's credential to `request` for `url`. Enforces
     /// https-only and the exact-host allowlist; rejects `.env`. Returns the
     /// mutated request (header set, or query param appended).

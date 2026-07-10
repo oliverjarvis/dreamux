@@ -19,6 +19,22 @@ final class ConnectionAuthenticatorTests: XCTestCase {
         }
     }
 
+    func testIsAllowedTargetRequiresHTTPSAndHost() {
+        // https + allowlisted host → the only accepted combination.
+        XCTAssertTrue(ConnectionAuthenticator.isAllowedTarget(
+            URL(string: "https://api.github.com/x")!, hosts: hosts))
+        // https downgrade to http on the SAME host → rejected (this is the
+        // redirect leak the guard now closes).
+        XCTAssertFalse(ConnectionAuthenticator.isAllowedTarget(
+            URL(string: "http://api.github.com/x")!, hosts: hosts))
+        // Off-allowlist host, even over https → rejected.
+        XCTAssertFalse(ConnectionAuthenticator.isAllowedTarget(
+            URL(string: "https://evil.com/x")!, hosts: hosts))
+        // Off-allowlist AND cleartext → rejected.
+        XCTAssertFalse(ConnectionAuthenticator.isAllowedTarget(
+            URL(string: "http://evil.com/x")!, hosts: hosts))
+    }
+
     func testHTTPSOnly() {
         XCTAssertThrowsError(try ConnectionAuthenticator.authorize(
             URLRequest(url: URL(string: "http://api.github.com/x")!),
