@@ -949,6 +949,52 @@ uses one).
    "libraryApplets":[{"slug":"lib-probe","name":"Lib Probe"}]}
 ```
 
+### `chatFaceState`
+
+Snapshot of the active workspace's Claude **chat face** (Task 6/8/9) —
+the observable evidence that a session bound, the tab auto-flipped to
+chat, and the binding's phase tracks a live session. Reads the same
+`TabSession.binding` + `TabSession.face` the `ChatFaceView` renders, so
+it can't drift from what's on screen — and it's the only way to assert
+the chat face, since the in-process `screenshot` renders the Ghostty
+grid blank (see `screenshot`).
+
+Resolves the workspace's on-screen tab: the focused pane's selected tab,
+then any pane's selected tab, then the workspace's first Claude terminal
+tab — so the pinned Overview tab sitting frontmost never masks a live
+chat session a driver just started in the shell (the Overview tab has no
+terminal `TabSession`).
+
+`{"ok": true, "phase": "unbound|working|waitingForUser|idle|ended",
+"items": N, "face": "chat|terminal", "pendingQuestion": true|false}`
+
+- `phase` — `ClaudeSessionBinding.Phase.rawValue`: `unbound` (no session
+  yet), `working` (assistant turn in flight), `waitingForUser` (a
+  Notification/AskUserQuestion is pending), `idle` (turn complete, at the
+  prompt), `ended` (session over; the face toggle stays visible).
+- `items` — count of parsed transcript items
+  (`binding.conversation?.items.count`, `0` when nothing has bound). It
+  only grows within a session, so a driver polls it to confirm a turn
+  landed.
+- `face` — `"chat"` once the tab has auto-flipped on first bind, else
+  `"terminal"` (the user can flip back).
+- `pendingQuestion` — `true` while an unanswered `AskUserQuestion` is on
+  screen (drives the chat face's option banner).
+
+Fails with `ok:false` when no project window/workspace is registered or
+the active workspace has no Claude terminal tab.
+
+Drive `Scripts/e2e/fake-claude` in a workspace's shell (a deterministic
+`claude` stand-in — emits the session-start/stop/session-end control
+OSCs and steps a busy → waiting → idle registry timeline), then poll:
+
+```
+→ {"cmd":"chatFaceState"}
+← {"ok":true,"phase":"working","items":2,"face":"chat","pendingQuestion":false}
+← {"ok":true,"phase":"waitingForUser","items":4,"face":"chat","pendingQuestion":true}
+← {"ok":true,"phase":"idle","items":6,"face":"chat","pendingQuestion":false}
+```
+
 ### `courseCorrect`
 
 File a course correction against a plan, driving the same submit as the
