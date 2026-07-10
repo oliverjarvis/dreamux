@@ -277,6 +277,13 @@ struct AddConnectionSheet: View {
         label.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// A pasted token often carries a trailing newline/space; trim it so it
+    /// can't silently corrupt the header/basic/env value it's substituted
+    /// into. The CLI-import path already hands back a trimmed token.
+    private var trimmedToken: String {
+        token.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var hostsArray: [String] {
         hostsText
             .split(separator: ",")
@@ -294,7 +301,7 @@ struct AddConnectionSheet: View {
     }
 
     private var canSave: Bool {
-        !trimmedLabel.isEmpty && !token.isEmpty && !hostsArray.isEmpty && kindFieldsValid
+        !trimmedLabel.isEmpty && !trimmedToken.isEmpty && !hostsArray.isEmpty && kindFieldsValid
     }
 
     /// Maps the current picker choice + its one typed field to an
@@ -337,7 +344,7 @@ struct AddConnectionSheet: View {
                 label: trimmedLabel,
                 kind: effectiveKind,
                 hosts: hostsArray,
-                token: token,
+                token: trimmedToken,
                 source: effectiveSource,
                 preferredID: effectivePreferredID
             )

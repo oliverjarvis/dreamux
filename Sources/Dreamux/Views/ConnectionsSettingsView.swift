@@ -14,6 +14,9 @@ struct ConnectionsSettingsView: View {
     /// The connection a Delete was fired against, driving the destructive
     /// confirm dialog (the view owns it, not the row).
     @State private var pendingDelete: Connection?
+    /// A delete that threw (secret-remove or metadata-save failure) — shown
+    /// as a red caption rather than swallowed, so a stuck row isn't silent.
+    @State private var deleteError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -29,6 +32,13 @@ struct ConnectionsSettingsView: View {
                 }
             }
             addRow
+            if let deleteError {
+                Text(deleteError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+            }
         }
         .sheet(isPresented: $showingAddSheet) {
             AddConnectionSheet(store: store, onDone: { showingAddSheet = false })
@@ -42,7 +52,12 @@ struct ConnectionsSettingsView: View {
             presenting: pendingDelete
         ) { connection in
             Button("Delete", role: .destructive) {
-                try? store.delete(id: connection.id)
+                do {
+                    try store.delete(id: connection.id)
+                    deleteError = nil
+                } catch {
+                    deleteError = "Couldn't delete \"\(connection.label)\": \(error.localizedDescription)"
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
