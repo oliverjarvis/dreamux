@@ -94,6 +94,9 @@ struct ChatFaceView: View {
                             ) { row(for: $0) }
                         }
                     }
+                    if binding.phase == .working {
+                        ThinkingIndicator()
+                    }
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 28)
@@ -106,6 +109,13 @@ struct ChatFaceView: View {
             }
             .onChange(of: items.count) {
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            // The thinking indicator appears on the phase flip — keep it
+            // in view, not clipped below the fold.
+            .onChange(of: binding.phase) {
+                if binding.phase == .working {
+                    withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                }
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
         }
@@ -388,6 +398,38 @@ struct ChatFaceView: View {
     private func toggle(_ index: Int) {
         if multiSelection.contains(index) { multiSelection.remove(index) }
         else { multiSelection.insert(index) }
+    }
+}
+
+/// "Thinking…" with a shimmer — a gradient highlight sweeping across the
+/// label while a turn is in flight. `TimelineView(.animation)` drives the
+/// sweep, so it costs frames only while actually on screen.
+private struct ThinkingIndicator: View {
+    private static let label = "Thinking…"
+    private static let period: TimeInterval = 1.6
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: Self.period) / Self.period
+            // Sweep from just off the left edge to just off the right so
+            // the highlight enters and exits cleanly each cycle.
+            let center = t * 1.5 - 0.25
+            Text(Self.label)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .secondary.opacity(0.45), location: 0),
+                            .init(color: .secondary.opacity(0.45), location: max(0, center - 0.2)),
+                            .init(color: .primary.opacity(0.95), location: min(max(0, center), 1)),
+                            .init(color: .secondary.opacity(0.45), location: min(1, center + 0.2)),
+                            .init(color: .secondary.opacity(0.45), location: 1),
+                        ],
+                        startPoint: .leading, endPoint: .trailing))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Claude is thinking")
     }
 }
 
