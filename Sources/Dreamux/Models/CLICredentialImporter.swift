@@ -100,6 +100,47 @@ enum CLICredentialImporter {
         }
     }
 
+    /// Live: run an arbitrary user/applet-supplied command via `/bin/sh -lc`
+    /// and return its trimmed stdout as a token, or nil on empty output /
+    /// non-zero exit / launch failure. The command is ALWAYS user-triggered
+    /// (never auto-run) — see the spec's consent rule; this is just the
+    /// runner, not the gate.
+    static func runCommand(_ command: String) async -> String? {
+        let output: String? = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/bin/sh")
+                process.arguments = ["-lc", command]
+                process.environment = ProcessInfo.processInfo.environment
+
+                let outPipe = Pipe()
+                let errPipe = Pipe()
+                process.standardOutput = outPipe
+                process.standardError = errPipe
+
+                do {
+                    try process.run()
+                } catch {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                // Drain before waiting so a chatty command can't deadlock on
+                // a full pipe buffer.
+                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                _ = errPipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+
+                guard process.terminationStatus == 0 else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                continuation.resume(returning: String(data: outData, encoding: .utf8) ?? "")
+            }
+        }
+        guard let output else { return nil }
+        return parseToken(provider: "", cliOutput: output)
+    }
+
     // MARK: - Process plumbing (gh)
 
     /// Path of the gh binary to exec: the `DREAMUX_GH_BIN` override when

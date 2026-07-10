@@ -32,4 +32,20 @@ final class CLICredentialImporterTests: XCTestCase {
     func testUnknownProvider() {
         XCTAssertNil(CLICredentialImporter.draft(provider: "nope", token: "t"))
     }
+
+    func testRunCommandCapturesTrimmedStdout() async {
+        let token = await CLICredentialImporter.runCommand("printf 'tok-xyz\\n'")
+        XCTAssertEqual(token, "tok-xyz")
+    }
+    func testRunCommandNilOnEmptyOutput() async {
+        let empty1 = await CLICredentialImporter.runCommand("true")
+        XCTAssertNil(empty1)
+        let empty2 = await CLICredentialImporter.runCommand("printf '   '")
+        XCTAssertNil(empty2)
+    }
+    func testRunCommandNilOnNonZeroExit() async {
+        // A command that prints then fails must NOT yield a token.
+        let result = await CLICredentialImporter.runCommand("echo oops; exit 3")
+        XCTAssertNil(result)
+    }
 }
