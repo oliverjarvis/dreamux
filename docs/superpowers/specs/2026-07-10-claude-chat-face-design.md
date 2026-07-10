@@ -110,8 +110,9 @@ Both feed a per-binding `@Observable` conversation model rendering:
 - **Thinking** behind a collapsed disclosure.
 - **Tool calls** as collapsed cards — icon, tool name, one-line summary —
   expanding to input/result detail. `tool_use`/`tool_result` pairs join by
-  tool-use id. Oversized results spilled to `tool-results/*.txt` load
-  lazily on expand.
+  tool-use id. Oversized results spill to `tool-results/*.txt`; v1 renders
+  whatever stub the transcript line carries (lazy spill-file loading is
+  deferred — see Deferred).
 - **Agent (subagent) calls** as cards summarizing the task, with a link
   that opens the subagent's transcript
   (`projects/<slug>/<session>/subagents/agent-<id>.jsonl`) in the existing
@@ -233,7 +234,16 @@ instant and lossless in both directions.
 ## Deferred (designed-for, not built)
 
 - **Inline subagent conversations** — v1 links out to the static viewer.
-- **Full permission parity** — v1 handles recognized patterns only.
+- **Full permission parity** — v1 handles recognized patterns only (and
+  the recognized-pattern table ships empty until verified against real
+  payloads: every permission request degrades to banner + flip).
+- **Lazy loading of oversized spilled tool results** — the on-disk stub
+  format inside the transcript line is unverified; v1 renders the stub
+  text as-is rather than guessing a join.
+- **Multi-question AskUserQuestion dialogs** — v1 answers single-question
+  dialogs from the chat face; multi-question ones degrade to the
+  "Respond in terminal" banner (never blind-type through a dialog whose
+  cursor state we can't model).
 - **Slash-command affordances** (model picker, /compact button) from the
   chat face.
 - **Multiple concurrent claude processes in one tab** (tmux panes) — v1
