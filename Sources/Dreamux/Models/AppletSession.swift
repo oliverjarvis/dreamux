@@ -56,13 +56,27 @@ final class AppletSession: @MainActor Identifiable {
         )
     }
 
-    /// Manifest-declared connection slots this applet has no binding for yet
-    /// — the T8 bind banner lists these. Reads observable binding state, so
-    /// it re-evaluates when a slot is bound/unbound.
+    /// Manifest-declared connection slots this applet has no *working*
+    /// binding for — the T8 bind banner/host-view lists these. Dangling-aware:
+    /// `status(slot:).bound` is false both when the slot was never bound AND
+    /// when it's bound to a since-deleted connection, so a stale binding
+    /// still shows up here (checking `bindings.connectionID(forSlot:) == nil`
+    /// alone would miss that second case). Reads observable binding state,
+    /// so it re-evaluates when a slot is bound/unbound or a connection is
+    /// deleted out from under it.
     var unboundConnectionSlots: [ConnectionSlot] {
-        applet.manifest.requiresConnections.filter {
-            connections.bindings.connectionID(forSlot: $0.id) == nil
-        }
+        applet.manifest.requiresConnections.filter { !connections.status(slot: $0.id).bound }
+    }
+
+    /// Binds `slot` to the connection with id `connectionID` and dismisses
+    /// the pending bind sheet — the one place the session performs a
+    /// binding write, so bind-then-complete stays atomic from the caller's
+    /// (the bind sheet's) perspective. Throws (and leaves the sheet open,
+    /// `pendingBindSlot` untouched) if the write to disk fails; the caller
+    /// can retry or the user can cancel.
+    func bind(slot: String, toConnectionID connectionID: String) throws {
+        try connections.bindings.bind(slot: slot, toConnectionID: connectionID)
+        completeBind()
     }
 
     /// Open the bind sheet for `slot` and suspend until it dismisses, then
