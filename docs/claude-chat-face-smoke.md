@@ -65,3 +65,44 @@ matches.
   another shell. Within ~2s the registry liveness backstop notices the
   session is gone and the face shows **Session ended** (the toggle pill
   stays so you can flip back to Terminal).
+
+## Scripted e2e replay (deterministic, fake-claude)
+
+Deferred at merge time (2026-07-10) because a live Dreamux instance held
+focus and the emit socket — **this replay has not yet been observed
+running end-to-end**. Run it once, with no Dreamux instance open; it
+drives bind → auto-flip → question banner → answer → idle without a real
+`claude`.
+
+```sh
+REPO=/Users/olliejarvis/Development/clayspace
+SHOTS=/tmp/chat-face-shots; mkdir -p "$SHOTS"
+SANDBOX="$(mktemp -d)"; SOCK=/tmp/dreamux-chatface.sock; SESSIONS="$SANDBOX/sessions"
+mkdir -p "$SANDBOX/projects/demo" "$SANDBOX/state" "$SESSIONS"
+
+"$REPO/Scripts/make-app.sh" debug           # build the bundle
+
+DREAMUX_E2E_SOCKET="$SOCK" DREAMUX_E2E_AUTOOPEN=demo \
+DREAMUX_PROJECTS_ROOT="$SANDBOX/projects" DREAMUX_STATE_DIR="$SANDBOX/state" \
+DREAMUX_SESSIONS_DIR="$SESSIONS" \
+  "$REPO/Dreamux.app/Contents/MacOS/Dreamux" -ApplePersistenceIgnoreState YES &
+
+# Over the socket (see Scripts/e2e/PROTOCOL.md — newline-delimited JSON):
+#  1. poll {"cmd":"state"} until activeProject.name == "demo"
+#  2. {"cmd":"createFeature","name":"chatface","repos":[]}
+#     (or openMainWorkspace); then setSidebarMode workspace so the pane mounts
+#  3. {"cmd":"sendTerminalText","text":"'"$REPO"'/Scripts/e2e/fake-claude","submit":true}
+#  4. poll {"cmd":"chatFaceState"} until
+#        phase=="waitingForUser" && pendingQuestion==true && face=="chat"
+#  5. {"cmd":"screenshot","path":"'"$SHOTS"'/chat-face-question.png"}
+#  6. answer: {"cmd":"sendTerminalText","text":"Manual toggle","submit":true}
+#        (types into fake-claude's stdin, i.e. the tab's PTY)
+#  7. poll {"cmd":"chatFaceState"} until phase=="idle" && items grew (>=6)
+#  8. {"cmd":"screenshot","path":"'"$SHOTS"'/chat-face-idle.png"}
+#  9. {"cmd":"quit"}
+```
+
+The Overview tab is selected by default and there is no tab-selection
+e2e command, so the screenshots document window chrome; `chatFaceState`
+(which falls back to the shell `TabSession`) is the authoritative
+assertion.
