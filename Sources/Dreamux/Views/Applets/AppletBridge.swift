@@ -158,6 +158,12 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
             let connectionSlot = (request.params["connection"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             Task { @MainActor [weak owner] in
                 guard let owner else { return }
+                // A dedicated, redirect-guarded session for a connection-
+                // authenticated fetch; invalidated (releasing its delegate)
+                // when this scope exits. Non-connection fetches leave this nil
+                // and use `URLSession.shared`, unchanged.
+                var dedicatedSession: URLSession?
+                defer { dedicatedSession?.finishTasksAndInvalidate() }
                 do {
                     var urlRequest = URLRequest(url: url)
                     urlRequest.httpMethod = method
@@ -179,8 +185,16 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
                         urlRequest = try ConnectionAuthenticator.authorize(
                             urlRequest, url: url, kind: resolved.connection.kind,
                             token: resolved.token, hosts: resolved.connection.hosts)
+                        // The initial host is allowlisted, but URLSession
+                        // auto-follows 3xx redirects — guard them so the
+                        // credential can't be carried off the allowlist.
+                        dedicatedSession = URLSession(
+                            configuration: .default,
+                            delegate: AppletRedirectHostGuard(hosts: resolved.connection.hosts),
+                            delegateQueue: nil)
                     }
-                    let (data, response) = try await URLSession.shared.data(for: urlRequest)
+                    let session = dedicatedSession ?? .shared
+                    let (data, response) = try await session.data(for: urlRequest)
                     let http = response as? HTTPURLResponse
                     var responseHeaders: [String: String] = [:]
                     for (field, value) in http?.allHeaderFields ?? [:] {
@@ -249,7 +263,7 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
             let status = owner.connections.status(slot: slot)
             reply(id: request.id, owner: owner, result: [
                 "bound": status.bound,
-                "label": status.label ?? NSNull(),
+                "label": status.label.map { $0 as Any } ?? NSNull(),
                 "hosts": status.hosts,
             ])
 
@@ -265,7 +279,7 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
                 let status = await owner.requestBind(slot: slot)
                 reply(id: request.id, owner: owner, result: [
                     "bound": status.bound,
-                    "label": status.label ?? NSNull(),
+                    "label": status.label.map { $0 as Any } ?? NSNull(),
                     "hosts": status.hosts,
                 ])
             }
