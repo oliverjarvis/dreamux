@@ -74,6 +74,35 @@ final class QuitGuardTests: XCTestCase {
         XCTAssertEqual(PTYShellSession().busyWork, BusyWork())
     }
 
+    // MARK: - PTY integration (real shell)
+
+    /// Regression: ⌘Q while `claude` (or any foreground job) ran in a
+    /// terminal quit without the alert. A real PTY running a real job
+    /// must report busy through the real tcgetpgrp path.
+    func testRealPTYWithForegroundJobReportsBusy() async throws {
+        let session = PTYShellSession()
+        session.start()
+        defer { session.stop() }
+
+        // Wait for the shell's line editor to come up (zle's init
+        // flushes input typed before it's ready).
+        for _ in 0..<100 where !session.isQuiescent(for: 0.5) {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertTrue(session.hasProducedOutput, "shell never came up")
+        XCTAssertEqual(session.busyWork, BusyWork(), "idle prompt must not be busy")
+
+        session.send("sleep 30\n")
+        var work = BusyWork()
+        for _ in 0..<50 {
+            work = session.busyWork
+            if work.busyTerminals == 1 { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertEqual(work, BusyWork(busyTerminals: 1),
+                       "a foreground job must count as a busy terminal")
+    }
+
     // MARK: - RunnerManager source
 
     func testRunnerManagerCountsRunningInstances() async throws {
