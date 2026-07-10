@@ -16,7 +16,7 @@ enum AppletShell {
     /// timeout a detached watchdog calls `terminate()`; Foundation's
     /// `Process` puts the child in its own process group and `terminate()`
     /// signals that whole group, so shell-spawned grandchildren die too.
-    static func exec(cmd: String, cwd: URL, timeout: TimeInterval = 60) async -> (stdout: String, stderr: String, code: Int32) {
+    static func exec(cmd: String, cwd: URL, timeout: TimeInterval = 60, env extraEnv: [String: String] = [:]) async -> (stdout: String, stderr: String, code: Int32) {
         let processBox = ProcessBox()
 
         return await withCheckedContinuation { (continuation: CheckedContinuation<(stdout: String, stderr: String, code: Int32), Never>) in
@@ -36,6 +36,12 @@ enum AppletShell {
                 // expect `pwd` to print.
                 var env = ProcessInfo.processInfo.environment
                 env["PWD"] = cwd.path
+                // A bound connection's `.env`-kind vars are merged LAST so
+                // they win over both inherited vars and `PWD` — the credential
+                // the applet asked for can't be shadowed by the ambient env.
+                for (key, value) in extraEnv {
+                    env[key] = value
+                }
                 process.environment = env
 
                 let outPipe = Pipe()
