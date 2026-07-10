@@ -19,6 +19,21 @@ final class TabSession: Identifiable {
 
     let binding = ClaudeSessionBinding()
 
+    // MARK: - Face state
+
+    enum TabFace: Equatable { case chat, terminal }
+    /// Which face this tab shows. Terminal until a session first binds,
+    /// then auto-flips to chat ONCE; after that the user's choice sticks
+    /// (in-memory — tabs don't persist across launches).
+    var face: TabFace = .terminal
+    @ObservationIgnored private var didAutoFlip = false
+
+    func autoFlipToChatOnce() {
+        guard !didAutoFlip else { return }
+        didAutoFlip = true
+        face = .chat
+    }
+
     private let shell: PTYShellSession
     private var didStart = false
 
