@@ -8,6 +8,7 @@ enum ConnectionAuthError: Error, Equatable {
     case wrongKindForHTTP    // .env kind used with http.fetch
     case wrongKindForShell   // non-.env kind used with shell.exec
     case malformedURL
+    case templateMissingPlaceholder  // .header valueTemplate lacks "{token}"
 }
 
 /// Pure functions that attach a Connection's token to a request (HTTP
@@ -37,9 +38,16 @@ enum ConnectionAuthenticator {
             throw ConnectionAuthError.hostNotAllowed(url.host ?? "")
         }
 
+        // Defense in depth: pin the request to the validated `url` so no kind
+        // can ever attach a credential to a divergent (redirect-mutated,
+        // stale, mismatched) `request.url` that skipped the scheme/host guards.
         var request = request
+        request.url = url
         switch kind {
         case .header(let headerName, let valueTemplate):
+            guard valueTemplate.contains("{token}") else {
+                throw ConnectionAuthError.templateMissingPlaceholder
+            }
             let value = valueTemplate.replacingOccurrences(of: "{token}", with: token)
             request.setValue(value, forHTTPHeaderField: headerName)
             return request
@@ -72,6 +80,7 @@ enum ConnectionAuthenticator {
         guard case .env(let vars) = kind else {
             throw ConnectionAuthError.wrongKindForShell
         }
-        return Dictionary(uniqueKeysWithValues: vars.map { ($0, token) })
+        // Tolerate duplicate var names (uniqueKeysWithValues would trap).
+        return Dictionary(vars.map { ($0, token) }, uniquingKeysWith: { first, _ in first })
     }
 }

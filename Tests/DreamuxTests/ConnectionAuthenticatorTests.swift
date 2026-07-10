@@ -68,4 +68,29 @@ final class ConnectionAuthenticatorTests: XCTestCase {
         XCTAssertEqual(try ConnectionAuthenticator.env(for: .env(vars: ["GH_TOKEN"]), token: "T"),
                        ["GH_TOKEN": "T"])
     }
+
+    func testCredentialNeverAttachedToADivergentRequestURL() throws {
+        let divergent = try ConnectionAuthenticator.authorize(
+            URLRequest(url: URL(string: "https://evil.com/x")!),
+            url: URL(string: "https://api.github.com/x")!,
+            kind: .header(headerName: "Authorization", valueTemplate: "Bearer {token}"),
+            token: "T", hosts: hosts)
+        XCTAssertEqual(divergent.url!.host, "api.github.com")   // evil url can't survive
+        XCTAssertEqual(divergent.value(forHTTPHeaderField: "Authorization"), "Bearer T")
+    }
+
+    func testHeaderTemplateWithoutPlaceholderThrows() {
+        let url = URL(string: "https://api.github.com/x")!
+        XCTAssertThrowsError(try ConnectionAuthenticator.authorize(URLRequest(url: url), url: url,
+            kind: .header(headerName: "Authorization", valueTemplate: "Bearer no-placeholder"),
+            token: "T", hosts: hosts)) {
+            XCTAssertEqual($0 as? ConnectionAuthError, .templateMissingPlaceholder)
+        }
+    }
+
+    func testEnvToleratesDuplicateVarNames() throws {
+        XCTAssertEqual(
+            try ConnectionAuthenticator.env(for: .env(vars: ["GH_TOKEN", "GH_TOKEN"]), token: "T"),
+            ["GH_TOKEN": "T"])
+    }
 }
