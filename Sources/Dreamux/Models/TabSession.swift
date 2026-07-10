@@ -183,4 +183,48 @@ final class TabSession: Identifiable {
     /// their text was echoed (received) and not flushed by a
     /// still-initializing line editor.
     var lastShellOutputAt: Date? { shell.lastOutputTimestamp }
+
+    // MARK: - Chat-face input (gated — never blind-type)
+
+    /// Send a composer prompt into the bound claude TUI. Returns false
+    /// (and sends nothing) unless the session is at its input prompt.
+    @discardableResult
+    func sendChatPrompt(_ text: String) -> Bool {
+        guard binding.phase == .idle || binding.phase == .waitingForUser,
+              binding.conversation?.pendingQuestion == nil,
+              !text.isEmpty else { return false }
+        shell.send(PromptKeystrokeRecipes.promptSend(text))
+        return true
+    }
+
+    /// Answer the pending AskUserQuestion by option indices (single- or
+    /// multi-select decided by the question itself).
+    @discardableResult
+    func answerQuestion(selecting indices: [Int]) -> Bool {
+        guard binding.phase == .waitingForUser,
+              let question = binding.conversation?.pendingQuestion?.questions.first,
+              let first = indices.first, indices.allSatisfy({ (0..<question.options.count).contains($0) })
+        else { return false }
+        shell.send(question.multiSelect
+            ? PromptKeystrokeRecipes.selectOptions(at: indices)
+            : PromptKeystrokeRecipes.selectOption(at: first))
+        return true
+    }
+
+    /// Answer the pending question with free text via its Other row.
+    @discardableResult
+    func answerQuestionOther(text: String) -> Bool {
+        guard binding.phase == .waitingForUser,
+              let question = binding.conversation?.pendingQuestion?.questions.first,
+              !text.isEmpty else { return false }
+        shell.send(PromptKeystrokeRecipes.selectOtherAndType(
+            optionCount: question.options.count, text: text))
+        return true
+    }
+
+    /// ESC — stop the current turn.
+    func interruptClaude() {
+        guard binding.isBound else { return }
+        shell.send(PromptKeystrokeRecipes.interrupt)
+    }
 }
