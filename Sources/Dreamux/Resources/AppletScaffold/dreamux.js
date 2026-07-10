@@ -32,5 +32,9 @@
     http: { fetch: (url, opts) => call('http.fetch', { url, ...(opts || {}) }) },
     shell: { exec: (cmd, opts) => call('shell.exec', { cmd, ...(opts || {}) }) },
     notify: (title, body) => call('notify', { title, body }),
+    connections: {
+      status: (slot) => call('connections.status', { slot }),
+      request: (slot) => call('connections.request', { slot }),
+    },
   };
 })();

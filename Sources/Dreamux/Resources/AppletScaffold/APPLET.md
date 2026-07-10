@@ -44,6 +44,7 @@ files/          — created on demand: the applet's private data directory
 | `description` | One-line summary of what the applet does. |
 | `requiresCapabilities` | Array of capability strings the applet calls through the bridge. Must exactly match what the code actually calls — see **Capabilities** below. |
 | `origin` | `null` for an applet built from scratch; set automatically when an applet is adopted from the shared library (records where it was adopted from and a content hash). Don't hand-edit. |
+| `requiresConnections` | Optional array of credential slots the applet needs — see **`dreamux.connections`** below. Omit or leave empty if the applet uses no credentials. |
 
 ## Capabilities
 
@@ -199,6 +200,77 @@ await dreamux.notify('Build finished', 'All tasks passed.');  // → undefined
 |---|---|
 | `title` | notification title (required) |
 | `body` | notification body text |
+
+### `dreamux.connections` — credential-scoped access (capability-free)
+
+Some services need a credential — a GitHub token, an API key — but your
+JS code should never see it. **Connections** solve this: the user adds a
+named credential once (Settings → Connections, or imported from a CLI like
+`gh`), the applet declares a *slot* it needs, the user binds the slot to a
+connection, and the native bridge attaches the token for you. Your code
+never touches the secret.
+
+Declare each slot your applet needs in `manifest.json`'s
+`requiresConnections`:
+
+```json
+"requiresConnections": [
+  { "id": "github", "label": "GitHub", "hosts": ["api.github.com"], "suggests": "github" }
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | The slot name — pass this as `connection` to `http.fetch`/`shell.exec`. |
+| `label` | Shown to the user in the bind sheet. |
+| `hosts` | Advisory — what you intend to call. The connection the user binds carries its OWN enforced allowlist; a mismatch is rejected at call time, not at declaration time. |
+| `suggests` | Optional provider hint (`"github"`, `"expo"`) that prefills the bind sheet's "create new" flow. |
+
+Pass `{ connection: "<slot>" }` to attach a bound slot's credential:
+
+```js
+// HTTP: capability `http` + a slot bound to an HTTP-kind connection
+// (header/basic/query). Native code attaches the credential — your
+// request/response never carries it.
+const res = await dreamux.http.fetch('https://api.github.com/user', {
+  connection: 'github',
+});
+
+// Shell: capability `shell` + a slot bound to an `env`-kind connection.
+// The token is injected as a process env var for this one exec call —
+// it is never interpolated into `cmd` or returned in the reply.
+const res = await dreamux.shell.exec('echo "token via $GH_TOKEN"', {
+  connection: 'github',
+});
+```
+
+**The token never reaches your JS.** `http.fetch`'s response and
+`shell.exec`'s `{stdout, stderr, code}` never carry it, and neither does
+any error message. A call is rejected — the promise rejects, nothing is
+sent — unless:
+
+- the URL is `https` (never plain `http`) — for `http.fetch`;
+- the target host exactly matches one of the bound connection's own
+  allowed hosts (case-insensitive, no subdomain/wildcard matching);
+- the bound connection's kind matches the call (`http.fetch` needs an
+  HTTP kind — header/basic/query; `shell.exec` needs an `env` kind).
+
+Check or request a binding without any capability declaration:
+
+```js
+const status = await dreamux.connections.status('github');
+// { bound: boolean, label: string | null, hosts: string[] }
+
+if (!status.bound) {
+  // Opens the host view's bind sheet and waits for the user; resolves
+  // with the same shape once it dismisses (bound or cancelled).
+  await dreamux.connections.request('github');
+}
+```
+
+`connections.status`/`connections.request` need no capability — they
+expose only non-secret binding state (or open the bind UI), never a
+token.
 
 ## UI: vendored Preact + htm
 

