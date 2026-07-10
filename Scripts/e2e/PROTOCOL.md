@@ -951,10 +951,10 @@ uses one).
 
 ### Applet Connections
 
-Three commands cover the pieces of the Connections feature an e2e driver
+Four commands cover the pieces of the Connections feature an e2e driver
 needs that aren't reachable through the applet bridge itself (a driver has
 no way to click the Settings "Add Connection" button or the host view's
-bind sheet). All three operate on the app-wide `ConnectionStore.shared`
+bind sheet). All four operate on the app-wide `ConnectionStore.shared`
 and the active project's applets, exactly like the bridge's own
 `connections.status`/`{connection}` handling reaches them — no parallel
 test implementation.
@@ -1039,6 +1039,30 @@ disk); it does **not** by itself re-run an already-loaded applet's page
 — rewrite `index.html` (even with identical bytes, to bump its mtime)
 and let the applet's 1s hot-reload poller pick up the change, or wait
 for a fresh `openApplet` on an applet that hasn't been opened yet.
+
+#### `importConnection`
+
+Create a connection by running an arbitrary shell command and importing
+whatever token it prints — `CLICredentialImporter.runCommand(command)`
+then `ConnectionStore.shared.add(...)`, the SAME generic path a
+manifest-declared slot's `importCommand` recipe drives from
+`AddConnectionSheet`'s "Or run a command" field (no built-in provider
+required, unlike `createConnection`'s `gh`/`eas`-shaped `"bearer"`/`"env"`
+kinds — this is the path for any CLI login Dreamux has no preset for).
+Always `.env`-kind (shell-only — pairs with `shell.exec`; `hosts` is
+carried through but has no HTTP surface to enforce). `source` is recorded
+as `.importedFromCLI(tool: "command")`. Errors when the command produces
+no parseable token (mirrors the sheet's `commandImportFailed` path rather
+than saving an empty token) — same launch requirement
+(`$DREAMUX_CONNECTIONS_SECRET_DIR`) as `createConnection` above.
+
+```
+→ {"cmd":"importConnection","id":"cmd","hosts":["127.0.0.1"],"envVar":"CMD_TOKEN","command":"printf cmd-tok-789"}
+← {"ok":true,"id":"cmd"}
+
+→ {"cmd":"importConnection","id":"nope","hosts":[],"envVar":"X","command":"true"}
+← {"ok":false,"error":"importConnection command produced no token"}
+```
 
 #### `connectionsState`
 

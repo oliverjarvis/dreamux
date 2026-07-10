@@ -9,10 +9,18 @@ import SwiftUI
 /// Keychain and this view discards its own copy on dismiss.
 struct AddConnectionSheet: View {
     let store: ConnectionStore
+    /// The full slot being bound, when this sheet is presented from
+    /// `ConnectionBindSheet`'s Create-new row — a slot-declared recipe
+    /// (`authKind`/`importCommand`, from G1) prefills the manual fields and
+    /// picks the landing tab in `.onAppear`. Optional/defaulted so the T7
+    /// Settings call site (which has no slot) compiles unchanged.
+    var prefillSlot: ConnectionSlot? = nil
     /// Slot-provided provider hint (a connection slot's `suggests`) — when it
     /// maps to a known CLI provider, the sheet opens on the Import-from-CLI
     /// tab with that provider pre-selected. Optional/defaulted so the T7
-    /// Settings call site (which has no slot) compiles unchanged.
+    /// Settings call site (which has no slot) compiles unchanged. Used as the
+    /// no-recipe fallback when `prefillSlot` has neither `authKind` nor
+    /// `importCommand`.
     var suggestedProvider: String? = nil
     let onDone: () -> Void
 
@@ -124,6 +132,25 @@ struct AddConnectionSheet: View {
         .padding(20)
         .frame(width: 460)
         .onAppear {
+            // A slot-declared recipe (G1) prefills label/hosts/auth shape
+            // BEFORE the no-recipe suggestedProvider fallback below, so a
+            // slot with only `suggests` still lands on the import preset.
+            if let prefillSlot {
+                if label.isEmpty { label = prefillSlot.label }
+                hostsText = prefillSlot.hosts.joined(separator: ", ")
+                if let authKind = prefillSlot.authKind {
+                    applyKind(authKind)
+                }
+                // importCommand wins the landing tab when both are present —
+                // running it is the fast path; the manual fields prefilled
+                // above are still there underneath if the user switches.
+                if let command = prefillSlot.importCommand {
+                    importCommand = command
+                    mode = .importFromCLI
+                } else if prefillSlot.authKind != nil {
+                    mode = .manual
+                }
+            }
             // If the presenting slot suggests a provider we can import, land
             // the user on that ready-to-import tab; otherwise keep defaults.
             if let hint = suggestedProvider, let providerID = Self.resolveProvider(hint) {
@@ -285,7 +312,15 @@ struct AddConnectionSheet: View {
         label = draft.label
         hostsText = draft.hosts.joined(separator: ", ")
         token = draft.token
-        switch draft.kind {
+        applyKind(draft.kind)
+    }
+
+    /// Maps an `AuthKind` to `kindChoice` + its associated field(s) — the
+    /// reverse of `effectiveKind`. Shared by `applyDraft` (a CLI import) and
+    /// the `prefillSlot` recipe path (`.onAppear`) so both round-trip
+    /// through the exact same mapping rather than duplicating the switch.
+    private func applyKind(_ kind: AuthKind) {
+        switch kind {
         case .header(let name, let template):
             kindChoice = .header
             headerName = name

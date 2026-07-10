@@ -131,6 +131,8 @@ enum E2ECommands {
             return try createConnection(request: request)
         case "bindConnection":
             return try bindConnection(request: request)
+        case "importConnection":
+            return try await importConnection(request: request)
         case "connectionsState":
             return connectionsState()
         case "quit":
@@ -958,6 +960,31 @@ enum E2ECommands {
             throw CommandError(message: "bindConnection failed: \(error.localizedDescription)")
         }
         return ["ok": true]
+    }
+
+    /// Import a token by running an arbitrary shell command and write it
+    /// straight into the store as an `.env`-kind connection — the SAME
+    /// generic path a slot's `importCommand` recipe (G1) drives from
+    /// `AddConnectionSheet.runCommandImport` (G2/G3), exercised here without
+    /// a UI driver: `CLICredentialImporter.runCommand` -> `ConnectionStore`.
+    /// Errors if the command produces no token (mirrors the sheet's
+    /// `commandImportFailed` path rather than saving an empty token).
+    private static func importConnection(request: [String: Any]) async throws -> [String: Any] {
+        let id = try string("id", in: request)
+        let envVar = try string("envVar", in: request)
+        let command = try string("command", in: request)
+        let hosts = (request["hosts"] as? [String]) ?? []
+        guard let token = await CLICredentialImporter.runCommand(command) else {
+            throw CommandError(message: "importConnection command produced no token")
+        }
+        do {
+            let connection = try ConnectionStore.shared.add(
+                label: "probe", kind: .env(vars: [envVar]), hosts: hosts, token: token,
+                source: .importedFromCLI(tool: "command"), preferredID: id)
+            return ["ok": true, "id": connection.id]
+        } catch {
+            throw CommandError(message: "importConnection failed: \(error.localizedDescription)")
+        }
     }
 
     /// Snapshot of the app-wide connection registry — metadata only, never

@@ -1649,12 +1649,17 @@ def scenario_applets(d):
 
 
 def connections_probe_html():
-    """The probe applet's index.html: three independent try/catch blocks,
-    each writing its own kv key, so one slot's failure (pre-bind, both
-    slots are unbound) never blocks the others from running. Re-used
-    verbatim for the pre-bind AND post-bind loads -- rewriting it with
-    identical bytes still bumps the folder's mtime, which is all the
-    applet's 1s hot-reload poller needs to reload and re-run it."""
+    """The probe applet's index.html: four independent try/catch blocks,
+    each writing its own kv key, so one slot's failure (pre-bind, all
+    slots are unbound; or cmdSlot not yet declared/bound) never blocks the
+    others from running. Re-used verbatim for the pre-bind AND post-bind
+    loads -- rewriting it with identical bytes still bumps the folder's
+    mtime, which is all the applet's 1s hot-reload poller needs to reload
+    and re-run it. The fourth block (cmdSlot) proves a connection created
+    via the GENERIC command-import path (importConnection ->
+    CLICredentialImporter.runCommand) flows through the same
+    slot -> binding -> connection -> shell.exec composition as the
+    hand-created env-conn above."""
     return (
         '<!doctype html><html><head><meta charset="utf-8">'
         '<title>Connections Probe</title></head>\n'
@@ -1681,6 +1686,13 @@ def connections_probe_html():
         "  const msg = String(e && e.message ? e.message : e);\n"
         "  await window.dreamux.kv.set('httpGate',\n"
         "    msg.includes('hostNotAllowed') ? 'blocked-by-allowlist' : 'blocked-other');\n"
+        "}\n"
+        "try {\n"
+        "  const r2 = await window.dreamux.shell.exec('printf %s \"$CMD_TOKEN\"', "
+        "{ connection: 'cmdSlot' });\n"
+        "  await window.dreamux.kv.set('cmdToken', r2.stdout);\n"
+        "} catch (e) {\n"
+        "  await window.dreamux.kv.set('cmdToken', 'error:' + e.message);\n"
         "}\n"
         '</script></body></html>\n'
     )
@@ -1726,6 +1738,14 @@ def scenario_connections(d):
          no server need be listening either way.
       3. `connections.status(slot).bound` flips false -> true across
          `bindConnection`, proving the binding itself took effect.
+      4. Generic command-import POSITIVE: `importConnection` runs an
+         arbitrary shell command through `CLICredentialImporter.runCommand`
+         (the same generic path a slot's `importCommand` recipe drives from
+         the UI's "Or run a command" field) and writes the result straight
+         into the store; once bound to a third slot, `cmdToken` proves that
+         command-imported token reaches `shell.exec`'s process env exactly
+         like the hand-created env-conn does in (1) -- the whole
+         runCommand -> ConnectionStore -> bridge loop, end to end.
 
     Always (re)launches its OWN app process with
     $DREAMUX_CONNECTIONS_SECRET_DIR set: `ConnectionStore.shared` is a
@@ -1859,6 +1879,48 @@ def scenario_connections(d):
             f"(hostNotAllowed) BEFORE any network call, not by a downstream network/DNS error: {kv}")
     require(kv["statusBound"] is True,
             f"connections.status should read bound:true once bound: {kv}")
+
+    # 7. Generic command-import path (Gen G2/G4): importConnection runs an
+    # arbitrary shell command through CLICredentialImporter.runCommand and
+    # writes the result straight into the store as an env-kind connection --
+    # the SAME generic path a slot's `importCommand` recipe (G1/G3) drives
+    # from the UI, exercised here end to end with no UI driver involved.
+    resp = d.cmd("importConnection", id="cmd", hosts=["127.0.0.1"],
+                 envVar="CMD_TOKEN", command="printf cmd-tok-789")
+    require(resp["id"] == "cmd", f"unexpected imported connection id: {resp!r}")
+
+    # Declare a third (second env-kind) slot on the probe's manifest and
+    # bind it to the command-imported connection. Rewriting manifest.json
+    # bumps the folder's mtime same as index.html, so the hot-reload poller
+    # re-parses requiresConnections into the live session -- no extra
+    # openApplet call needed (AppletSession is cached per-applet-id; a
+    # second openApplet would be a no-op on the already-open webview).
+    manifest["requiresConnections"].append(
+        {"id": "cmdSlot", "label": "Command Import Probe", "hosts": []})
+    write_json(manifest_path, manifest)
+    d.cmd("bindConnection", slug=slug, slot="cmdSlot", connectionID="cmd")
+
+    # bindConnection writes connections.json under .dreamux/appdata/, OUTSIDE
+    # the applet's own folder -- it doesn't bump the folder mtime the hot-
+    # reload poller watches. Rewrite index.html (identical bytes) AFTER the
+    # binding lands so the poller's next reload picks up the fresh binding,
+    # same mechanism as step 6 above.
+    write_text(os.path.join(probe_dir, "index.html"), connections_probe_html())
+
+    def cmd_token_lands():
+        try:
+            kv = read_json(kv_path)
+        except (OSError, json.JSONDecodeError):
+            return None
+        return kv if kv.get("cmdToken") == "cmd-tok-789" else None
+
+    kv = d.wait_until(
+        cmd_token_lands, 15.0,
+        "kv.json to gain cmdToken=cmd-tok-789 after binding the command-imported "
+        "connection (runCommand -> ConnectionStore -> bridge shell.exec end to end)")
+    require(kv["cmdToken"] == "cmd-tok-789",
+            f"shell.exec should have received CMD_TOKEN via the command-imported "
+            f"connection (cmd -> cmdSlot): {kv}")
 
     # The whole point of the disk assertions above: WKWebView content is
     # GPU-composited and comes out blank here (see PROTOCOL.md) -- this
