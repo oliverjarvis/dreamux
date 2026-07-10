@@ -251,6 +251,19 @@ instant and lossless in both directions.
 - **Other agents** (codex rollout JSONLs, opencode's SSE server) — the
   face/binding split is agent-agnostic by design; only the channels are
   Claude-specific.
+- **`message.id` turn-coalescing** — the design called for grouping items
+  by `message.id` so a later line with the same id *updates* an existing
+  turn. `TranscriptAccumulator`/`TranscriptParser` instead append one item
+  per content block as each JSONL line arrives, with no id-based merge.
+  Safe for the verified one-line-per-block format real Claude Code and
+  `fake-claude` both emit; a future format that revises an already-parsed
+  block via a repeated `message.id` would render as a duplicate rather
+  than an update.
+- **Id-joined `tool_use`/`tool_result` cards and header session
+  metadata** — the design called for joining `tool_use`/`tool_result` by
+  tool-use id into one card and showing model/cwd in the header. v1 ships
+  each as its own row in transcript order (no join) and a plain status
+  chip with no session metadata.
 
 ## Key integration seams (from codebase exploration)
 

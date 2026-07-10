@@ -17,6 +17,23 @@ final class TabSession: Identifiable {
     /// user last looked at it. Drives the badge on the workspace tile.
     var hasUnread: Bool = false
 
+    let binding = ClaudeSessionBinding()
+
+    // MARK: - Face state
+
+    enum TabFace: Equatable { case chat, terminal }
+    /// Which face this tab shows. Terminal until a session first binds,
+    /// then auto-flips to chat ONCE; after that the user's choice sticks
+    /// (in-memory — tabs don't persist across launches).
+    var face: TabFace = .terminal
+    @ObservationIgnored private var didAutoFlip = false
+
+    func autoFlipToChatOnce() {
+        guard !didAutoFlip else { return }
+        didAutoFlip = true
+        face = .chat
+    }
+
     private let shell: PTYShellSession
     private var didStart = false
 
@@ -25,7 +42,14 @@ final class TabSession: Identifiable {
         onActivity: @escaping @Sendable (String?) -> Void = { _ in }
     ) {
         self.cwd = cwd
-        self.shell = PTYShellSession(cwd: cwd, onActivity: onActivity)
+        let binding = self.binding
+        self.shell = PTYShellSession(
+            cwd: cwd,
+            onActivity: onActivity,
+            onControl: { verb, json in
+                Task { @MainActor in binding.handleControl(verb: verb, json: json) }
+            }
+        )
 
         // Ghostty ships with default `super+<letter>` keybinds (super+t,
         // super+d, super+w, …) for actions its own app shell implements.
@@ -174,4 +198,52 @@ final class TabSession: Identifiable {
     /// their text was echoed (received) and not flushed by a
     /// still-initializing line editor.
     var lastShellOutputAt: Date? { shell.lastOutputTimestamp }
+
+    // MARK: - Chat-face input (gated — never blind-type)
+
+    /// Send a composer prompt into the bound claude TUI. Returns false
+    /// (and sends nothing) unless the session is at its input prompt.
+    /// `.waitingForUser` is deliberately excluded — it can mean a
+    /// permission dialog is up (the transcript stays silent, only the
+    /// Notification hook fires), and blind-typing a prompt there would
+    /// send its CR straight into the dialog.
+    @discardableResult
+    func sendChatPrompt(_ text: String) -> Bool {
+        guard binding.phase == .idle,
+              binding.conversation?.pendingQuestion == nil,
+              !text.isEmpty else { return false }
+        shell.send(PromptKeystrokeRecipes.promptSend(text))
+        return true
+    }
+
+    /// Answer the pending AskUserQuestion by option indices (single- or
+    /// multi-select decided by the question itself).
+    @discardableResult
+    func answerQuestion(selecting indices: [Int]) -> Bool {
+        guard binding.phase == .waitingForUser,
+              let question = binding.conversation?.pendingQuestion?.questions.first,
+              let first = indices.first, indices.allSatisfy({ (0..<question.options.count).contains($0) })
+        else { return false }
+        shell.send(question.multiSelect
+            ? PromptKeystrokeRecipes.selectOptions(at: indices)
+            : PromptKeystrokeRecipes.selectOption(at: first))
+        return true
+    }
+
+    /// Answer the pending question with free text via its Other row.
+    @discardableResult
+    func answerQuestionOther(text: String) -> Bool {
+        guard binding.phase == .waitingForUser,
+              let question = binding.conversation?.pendingQuestion?.questions.first,
+              !text.isEmpty else { return false }
+        shell.send(PromptKeystrokeRecipes.selectOtherAndType(
+            optionCount: question.options.count, text: text))
+        return true
+    }
+
+    /// ESC — stop the current turn.
+    func interruptClaude() {
+        guard binding.isBound else { return }
+        shell.send(PromptKeystrokeRecipes.interrupt)
+    }
 }

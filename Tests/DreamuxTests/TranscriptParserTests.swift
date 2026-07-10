@@ -27,7 +27,7 @@ final class TranscriptParserTests: XCTestCase {
         guard case .assistantText(let a) = kinds[2], a == "hi!" else {
             return XCTFail("expected assistant text, got \(kinds[2])")
         }
-        guard case .toolUse(let name, let input) = kinds[3], name == "Bash" else {
+        guard case .toolUse(_, let name, let input) = kinds[3], name == "Bash" else {
             return XCTFail("expected tool_use Bash, got \(kinds[3])")
         }
         XCTAssertTrue(input.contains("\"command\""))

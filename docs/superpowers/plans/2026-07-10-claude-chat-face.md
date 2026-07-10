@@ -792,6 +792,31 @@ final class ClaudeSessionBindingTests: XCTestCase {
         XCTAssertEqual(b.phase, .ended)
     }
 
+    func testRegistryScanFallbackWhenClaimedPidIsWrong() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("registry-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let b = ClaudeSessionBinding()
+        b.registryDirectory = dir
+        // claude_pid 111 is an intermediate shell's pid — no 111.json ever.
+        b.handleControl(verb: "session-start", json: control(["session_id": "s-9", "transcript_path": "/t.jsonl", "claude_pid": 111]))
+
+        // Registry not written yet → grace, NOT death.
+        b.pollRegistryNow()
+        XCTAssertEqual(b.phase, .working)
+
+        // Entry appears under claude's real pid; matched by sessionId.
+        try #"{"sessionId":"s-9","status":"waiting"}"#
+            .write(to: dir.appendingPathComponent("222.json"), atomically: true, encoding: .utf8)
+        b.pollRegistryNow()
+        XCTAssertEqual(b.phase, .waitingForUser)
+
+        // A previously-seen entry vanishing IS death.
+        try FileManager.default.removeItem(at: dir.appendingPathComponent("222.json"))
+        b.pollRegistryNow()
+        XCTAssertEqual(b.phase, .ended)
+    }
+
     func testUnknownVerbAndGarbageJsonAreIgnored() {
         let b = ClaudeSessionBinding()
         b.handleControl(verb: "mystery", json: Data("nonsense".utf8))
@@ -845,6 +870,9 @@ final class ClaudeSessionBinding {
     }()
 
     @ObservationIgnored private var registryTimer: Timer?
+    /// True once a registry entry for this session has been read —
+    /// gates death-detection so a not-yet-written registry isn't death.
+    @ObservationIgnored private var registryEntrySeen = false
 
     func handleControl(verb: String, json: Data) {
         let payload = ((try? JSONSerialization.jsonObject(with: json)) as? [String: Any]) ?? [:]
@@ -870,20 +898,19 @@ final class ClaudeSessionBinding {
     }
 
     /// Test seam + timer body: reconcile phase against the registry.
+    /// The registry file is named by claude's pid, but the pid the hook
+    /// reports (its getppid) can be an intermediate shell's — so fall
+    /// back to scanning the directory for our sessionId, and only treat
+    /// a MISSING entry as death after we've actually seen one (the
+    /// registry may simply not be written yet at bind time).
     func pollRegistryNow() {
-        guard isBound, let pid = claudePID else { return }
-        let file = registryDirectory.appendingPathComponent("\(pid).json")
-        guard let data = try? Data(contentsOf: file),
-              let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            // Bound but no registry file: claude died without SessionEnd.
-            end()
+        guard isBound else { return }
+        guard let entry = registryEntry() else {
+            if registryEntrySeen { end() }
             return
         }
-        if let registrySession = dict["sessionId"] as? String,
-           let bound = sessionID, registrySession != bound {
-            return // stale/reused pid file — trust our own binding
-        }
-        switch dict["status"] as? String {
+        registryEntrySeen = true
+        switch entry["status"] as? String {
         case "busy": phase = .working
         case "waiting": phase = .waitingForUser
         case "idle": phase = .idle
@@ -891,11 +918,37 @@ final class ClaudeSessionBinding {
         }
     }
 
+    /// The registry dict for OUR session: the claimed-pid file if it
+    /// matches our sessionId, else the first directory entry that does.
+    private func registryEntry() -> [String: Any]? {
+        func load(_ url: URL) -> [String: Any]? {
+            guard let data = try? Data(contentsOf: url),
+                  let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            else { return nil }
+            if let registrySession = dict["sessionId"] as? String,
+               let bound = sessionID, registrySession != bound {
+                return nil // different/stale session — not ours
+            }
+            return dict
+        }
+        if let pid = claudePID,
+           let dict = load(registryDirectory.appendingPathComponent("\(pid).json")) {
+            return dict
+        }
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: registryDirectory, includingPropertiesForKeys: nil) else { return nil }
+        for file in files where file.pathExtension == "json" {
+            if let dict = load(file) { return dict }
+        }
+        return nil
+    }
+
     private func bind(sessionID: String, payload: [String: Any]) {
         conversation?.stop()
         self.sessionID = sessionID
         claudePID = payload["claude_pid"] as? Int
         lastNotification = nil
+        registryEntrySeen = false
         hasEverBound = true
         if let path = payload["transcript_path"] as? String, !path.isEmpty {
             conversation = LiveConversation(url: URL(fileURLWithPath: path))

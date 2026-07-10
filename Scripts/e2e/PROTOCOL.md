@@ -1075,6 +1075,66 @@ allowlisted hosts only, **never** a token (tokens never leave
 → {"cmd":"connectionsState"}
 ← {"ok":true,"connections":[{"id":"github","hosts":["api.github.com"]},{"id":"eas","hosts":[]}]}
 ```
+### `chatFaceState`
+
+Snapshot of the active workspace's Claude **chat face** (Task 6/8/9) —
+the observable evidence that a session bound, the tab auto-flipped to
+chat, and the binding's phase tracks a live session. Reads the same
+`TabSession.binding` + `TabSession.face` the `ChatFaceView` renders, so
+it can't drift from what's on screen — and it's the only way to assert
+the chat face, since the in-process `screenshot` renders the Ghostty
+grid blank (see `screenshot`).
+
+Resolves the workspace's on-screen tab: the focused pane's selected tab,
+then any pane's selected tab, then the workspace's first Claude terminal
+tab — so the pinned Overview tab sitting frontmost never masks a live
+chat session a driver just started in the shell (the Overview tab has no
+terminal `TabSession`). Deterministic only for single-tab workspaces —
+tab order is not defined, so keep scenario workspaces to one shell tab,
+same as `sendTerminalText`.
+
+`{"ok": true, "phase": "unbound|working|waitingForUser|idle|ended",
+"items": N, "face": "chat|terminal", "pendingQuestion": true|false}`
+
+- `phase` — `ClaudeSessionBinding.Phase.rawValue`: `unbound` (no session
+  yet), `working` (assistant turn in flight), `waitingForUser` (a
+  Notification/AskUserQuestion is pending), `idle` (turn complete, at the
+  prompt), `ended` (session over; the face toggle stays visible).
+- `items` — count of parsed transcript items
+  (`binding.conversation?.items.count`, `0` when nothing has bound). It
+  only grows within a session, so a driver polls it to confirm a turn
+  landed.
+- `face` — `"chat"` once the tab has auto-flipped on first bind, else
+  `"terminal"` (the user can flip back).
+- `pendingQuestion` — `true` while an unanswered `AskUserQuestion` is on
+  screen (drives the chat face's option banner). It's derived straight
+  from the transcript, so it can flip `true` while `phase` still reads
+  `"working"` — the transcript tailer (a `DispatchSource`) usually beats
+  the registry's 1s poll to the same event. Drivers waiting on a question
+  should poll for `pendingQuestion == true` OR `phase == "waitingForUser"`,
+  not require both at once.
+
+Fails with `ok:false` when no project window/workspace is registered or
+the active workspace has no Claude terminal tab.
+
+Drive `Scripts/e2e/fake-claude` in a workspace's shell (a deterministic
+`claude` stand-in — emits the session-start/stop/session-end control
+OSCs and steps a busy → waiting → idle registry timeline), then poll:
+
+```
+→ {"cmd":"chatFaceState"}
+← {"ok":true,"phase":"working","items":1,"face":"chat","pendingQuestion":false}
+← {"ok":true,"phase":"waitingForUser","items":4,"face":"chat","pendingQuestion":true}
+← {"ok":true,"phase":"idle","items":6,"face":"chat","pendingQuestion":false}
+```
+
+`items` while `"working"` is racy — fake-claude appends the user turn,
+then a thinking+text block, then the question, ahead of each registry
+write, so an early poll can observe `0`, `1`, or `3` (never `2`, since the
+thinking+text block lands as two items in the same append). Once
+`phase` reaches `"waitingForUser"` or `"idle"` the count is fixed at `4`
+and `6` respectively, because those registry writes always follow the
+items that unlock them — poll on `phase` for a stable count.
 
 ### `courseCorrect`
 

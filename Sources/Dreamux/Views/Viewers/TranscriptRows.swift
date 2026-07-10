@@ -1,0 +1,185 @@
+import SwiftUI
+import MarkdownUI
+
+// MARK: - Rows
+
+/// A single transcript entry rendered by role/kind. Shared between the
+/// `TranscriptView` (whole-file JSONL viewer) and `ChatFaceView` (the live
+/// chat face of a Claude terminal tab) — module-internal so both can reuse it.
+struct TranscriptRow: View {
+    let item: TranscriptItem
+
+    var body: some View {
+        switch item.kind {
+        case .userText(let text):
+            MessageBlock(isUser: true, text: text)
+        case .assistantText(let text):
+            MessageBlock(isUser: false, text: text)
+        case .thinking(let text):
+            CollapsibleBlock(icon: "brain", label: "Thinking", tint: .secondary, content: text, mono: false)
+        case .toolUse(_, let name, let input):
+            CollapsibleBlock(icon: "wrench.and.screwdriver", label: name, tint: .secondary,
+                             content: input, mono: true, monoLabel: true)
+        case .toolResult(let text, let isError):
+            CollapsibleBlock(icon: isError ? "xmark.octagon" : "arrow.turn.down.right",
+                             label: isError ? "Error" : "Result",
+                             tint: isError ? .red : .secondary, content: text, mono: true, collapsedPreview: true)
+        case .summary(let text):
+            HStack(spacing: 8) {
+                Image(systemName: "text.line.first.and.arrowtriangle.forward").foregroundStyle(.tertiary)
+                Text(text).font(.system(size: 13)).italic().foregroundStyle(.secondary)
+            }
+        case .raw(let text):
+            Text(text).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// A chat message. Roles read by position, not by header caps: the
+/// user's words sit right-aligned in a soft bubble, the assistant's as
+/// plain markdown on the app surface, left-aligned.
+struct MessageBlock: View {
+    let isUser: Bool
+    let text: String
+
+    private static let theme = Theme.gitHub.text {
+        ForegroundColor(.primary)
+        FontSize(15)
+    }
+
+    var body: some View {
+        if isUser {
+            HStack(spacing: 0) {
+                Spacer(minLength: 80)
+                Markdown(text)
+                    .markdownTheme(Self.theme)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color.primary.opacity(0.07)))
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            Markdown(text)
+                .markdownTheme(Self.theme)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// A collapsed run of consecutive tool calls — one compact row
+/// ("4 tool calls · Bash, Read, +2") that expands to the individual
+/// cards. Collapsed by default; its identity keys off the run's first
+/// item (see `TranscriptRunGrouper.Block.id`), so a live-growing run
+/// keeps its expansion state while the count ticks up.
+struct ToolRunBlock<Row: View>: View {
+    let items: [TranscriptItem]
+    /// True while the session is mid-turn — shows "running <tool>…"
+    /// when the run's last call has no result yet.
+    var isLive: Bool = false
+    @ViewBuilder var row: (TranscriptItem) -> Row
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "wrench.and.screwdriver")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("\(names.count) tool calls")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(summary)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if isLive,
+                       let running = TranscriptRunGrouper.unresolvedTrailingCall(in: items) {
+                        Text("· running \(running)…")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.orange)
+                    }
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(items) { row($0) }
+                }
+            }
+        }
+        .padding(11)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.05)))
+    }
+
+    private var names: [String] { TranscriptRunGrouper.toolNames(in: items) }
+
+    private var summary: String {
+        let shown = names.prefix(3).joined(separator: ", ")
+        let extra = names.count - min(3, names.count)
+        return extra > 0 ? "· \(shown), +\(extra)" : "· \(shown)"
+    }
+}
+
+/// Thinking / tool call / tool result — a collapsible pill-headed block.
+struct CollapsibleBlock: View {
+    let icon: String
+    let label: String
+    let tint: Color
+    let content: String
+    var mono: Bool = false
+    var monoLabel: Bool = false
+    /// Show a clamped preview when collapsed (for long tool results).
+    var collapsedPreview: Bool = false
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: icon).font(.system(size: 11)).foregroundStyle(tint)
+                    Text(label)
+                        .font(monoLabel
+                              ? .system(size: 13, weight: .semibold, design: .monospaced)
+                              : .system(size: 12, weight: .medium))
+                        .foregroundStyle(monoLabel ? .primary : tint)
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if !content.isEmpty, expanded || collapsedPreview {
+                Text(expanded ? content : preview)
+                    .font(mono ? .system(size: 12, design: .monospaced) : .system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(expanded ? nil : 3)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(11)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill((tint == .red ? Color.red : Color.primary).opacity(0.05)))
+    }
+
+    private var preview: String {
+        let clamped = content.prefix(240)
+        return clamped.count < content.count ? clamped + "…" : String(clamped)
+    }
+}

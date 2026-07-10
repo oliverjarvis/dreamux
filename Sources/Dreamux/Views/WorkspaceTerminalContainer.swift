@@ -114,8 +114,26 @@ private struct TabContentView: View {
             // drop overlay to the one tab actually on screen; see
             // `TerminalDropContainer`.
             let isSelectedTab = session.controller.isTabSelected(tabId)
-            HostedTerminalView(session: tabSession, dropTargetEnabled: isSelectedTab)
-                .onAppear { tabSession.startIfNeeded() }
+            ZStack(alignment: .topTrailing) {
+                if tabSession.face == .chat, tabSession.binding.hasEverBound {
+                    ChatFaceView(
+                        tab: tabSession,
+                        onFlipToTerminal: { tabSession.face = .terminal },
+                        onOpenTranscript: { session.openFileTab(at: $0) }
+                    )
+                } else {
+                    HostedTerminalView(session: tabSession, dropTargetEnabled: isSelectedTab)
+                        .onAppear { tabSession.startIfNeeded() }
+                }
+                if tabSession.binding.hasEverBound {
+                    FaceTogglePill(tab: tabSession)
+                        .padding(.top, 8)
+                        .padding(.trailing, 12)
+                }
+            }
+            .onChange(of: tabSession.binding.hasEverBound) { _, bound in
+                if bound { tabSession.autoFlipToChatOnce() }
+            }
         } else if let fileTab = session.fileTabSession(for: tabId) {
             FileEditorView(session: fileTab)
         } else if let diffTab = session.diffTabSession(for: tabId) {
@@ -125,6 +143,69 @@ private struct TabContentView: View {
         } else {
             Color.clear
         }
+    }
+}
+
+/// The Chat|Terminal face switch overlaid on a bound tab. Two segments
+/// sharing one outlined pill (see `HeaderRunControls` for the same
+/// shape) split by a hairline divider; the active segment reads
+/// `.primary` on a faint fill, the inactive one `.secondary` with a
+/// hover wash. Sits on `.ultraThinMaterial` so it stays legible over
+/// live terminal content.
+private struct FaceTogglePill: View {
+    let tab: TabSession
+
+    var body: some View {
+        HStack(spacing: 0) {
+            segment("Chat", face: .chat)
+            Rectangle()
+                .fill(Color.secondary.opacity(0.25))
+                .frame(width: 1, height: 16)
+            segment("Terminal", face: .terminal)
+        }
+        .background(
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial)
+                Rectangle().fill(Color.primary.opacity(0.04))
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func segment(_ title: String, face: TabSession.TabFace) -> some View {
+        FaceSegmentButton(title: title, isActive: tab.face == face) { tab.face = face }
+    }
+}
+
+/// One segment of `FaceTogglePill` — its own `@State` for the hover wash
+/// so hovering one segment never re-renders the other.
+private struct FaceSegmentButton: View {
+    let title: String
+    let isActive: Bool
+    let action: () -> Void
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isActive ? .primary : .secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isActive ? Color.primary.opacity(0.08)
+                      : (hovering ? Color.primary.opacity(0.04) : .clear))
+        )
+        .onHover { hovering = $0 }
     }
 }
 

@@ -135,6 +135,8 @@ enum E2ECommands {
             return try await importConnection(request: request)
         case "connectionsState":
             return connectionsState()
+        case "chatFaceState":
+            return try chatFaceState()
         case "quit":
             return ["ok": true]
         default:
@@ -997,6 +999,61 @@ enum E2ECommands {
                 ["id": connection.id, "hosts": connection.hosts]
             },
         ]
+    }
+
+    // MARK: - Chat face
+
+    /// Snapshot of the active workspace's Claude chat face — the observable
+    /// evidence that a session bound, the tab auto-flipped to chat, and the
+    /// binding's phase tracks the fake-claude timeline (Task 10). Reads the
+    /// same `TabSession.binding` + `TabSession.face` the `ChatFaceView`
+    /// renders, so it can't drift from what's on screen.
+    ///
+    /// "Selected tab" resolves to the tab actually on screen (the focused
+    /// pane's selection, then any pane's selection); it falls back to the
+    /// workspace's first Claude terminal tab so the pinned Overview tab
+    /// sitting frontmost never masks a live chat session the driver just
+    /// started in the shell. Terminal-only in-process screenshots can't
+    /// capture the Ghostty grid (see `screenshot`), so this is how a driver
+    /// asserts the chat face without a pixel.
+    private static func chatFaceState() throws -> [String: Any] {
+        let (_, store, _) = try projectStores()
+        guard let workspace = store.activeWorkspace ?? store.workspaces.first else {
+            throw CommandError(message: "no active workspace")
+        }
+        let session = store.session(for: workspace)
+        guard let tab = selectedTabSession(in: session) else {
+            throw CommandError(message: "active workspace has no Claude terminal tab")
+        }
+        let binding = tab.binding
+        return [
+            "ok": true,
+            "phase": binding.phase.rawValue,
+            "items": binding.conversation?.items.count ?? 0,
+            "face": tab.face == .chat ? "chat" : "terminal",
+            "pendingQuestion": binding.conversation?.pendingQuestion != nil,
+        ]
+    }
+
+    /// The `TabSession` behind the workspace's on-screen tab: the focused
+    /// pane's selected tab first, then any pane's selected tab, then the
+    /// workspace's first terminal tab (the Overview tab has no
+    /// `TabSession`, so a workspace opened on its dashboard still resolves
+    /// to the shell where a session runs).
+    private static func selectedTabSession(in session: WorkspaceSession) -> TabSession? {
+        let controller = session.controller
+        if let pane = controller.focusedPaneId,
+           let tab = controller.selectedTab(inPane: pane),
+           let tabSession = session.tabSession(for: tab.id) {
+            return tabSession
+        }
+        for pane in controller.allPaneIds {
+            if let tab = controller.selectedTab(inPane: pane),
+               let tabSession = session.tabSession(for: tab.id) {
+                return tabSession
+            }
+        }
+        return session.terminalTabSessions.first
     }
 
     /// Play semantics — worktree-centric, never a question. Flexible
