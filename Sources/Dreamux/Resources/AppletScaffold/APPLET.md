@@ -210,6 +210,16 @@ named credential once (Settings → Connections, or imported from a CLI like
 connection, and the native bridge attaches the token for you. Your code
 never touches the secret.
 
+> **Building an applet for an authenticated API?** You almost certainly
+> need a connection — and you should work out its shape *yourself*. Don't
+> hardcode a token, don't build your own token-entry UI, and don't ask the
+> user which scheme the service uses: you already know how the common ones
+> authenticate. Declare a slot with a **full recipe** (see *Declaring a
+> connection recipe* below), inferring the `authKind`, the API `hosts`, and
+> whether a CLI can print the token. When unsure, default to a Bearer token
+> (`Authorization` / `Bearer {token}`) to the service's API host — the user
+> supplies only the secret when they bind.
+
 Declare each slot your applet needs in `manifest.json`'s
 `requiresConnections`:
 
