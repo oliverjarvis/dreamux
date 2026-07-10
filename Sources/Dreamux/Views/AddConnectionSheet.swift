@@ -22,19 +22,21 @@ struct AddConnectionSheet: View {
         var id: String { rawValue }
     }
 
-    /// The four auth shapes exposed in the picker. `.query` exists on
-    /// `AuthKind` but isn't offered here — no current provider (manual or
-    /// CLI) needs it, so leaving it out of the UI is YAGNI, not an omission.
+    /// The four auth shapes exposed in the picker, mapping 1:1 to `AuthKind`
+    /// so any token-based service — not just gh/expo's Bearer header — can be
+    /// wired up by hand: a freeform header name + value template, HTTP
+    /// Basic, a query-string param, or a shell env var.
     enum KindChoice: String, CaseIterable, Identifiable {
-        case bearer = "Bearer header"
-        case apiKey = "API-key header"
+        case header = "Header"
         case basic = "Basic"
+        case query = "Query param"
         case env = "Env var"
         var id: String { rawValue }
     }
 
     enum Field {
-        case label, headerName, basicUsername, envVarName, hosts, token
+        case label, headerName, valueTemplate, basicUsername, queryParam, envVarName, hosts, token
+        case importCommand
     }
 
     @State private var mode: Mode = .importFromCLI
@@ -51,14 +53,22 @@ struct AddConnectionSheet: View {
 
     // Shared fields — prefilled by an import, or typed by hand.
     @State private var label = ""
-    @State private var kindChoice: KindChoice = .bearer
-    @State private var headerName = "X-API-Key"
+    @State private var kindChoice: KindChoice = .header
+    @State private var headerName = "Authorization"
+    @State private var valueTemplate = "Bearer {token}"
     @State private var basicUsername = ""
+    @State private var queryParam = "api_key"
     @State private var envVarName = "TOKEN"
     @State private var hostsText = ""
     @State private var token = ""
 
     @State private var errorMessage: String?
+
+    // Custom-command import path.
+    @State private var importCommand = ""
+    @State private var isRunningCommand = false
+    @State private var commandImportMessage: String?
+    @State private var commandImportFailed = false
 
     @FocusState private var focused: Field?
 
@@ -83,6 +93,8 @@ struct AddConnectionSheet: View {
                 if newMode == .manual {
                     importedDraft = nil
                     importNotFound = false
+                    commandImportMessage = nil
+                    commandImportFailed = false
                 }
             }
 
@@ -173,6 +185,42 @@ struct AddConnectionSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Divider()
+                .padding(.vertical, 2)
+
+            Text("Or run a command")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                TextField("gh auth token", text: $importCommand)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focused, equals: .importCommand)
+
+                Button {
+                    runCommandImport()
+                } label: {
+                    if isRunningCommand {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Run")
+                    }
+                }
+                .buttonStyle(.soft)
+                .disabled(isRunningCommand || importCommand.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            Text("Runs at your privilege when you click Run — Dreamux never runs it automatically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let commandImportMessage {
+                Text(commandImportMessage)
+                    .font(.caption)
+                    .foregroundStyle(commandImportFailed ? .orange : .secondary)
+            }
         }
         .padding(12)
         .background(
@@ -197,10 +245,39 @@ struct AddConnectionSheet: View {
         }
     }
 
+    /// Runs an arbitrary user-typed command (e.g. `gh auth token`) to pull a
+    /// token from any CLI Dreamux has no built-in provider for. Strictly
+    /// user-triggered by the Run button — never invoked from `.onAppear` or
+    /// any other automatic path, per the consent rule surfaced in the
+    /// caption below the field. Unlike a provider import, a raw command
+    /// carries no label/host/kind metadata, so only `token` is filled in;
+    /// the user still picks the auth kind and hosts by hand.
+    private func runCommandImport() {
+        isRunningCommand = true
+        commandImportMessage = nil
+        commandImportFailed = false
+        let command = importCommand
+        Task {
+            let result = await CLICredentialImporter.runCommand(command)
+            isRunningCommand = false
+            if let result {
+                token = result
+                commandImportFailed = false
+                commandImportMessage = "Imported from command — review below, then Save."
+            } else {
+                commandImportFailed = true
+                commandImportMessage = "Command produced no token."
+            }
+        }
+    }
+
     /// Prefills the shared fields from a successful import. `kindChoice`
-    /// (plus its one associated field) is reverse-mapped from the draft's
-    /// `AuthKind` so Save's reconstruction round-trips it exactly for
-    /// today's providers (both gh and eas hand back a Bearer header).
+    /// (plus its associated field(s)) is reverse-mapped from the draft's
+    /// `AuthKind` so Save's reconstruction round-trips it exactly — a
+    /// Bearer import (gh/eas today) lands as `.header` with headerName
+    /// "Authorization" and valueTemplate "Bearer {token}", both editable,
+    /// so an import that's close-but-not-quite for some service can be
+    /// tweaked in place rather than requiring a fully manual re-entry.
     private func applyDraft(_ draft: CLICredentialImporter.Draft) {
         importedDraft = draft
         importNotFound = false
@@ -210,23 +287,18 @@ struct AddConnectionSheet: View {
         token = draft.token
         switch draft.kind {
         case .header(let name, let template):
-            if name == "Authorization", template.contains("Bearer") {
-                kindChoice = .bearer
-            } else {
-                kindChoice = .apiKey
-                headerName = name
-            }
+            kindChoice = .header
+            headerName = name
+            valueTemplate = template
         case .basic(let username):
             kindChoice = .basic
             basicUsername = username
+        case .query(let param):
+            kindChoice = .query
+            queryParam = param
         case .env(let vars):
             kindChoice = .env
             envVarName = vars.first ?? envVarName
-        case .query:
-            // Unreachable for gh/eas today; fall back rather than drop the
-            // import silently.
-            kindChoice = .apiKey
-            headerName = "Authorization"
         }
     }
 
@@ -251,19 +323,33 @@ struct AddConnectionSheet: View {
             }
 
             switch kindChoice {
-            case .bearer:
-                EmptyView()
-            case .apiKey:
+            case .header:
                 field("Header name") {
-                    TextField("X-API-Key", text: $headerName)
+                    TextField("Authorization", text: $headerName)
                         .textFieldStyle(.roundedBorder)
                         .focused($focused, equals: .headerName)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    field("Value template") {
+                        TextField("Bearer {token}", text: $valueTemplate)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($focused, equals: .valueTemplate)
+                    }
+                    Text("Must contain {token}")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             case .basic:
                 field("Username") {
                     TextField("username", text: $basicUsername)
                         .textFieldStyle(.roundedBorder)
                         .focused($focused, equals: .basicUsername)
+                }
+            case .query:
+                field("Query parameter") {
+                    TextField("api_key", text: $queryParam)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focused, equals: .queryParam)
                 }
             case .env:
                 field("Env variable name") {
@@ -318,11 +404,16 @@ struct AddConnectionSheet: View {
             .filter { !$0.isEmpty }
     }
 
+    /// The `.header` check mirrors `ConnectionAuthenticator`'s
+    /// `.templateMissingPlaceholder` guard so a template that would fail at
+    /// call time can't be saved here in the first place.
     private var kindFieldsValid: Bool {
         switch kindChoice {
-        case .bearer: return true
-        case .apiKey: return !headerName.trimmingCharacters(in: .whitespaces).isEmpty
+        case .header:
+            return !headerName.trimmingCharacters(in: .whitespaces).isEmpty
+                && valueTemplate.contains("{token}")
         case .basic: return !basicUsername.trimmingCharacters(in: .whitespaces).isEmpty
+        case .query: return !queryParam.trimmingCharacters(in: .whitespaces).isEmpty
         case .env: return !envVarName.trimmingCharacters(in: .whitespaces).isEmpty
         }
     }
@@ -331,20 +422,23 @@ struct AddConnectionSheet: View {
         !trimmedLabel.isEmpty && !trimmedToken.isEmpty && !hostsArray.isEmpty && kindFieldsValid
     }
 
-    /// Maps the current picker choice + its one typed field to an
-    /// `AuthKind` — see `AuthKind`'s doc comment for the header/template
-    /// shapes (Bearer: "Authorization"/"Bearer {token}"; API key:
-    /// user-typed header name / "{token}").
+    /// Maps the current picker choice + its typed field(s) to an `AuthKind`
+    /// — see `AuthKind`'s doc comment for the general header/template shape.
+    /// `.header` is fully freeform now: both the header name and the value
+    /// template (which must contain "{token}", enforced by
+    /// `kindFieldsValid`) are user-editable, so any header-based service —
+    /// Bearer, "token {token}", a custom API-key header, whatever a service
+    /// documents — is expressible without new UI.
     private var effectiveKind: AuthKind {
         switch kindChoice {
-        case .bearer:
-            return .header(headerName: "Authorization", valueTemplate: "Bearer {token}")
-        case .apiKey:
+        case .header:
             return .header(
                 headerName: headerName.trimmingCharacters(in: .whitespaces),
-                valueTemplate: "{token}")
+                valueTemplate: valueTemplate.trimmingCharacters(in: .whitespaces))
         case .basic:
             return .basic(username: basicUsername.trimmingCharacters(in: .whitespaces))
+        case .query:
+            return .query(param: queryParam.trimmingCharacters(in: .whitespaces))
         case .env:
             return .env(vars: [envVarName.trimmingCharacters(in: .whitespaces)])
         }
