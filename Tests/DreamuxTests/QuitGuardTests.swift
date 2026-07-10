@@ -58,6 +58,22 @@ final class QuitGuardTests: XCTestCase {
         XCTAssertEqual(guard_.busySummary(), "1 run will be terminated.")
     }
 
+    // MARK: - PTY busy decision
+
+    /// A terminal is busy iff a real job owns the foreground: pgid equal
+    /// to the shell's is an idle prompt, and <= 0 is tcgetpgrp failing
+    /// (dead PTY) — neither should block quit.
+    func testForegroundBusyDecision() {
+        XCTAssertFalse(PTYShellSession.foregroundIsBusy(foregroundPGID: 500, shellPID: 500))
+        XCTAssertTrue(PTYShellSession.foregroundIsBusy(foregroundPGID: 501, shellPID: 500))
+        XCTAssertFalse(PTYShellSession.foregroundIsBusy(foregroundPGID: -1, shellPID: 500))
+        XCTAssertFalse(PTYShellSession.foregroundIsBusy(foregroundPGID: 0, shellPID: 500))
+    }
+
+    func testUnstartedPTYSessionReportsNoBusyWork() {
+        XCTAssertEqual(PTYShellSession().busyWork, BusyWork())
+    }
+
     // MARK: - Wording
 
     func testSummaryWording() {

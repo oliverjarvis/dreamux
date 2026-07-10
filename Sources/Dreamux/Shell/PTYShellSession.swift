@@ -92,6 +92,12 @@ final class PTYShellSession: @unchecked Sendable {
             resize: { viewport in holder.value?.handleResize(viewport) }
         )
         holder.value = self
+
+        // The quit guard's registry is weak, so registering at init is
+        // safe even for sessions that never start (they report no work).
+        Task { @MainActor [weak self] in
+            if let self { QuitGuard.shared.register(self) }
+        }
     }
 
     deinit {
@@ -481,4 +487,25 @@ private func freeCStringArray(_ ptr: UnsafeMutablePointer<UnsafeMutablePointer<C
         i += 1
     }
     ptr.deallocate()
+}
+
+// MARK: - Quit guard
+
+extension PTYShellSession: QuitGuardSource {
+    /// Busy iff a job other than the shell owns the PTY's foreground
+    /// process group — Terminal.app's own heuristic. `<= 0` means
+    /// tcgetpgrp failed (dead or never-started PTY).
+    static func foregroundIsBusy(foregroundPGID: pid_t, shellPID: pid_t) -> Bool {
+        foregroundPGID > 0 && foregroundPGID != shellPID
+    }
+
+    var busyWork: BusyWork {
+        stateLock.lock()
+        let fd = masterFD
+        let pid = childPID
+        stateLock.unlock()
+        guard fd >= 0, pid > 0 else { return BusyWork() }
+        let busy = Self.foregroundIsBusy(foregroundPGID: tcgetpgrp(fd), shellPID: pid)
+        return BusyWork(busyTerminals: busy ? 1 : 0)
+    }
 }
