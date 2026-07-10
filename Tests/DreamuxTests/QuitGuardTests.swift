@@ -74,6 +74,31 @@ final class QuitGuardTests: XCTestCase {
         XCTAssertEqual(PTYShellSession().busyWork, BusyWork())
     }
 
+    // MARK: - RunnerManager source
+
+    func testRunnerManagerCountsRunningInstances() async throws {
+        let sandbox = try TestSandbox()
+        defer { sandbox.destroy() }
+        let project = try sandbox.makeProject(named: "quitguard")
+        let manager = RunnerManager(project: project, signals: SignalStore())
+        XCTAssertEqual(manager.busyWork, BusyWork(), "no instances → no busy work")
+
+        let runner = ParsedRunner(
+            name: "sleeper", cwd: nil, start: "sleep 30",
+            stop: nil, port: nil, portEnv: nil
+        )
+        manager.start(runner)
+        addTeardownBlock { @MainActor in manager.stop(runner) }
+        XCTAssertEqual(manager.busyWork, BusyWork(runs: 1))
+
+        manager.stop(runner)
+        // Exit flows back through an async termination handler; poll.
+        for _ in 0..<100 where manager.busyWork != BusyWork() {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        XCTAssertEqual(manager.busyWork, BusyWork(), "a stopped run must not block quit")
+    }
+
     // MARK: - Wording
 
     func testSummaryWording() {

@@ -272,6 +272,7 @@ final class RunnerManager {
     init(project: Project, signals: SignalStore) {
         self.project = project
         self.signals = signals
+        QuitGuard.shared.register(self)
     }
 
     func reload(from toml: String?) {
@@ -997,5 +998,13 @@ final class RunnerManager {
             rest = nil
         }
         return RunnerPath(repo: repo, branch: branch, subPath: rest)
+    }
+}
+
+// MARK: - Quit guard
+
+extension RunnerManager: QuitGuardSource {
+    var busyWork: BusyWork {
+        BusyWork(runs: statusByInstance.values.filter(\.isRunning).count)
     }
 }
