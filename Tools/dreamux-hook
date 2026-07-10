@@ -54,22 +54,58 @@ def log(event: str, **fields: Any) -> None:
         pass
 
 
-def emit(message: str) -> None:
-    """Write `OSC 9 ; message BEL` to /dev/tty (the controlling
-    terminal of this hook subprocess) so it reaches Dreamux's PTY
-    parser even when the agent has captured stdout."""
-    seq = f"\033]9;{message}\a"
+def _session_tty_path() -> Optional[str]:
+    """The session terminal's device path, for when this process has no
+    controlling terminal of its own. Claude Code ≥2.1.206 runs hook
+    subprocesses detached from the tty (`open('/dev/tty')` → ENXIO),
+    but the parent claude still sits on the session PTY — resolve its
+    tty device via ps. Writing to the slave device reaches Dreamux's
+    master-side reader exactly like /dev/tty used to."""
+    import subprocess
+
     try:
-        with open("/dev/tty", "w") as tty:
-            tty.write(seq)
-            tty.flush()
-            log("emit", channel="/dev/tty", message=message)
-            return
-    except OSError as exc:
-        log("emit_tty_fail", error=str(exc))
+        name = subprocess.check_output(
+            ["ps", "-o", "tty=", "-p", str(os.getppid())],
+            text=True, timeout=2.0,
+        ).strip()
+    except Exception as exc:
+        log("tty_resolve_fail", ppid=os.getppid(), error=str(exc))
+        return None
+    if not name or name in ("??", "-"):
+        log("tty_resolve_fail", ppid=os.getppid(), error=f"ps says {name!r}")
+        return None
+    return "/dev/" + name
+
+
+def _write_osc(seq: str, event: str, **fields) -> None:
+    """Deliver an escape sequence to the session's terminal: the hook's
+    own /dev/tty when it has one (claude ≤2.1.205), the parent claude's
+    tty device otherwise (≥2.1.206 detaches hooks from the terminal),
+    stdout as the last resort (only right when stdout IS a terminal,
+    e.g. invoked outside claude)."""
+    candidates = ["/dev/tty"]
+    resolved = _session_tty_path()
+    if resolved:
+        candidates.append(resolved)
+    for path in candidates:
+        try:
+            with open(path, "w") as tty:
+                tty.write(seq)
+                tty.flush()
+                log(event, channel=path, **fields)
+                return
+        except OSError as exc:
+            log(f"{event}_tty_fail", channel=path, error=str(exc))
     sys.stdout.write(seq)
     sys.stdout.flush()
-    log("emit", channel="stdout", message=message)
+    log(event, channel="stdout", **fields)
+
+
+def emit(message: str) -> None:
+    """Write `OSC 9 ; message BEL` to the session terminal so it
+    reaches Dreamux's PTY parser even when the agent has captured
+    stdout."""
+    _write_osc(f"\033]9;{message}\a", "emit", message=message)
 
 
 def control_emit(verb: str, payload: dict) -> None:
@@ -84,18 +120,7 @@ def control_emit(verb: str, payload: dict) -> None:
     body = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
-    seq = f"\033]777;dreamux;{verb};{body}\a"
-    try:
-        with open("/dev/tty", "w") as tty:
-            tty.write(seq)
-            tty.flush()
-            log("control_emit", channel="/dev/tty", verb=verb)
-            return
-    except OSError as exc:
-        log("control_emit_tty_fail", verb=verb, error=str(exc))
-    sys.stdout.write(seq)
-    sys.stdout.flush()
-    log("control_emit", channel="stdout", verb=verb)
+    _write_osc(f"\033]777;dreamux;{verb};{body}\a", "control_emit", verb=verb)
 
 
 def read_stdin_json() -> Optional[dict]:

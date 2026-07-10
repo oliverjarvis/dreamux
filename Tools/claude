@@ -80,7 +80,11 @@ SYNC_STOP='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' stop
 SYNC_NOTIFY='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' notify"}]}'
 FLOW_MATCHED='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' flow","async":true}]}'
 FLOW_PLAIN='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' flow","async":true}]}'
-SESSION_START='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' session-start","async":true}]}'
+# session-start is deliberately SYNC: the hook resolves the session's
+# tty via its parent (claude ≥2.1.206 detaches hooks from /dev/tty),
+# and an async hook's parentage/ordering isn't guaranteed. The hook is
+# one local write — no user-visible delay.
+SESSION_START='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' session-start"}]}'
 SETTINGS_JSON='{"hooks":{'
 SETTINGS_JSON="$SETTINGS_JSON"'"Stop":['"$SYNC_STOP"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"Notification":['"$SYNC_NOTIFY"'],'
