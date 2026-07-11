@@ -367,25 +367,31 @@ struct WorkspaceOverviewView: View {
     @ViewBuilder
     private func checklist(_ plan: PlanDoc) -> some View {
         let tasks = plan.tasks.filter { !$0.steps.isEmpty }
-        if PlanPhases.shouldGroup(tasks) {
-            let groups = PlanPhases.groups(tasks)
-            let currentGroup = PlanPhases.currentGroupIndex(groups)
-            VStack(alignment: .leading, spacing: 18) {
+        // Global 1-based task numbers, keyed by line (unique per task).
+        let numbers = Dictionary(uniqueKeysWithValues: tasks.enumerated().map { ($1.line, $0 + 1) })
+        VStack(alignment: .leading, spacing: PlanPhases.shouldGroup(tasks) ? 14 : 2) {
+            if PlanPhases.shouldGroup(tasks) {
+                let groups = PlanPhases.groups(tasks)
+                let currentGroup = PlanPhases.currentGroupIndex(groups)
                 ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
-                    phaseSection(group, plan: plan, isCurrentGroup: index == currentGroup)
+                    phaseSection(group, plan: plan, numbers: numbers,
+                                 isCurrentGroup: index == currentGroup)
+                }
+            } else {
+                let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
+                ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
+                    taskRow(task, number: index + 1, plan: plan, isCurrent: index == currentIndex)
                 }
             }
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                taskRows(tasks, plan: plan)
-            }
         }
+        .overviewSurface(padding: 8)
     }
 
     private func phaseSection(
-        _ group: PlanPhases.Group, plan: PlanDoc, isCurrentGroup: Bool
+        _ group: PlanPhases.Group, plan: PlanDoc, numbers: [Int: Int], isCurrentGroup: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let currentTaskIndex = group.tasks.firstIndex { $0.steps.contains { !$0.checked } }
+        return VStack(alignment: .leading, spacing: 3) {
             Button {
                 if let line = group.tasks.first?.phaseLine ?? group.tasks.first?.line {
                     onOpenDocAtLine(plan.fileURL, line)
@@ -395,16 +401,14 @@ struct WorkspaceOverviewView: View {
                     Text(group.phase ?? "Steps")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.primary)
-                    if isCurrentGroup {
-                        Text("← current")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
+                    if isCurrentGroup { currentTag() }
                     Spacer(minLength: 0)
                     Text("\(group.checkedSteps)/\(group.totalSteps)")
                         .font(.system(size: 13).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -416,49 +420,32 @@ struct WorkspaceOverviewView: View {
                         description: group.phase ?? "Steps")
                 }
             }
-            taskRows(group.tasks, plan: plan)
-        }
-    }
-
-    private func taskRows(_ tasks: [PlanTask], plan: PlanDoc) -> some View {
-        let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
-        return VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
-                taskRow(task, plan: plan, isCurrent: index == currentIndex)
+            ForEach(Array(group.tasks.enumerated()), id: \.offset) { index, task in
+                taskRow(task, number: numbers[task.line] ?? (index + 1),
+                        plan: plan, isCurrent: index == currentTaskIndex)
             }
         }
     }
 
-    private func taskRow(_ task: PlanTask, plan: PlanDoc, isCurrent: Bool) -> some View {
+    private func taskRow(_ task: PlanTask, number: Int, plan: PlanDoc, isCurrent: Bool) -> some View {
         let checked = task.steps.filter(\.checked).count
         let total = task.steps.count
         let allChecked = checked == total
-        let glyph = allChecked ? "checkmark" : (isCurrent ? "arrowtriangle.right.fill" : "circle")
-        let tint = isCurrent
-            ? AnyShapeStyle(Color.accentColor)
-            : AnyShapeStyle(allChecked ? .secondary : .tertiary)
         return Button {
             onOpenDocAtLine(plan.fileURL, task.line)
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: glyph)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 18)
-                Text(task.title.isEmpty ? "Steps" : task.title)
+            HStack(spacing: 11) {
+                Text("\(number)")
+                    .font(.system(size: 12.5).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, alignment: .trailing)
+                checkGlyph(allChecked: allChecked, isCurrent: isCurrent)
+                Text(cleanTitle(task.title))
                     .font(.system(size: 15))
                     .foregroundStyle(.primary)
                     .lineLimit(1).truncationMode(.tail)
-                if isCurrent {
-                    Text("← current")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
+                if isCurrent { currentTag() }
                 Spacer(minLength: 0)
-                // Hover button only when at least one step is checked — an
-                // untouched task can't have commits yet. Rendered whenever
-                // checked, faded by hover, so the count never shifts
-                // (mirrors the rail's now-deleted task row).
                 if checked > 0 {
                     let show = hoveredTaskLine == task.line
                     Button {
@@ -476,24 +463,26 @@ struct WorkspaceOverviewView: View {
                     .allowsHitTesting(show)
                 }
                 Text("\(checked)/\(total)")
-                    .font(.system(size: 13).monospacedDigit())
+                    .font(.system(size: 12).monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.05)))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .background {
-            if isCurrent {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.08))
-            }
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isCurrent
+                      ? Color.accentColor.opacity(0.08)
+                      : (hoveredTaskLine == task.line ? Color.primary.opacity(0.04) : Color.clear))
         }
         .contextMenu {
-            Button("View changes") {
-                onViewTaskChanges(plan, task)
-            }
+            Button("View changes") { onViewTaskChanges(plan, task) }
             Button("Course correct…") {
                 correcting = CorrectionTarget(
                     plan: plan,
@@ -505,6 +494,46 @@ struct WorkspaceOverviewView: View {
             if inside { hoveredTaskLine = task.line }
             else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
         }
+    }
+
+    /// A leading "Task 12:" is redundant once a number badge carries the
+    /// index — strip it; keep any other title verbatim.
+    private func cleanTitle(_ title: String) -> String {
+        if let range = title.range(of: #"^Task\s+\d+:\s*"#, options: .regularExpression) {
+            let rest = String(title[range.upperBound...])
+            return rest.isEmpty ? "Steps" : rest
+        }
+        return title.isEmpty ? "Steps" : title
+    }
+
+    @ViewBuilder
+    private func checkGlyph(allChecked: Bool, isCurrent: Bool) -> some View {
+        if allChecked {
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.green)
+                .frame(width: 19, height: 19)
+                .background(Circle().fill(Color.green.opacity(0.16)))
+        } else if isCurrent {
+            Image(systemName: "arrowtriangle.right.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 19, height: 19)
+        } else {
+            Image(systemName: "circle")
+                .font(.system(size: 13))
+                .foregroundStyle(.tertiary)
+                .frame(width: 19, height: 19)
+        }
+    }
+
+    private func currentTag() -> some View {
+        Text("current")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
     }
 
     /// Reuse an already-open shell tab if this workspace has one; otherwise
