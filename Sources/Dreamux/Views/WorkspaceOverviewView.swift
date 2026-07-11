@@ -130,6 +130,9 @@ struct WorkspaceOverviewView: View {
     /// "View changes" button, keyed by the task's line (mirrors the
     /// rail's now-deleted `hoveredTaskLine`).
     @State private var hoveredTaskLine: Int?
+    /// Step row currently under the pointer within an expanded task — drives
+    /// the per-step hover wash, keyed by the step's document line.
+    @State private var hoveredStepLine: Int?
     /// Task rows currently expanded to reveal their steps, keyed by the
     /// task's line. The current task auto-expands once on open (see
     /// `modeA`'s `.onAppear`); every other task starts collapsed so the
@@ -612,35 +615,56 @@ struct WorkspaceOverviewView: View {
                 else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
             }
             if isExpanded {
-                stepsList(task)
+                stepsList(task, plan: plan)
             }
         }
     }
 
-    /// The task's steps, revealed when its row is expanded — a check glyph
-    /// (green when done) and the readable step title, wrapping rather than
-    /// truncating since a step line can be a full sentence. Indented one
-    /// level past the disclosure chevron so it reads as belonging to the
-    /// task above it.
-    private func stepsList(_ task: PlanTask) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+    /// The task's steps, revealed when its row is expanded. Each step is a
+    /// first-class row — generous vertical padding, a hover wash, and a click
+    /// that opens the plan at that checkbox's line (steps carry their own
+    /// `line` now). The title wraps rather than truncating, since a step line
+    /// can be a full sentence. Indented so the glyph column lines up under
+    /// the task's status glyph above it.
+    private func stepsList(_ task: PlanTask, plan: PlanDoc) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(task.steps.enumerated()), id: \.offset) { _, step in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: step.checked ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(step.checked ? Color.green : Color.secondary)
-                    Text(step.title)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(step.checked ? .secondary : .primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
+                Button {
+                    onOpenDocAtLine(plan.fileURL, step.line)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 11) {
+                        Image(systemName: step.checked ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(step.checked ? Color.green : Color.secondary)
+                            .frame(width: 18)
+                        Text(step.title)
+                            .font(.system(size: 14))
+                            .foregroundStyle(step.checked ? .secondary : .primary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(hoveredStepLine == step.line
+                              ? Color.primary.opacity(0.05) : Color.clear)
+                }
+                .onHover { inside in
+                    if inside { hoveredStepLine = step.line }
+                    else if hoveredStepLine == step.line { hoveredStepLine = nil }
+                }
+                .help("Open this step in the plan")
             }
         }
-        .padding(.leading, 43)
-        .padding(.trailing, 14)
+        .padding(.leading, 31)
+        .padding(.trailing, 10)
         .padding(.top, 4)
-        .padding(.bottom, 10)
+        .padding(.bottom, 12)
     }
 
     /// Flip a task row between collapsed and expanded, animated so the

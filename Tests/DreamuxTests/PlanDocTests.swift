@@ -367,6 +367,25 @@ final class PlanDocTests: XCTestCase {
         assertCountsMatchSteps(d)
     }
 
+    func testStepsCarryTheirDocumentLine() {
+        let d = doc("2026-07-02-lines.md", """
+        # Lines Implementation Plan
+
+        ### Task 1: First
+        - [ ] **Step 1: alpha**
+        - [x] **Step 2: beta**
+
+        ### Task 2: Second
+        - [ ] **Step 1: gamma**
+        """)
+        // 1-based lines: 1 "# Lines…", 2 blank, 3 "### Task 1…", 4 alpha,
+        // 5 beta, 6 blank, 7 "### Task 2…", 8 gamma.
+        XCTAssertEqual(d.tasks[0].steps.map(\.line), [4, 5])
+        XCTAssertEqual(d.tasks[1].steps.map(\.line), [8])
+        // `line` is excluded from ==, so content equality still holds.
+        XCTAssertEqual(d.tasks[0].steps.first, PlanStep(title: "alpha", checked: false))
+    }
+
     func testStepDecorationStrippedToReadableTitle() {
         // A short bold label followed by prose keeps the prose; the
         // `**Step k:` numbering and bold markers fall away.
