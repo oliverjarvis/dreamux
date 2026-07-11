@@ -159,7 +159,7 @@ final class FlowStore: ObservableObject {
 
     private static let skippedLinesThreshold = 50
     private static let agentFanOutCap = 6
-    private static let collapsedAgentNodeID = "agents-collapsed"
+    nonisolated static let collapsedAgentNodeID = "agents-collapsed"
 
     /// A transcript event's own `at`, when it has one — used only to
     /// seed a lane's `startedAt` if the transcript beats the registry.
