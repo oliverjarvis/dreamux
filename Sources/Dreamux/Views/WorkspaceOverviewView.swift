@@ -217,7 +217,7 @@ struct WorkspaceOverviewView: View {
                     workingNow(plan, subagents: live)
                 }
                 OverviewSectionLabel(title: "Tasks", trailing: "\(tasks.count) tasks")
-                checklist(plan)
+                checklist(plan, live: live)
             }
             .padding(24)
             .frame(maxWidth: 860, alignment: .leading)
@@ -444,7 +444,7 @@ struct WorkspaceOverviewView: View {
     // it isn't crammed into the sidebar).
 
     @ViewBuilder
-    private func checklist(_ plan: PlanDoc) -> some View {
+    private func checklist(_ plan: PlanDoc, live: [LiveSubagent]) -> some View {
         let tasks = plan.tasks.filter { !$0.steps.isEmpty }
         // Global 1-based task numbers, keyed by line (unique per task in
         // practice; `uniquingKeysWith` keeps the first rather than trapping
@@ -457,12 +457,13 @@ struct WorkspaceOverviewView: View {
                 let currentGroup = PlanPhases.currentGroupIndex(groups)
                 ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
                     phaseSection(group, plan: plan, numbers: numbers,
-                                 isCurrentGroup: index == currentGroup)
+                                 isCurrentGroup: index == currentGroup, live: live)
                 }
             } else {
                 let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
                 ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
-                    taskRow(task, number: index + 1, plan: plan, isCurrent: index == currentIndex)
+                    taskRow(task, number: index + 1, plan: plan,
+                            isCurrent: index == currentIndex, live: live)
                 }
             }
         }
@@ -470,7 +471,8 @@ struct WorkspaceOverviewView: View {
     }
 
     private func phaseSection(
-        _ group: PlanPhases.Group, plan: PlanDoc, numbers: [Int: Int], isCurrentGroup: Bool
+        _ group: PlanPhases.Group, plan: PlanDoc, numbers: [Int: Int],
+        isCurrentGroup: Bool, live: [LiveSubagent]
     ) -> some View {
         let currentTaskIndex = group.tasks.firstIndex { $0.steps.contains { !$0.checked } }
         return VStack(alignment: .leading, spacing: 3) {
@@ -504,16 +506,19 @@ struct WorkspaceOverviewView: View {
             }
             ForEach(Array(group.tasks.enumerated()), id: \.offset) { index, task in
                 taskRow(task, number: numbers[task.line] ?? (index + 1),
-                        plan: plan, isCurrent: index == currentTaskIndex)
+                        plan: plan, isCurrent: index == currentTaskIndex, live: live)
             }
         }
     }
 
-    private func taskRow(_ task: PlanTask, number: Int, plan: PlanDoc, isCurrent: Bool) -> some View {
+    private func taskRow(
+        _ task: PlanTask, number: Int, plan: PlanDoc, isCurrent: Bool, live: [LiveSubagent]
+    ) -> some View {
         let checked = task.steps.filter(\.checked).count
         let total = task.steps.count
         let allChecked = checked == total
         let isExpanded = expandedTaskLines.contains(task.line)
+        let pinned = live.first { $0.taskLine == task.line }
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 toggleExpanded(task.line)
@@ -534,6 +539,20 @@ struct WorkspaceOverviewView: View {
                         .foregroundStyle(.primary)
                         .lineLimit(1).truncationMode(.tail)
                     if isCurrent { currentTag() }
+                    if let pinned {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(FlowStatusGlyph.color(pinned.status))
+                                .frame(width: 6, height: 6)
+                            Text(pinned.name)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.06)))
+                        .help("\(pinned.name) is working this task")
+                    }
                     Spacer(minLength: 0)
                     if checked > 0 {
                         let show = hoveredTaskLine == task.line
