@@ -49,6 +49,13 @@ struct WorkspaceOverviewDependencies {
     /// — forwarded straight into the checklist's own course-correct sheet,
     /// the same way `WorkspaceSidebar` forwards it into `PlansSpecsSection`.
     let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
+    /// Live flow state, passed as a plain reference and re-wrapped as an
+    /// `@ObservedObject` on the view (a struct field can't be observed).
+    let flows: FlowStore
+    /// Zoom the Flows page to a workspace's run lane (the "Working now"
+    /// pill's click target). ContentView resolves the workspace's plan lane
+    /// — the session lane the subagent lives on is board-suppressed.
+    let onOpenRunFlow: (UUID) -> Void
 }
 
 /// The workspace's home dashboard — its pinned, non-dismissable first
@@ -65,6 +72,11 @@ struct WorkspaceOverviewDependencies {
 ///   here).
 struct WorkspaceOverviewView: View {
     @Bindable var session: WorkspaceSession
+    /// The project's live flow state — read reactively so the Overview's
+    /// "Working now" strip updates as subagents start and stop. Carried by
+    /// `WorkspaceOverviewDependencies` (a plain reference) and re-wrapped
+    /// here so `@Published flows` drives re-render.
+    @ObservedObject var flows: FlowStore
     let docStore: DocStore
     let planQueue: PlanQueueController
     /// Mode B's working-tree header resolves this workspace's worktree
@@ -105,6 +117,9 @@ struct WorkspaceOverviewView: View {
     let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
     /// See `WorkspaceOverviewDependencies.onCourseCorrectionNudge`.
     let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
+    /// Zoom the Flows page to this workspace's run lane — the pill's click
+    /// target. See `WorkspaceOverviewDependencies.onOpenRunFlow`.
+    let onOpenRunFlow: (UUID) -> Void
 
     /// Mode B's working-tree summary — loaded once on appear (no poller;
     /// unlike the header chip's 5s loop, this tab isn't always on
@@ -193,9 +208,14 @@ struct WorkspaceOverviewView: View {
         let status = docStore.status(for: plan, featureExists: { _ in true })
         let hero = RunHeroState.resolve(status: status, hasLiveAgent: hasLiveAgent(session.workspace))
         let tasks = plan.tasks.filter { !$0.steps.isEmpty }
+        let live = OverviewLiveAgents.subagents(
+            in: flows.flows, workspaceID: session.workspace.id, tasks: plan.tasks)
         return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 heroCard(plan, hero: hero)
+                if !live.isEmpty {
+                    workingNow(plan, subagents: live)
+                }
                 OverviewSectionLabel(title: "Tasks", trailing: "\(tasks.count) tasks")
                 checklist(plan)
             }
@@ -222,6 +242,34 @@ struct WorkspaceOverviewView: View {
             .filter { !$0.steps.isEmpty }
             .first { $0.steps.contains { !$0.checked } }?
             .line
+    }
+
+    /// The "Working now" strip: a pill per live subagent. Horizontal scroll
+    /// is a safe fallback for the rare overflow (done agents are collapsed
+    /// upstream, so live ones are few). Hidden entirely when `subagents` is
+    /// empty (caller guards).
+    private func workingNow(_ plan: PlanDoc, subagents: [LiveSubagent]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            OverviewSectionLabel(title: "Working now")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(subagents) { sub in
+                        LiveSubagentPill(subagent: sub, detail: detailText(for: sub, plan: plan)) {
+                            onOpenRunFlow(session.workspace.id)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Prefer the pinned task's clean title (so the pill and the badged row
+    /// agree); fall back to the subagent's live activity.
+    private func detailText(for sub: LiveSubagent, plan: PlanDoc) -> String? {
+        if let line = sub.taskLine, let task = plan.tasks.first(where: { $0.line == line }) {
+            return cleanTitle(task.title)
+        }
+        return sub.activity
     }
 
     // MARK: - Mode A hero

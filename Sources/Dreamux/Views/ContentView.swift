@@ -852,6 +852,15 @@ struct ContentView: View {
             onCourseCorrectionNudge: { plan, summary, priority in
                 session.enqueueCourseCorrectionNudge(
                     plan: plan, summary: summary, priority: priority)
+            },
+            flows: session.flows,
+            onOpenRunFlow: { ws in
+                let lane = session.flows.flows.first { $0.workspaceID == ws && $0.kind == .plan }
+                    ?? session.flows.flows.first { $0.workspaceID == ws }   // Mode B fallback
+                if let lane {
+                    sidebarMode = .flows
+                    flowsZoomLaneID = lane.id
+                }
             }
         )
     }

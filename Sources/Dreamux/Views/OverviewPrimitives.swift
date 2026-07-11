@@ -93,3 +93,52 @@ extension View {
                     .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1))
     }
 }
+
+/// A live subagent as a clickable pill for the Overview's "Working now"
+/// strip: a pulsing status dot, the agent name, and a `· detail` tail
+/// (the pinned task title, or the live activity — the strip decides).
+/// Same visual family as `OverviewStatusPill`.
+struct LiveSubagentPill: View {
+    let subagent: LiveSubagent
+    let detail: String?
+    let onOpen: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(FlowStatusGlyph.color(subagent.status))
+                    .frame(width: 7, height: 7)
+                    .opacity(reduceMotion ? 1 : (pulse ? 0.35 : 1))
+                Text(subagent.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                if let detail, !detail.isEmpty {
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(detail)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous).fill(Color.primary.opacity(0.05))
+                    .overlay(Capsule(style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Open this run's flow")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}

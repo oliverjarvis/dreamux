@@ -89,6 +89,7 @@ private struct TabContentView: View {
         if session.isOverviewTab(tabId) {
             WorkspaceOverviewView(
                 session: session,
+                flows: overview.flows,
                 docStore: overview.docStore,
                 planQueue: overview.planQueue,
                 repoStore: overview.repoStore,
@@ -103,7 +104,8 @@ private struct TabContentView: View {
                 onNewPlan: overview.onNewPlan,
                 onOpenRun: overview.onOpenRun,
                 onViewTaskChanges: overview.onViewTaskChanges,
-                onCourseCorrectionNudge: overview.onCourseCorrectionNudge
+                onCourseCorrectionNudge: overview.onCourseCorrectionNudge,
+                onOpenRunFlow: overview.onOpenRunFlow
             )
         } else if let tabSession = session.tabSession(for: tabId) {
             // Read inside `body` (not cached in `onAppear`/`onChange`) so
