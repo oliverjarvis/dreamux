@@ -282,7 +282,15 @@ struct WorkspaceOverviewView: View {
     }
 
     private func mergedNote() -> some View {
-        let base = repoStore.repositories.first?.defaultBranch ?? "main"
+        // The base is this workspace's first *linked* repo's default branch
+        // (mirrors `resolveWorktreeGitStatus`' repo pick) — not just the
+        // store's first repo, which would name the wrong base for a
+        // workspace that links a non-first repo.
+        let base = (session.workspace.linkedRepoIDs.isEmpty
+                    ? repoStore.repositories.first
+                    : repoStore.repositories.first {
+                        session.workspace.linkedRepoIDs.contains($0.name)
+                    })?.defaultBranch ?? "main"
         return HStack(spacing: 8) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 13))
@@ -367,8 +375,11 @@ struct WorkspaceOverviewView: View {
     @ViewBuilder
     private func checklist(_ plan: PlanDoc) -> some View {
         let tasks = plan.tasks.filter { !$0.steps.isEmpty }
-        // Global 1-based task numbers, keyed by line (unique per task).
-        let numbers = Dictionary(uniqueKeysWithValues: tasks.enumerated().map { ($1.line, $0 + 1) })
+        // Global 1-based task numbers, keyed by line (unique per task in
+        // practice; `uniquingKeysWith` keeps the first rather than trapping
+        // if a malformed plan ever repeats a line).
+        let numbers = Dictionary(tasks.enumerated().map { ($1.line, $0 + 1) },
+                                 uniquingKeysWith: { first, _ in first })
         VStack(alignment: .leading, spacing: PlanPhases.shouldGroup(tasks) ? 14 : 2) {
             if PlanPhases.shouldGroup(tasks) {
                 let groups = PlanPhases.groups(tasks)
