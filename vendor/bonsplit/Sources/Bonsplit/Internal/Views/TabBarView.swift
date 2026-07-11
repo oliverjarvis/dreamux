@@ -316,6 +316,11 @@ struct TabBarView: View {
     private var tabBarBackground: some View {
         Rectangle()
             .fill(isFocused ? TabBarColors.barBackground : TabBarColors.barBackground.opacity(0.95))
+            // Recess the strip so the brighter, content-colored active tab
+            // reads as merged with the pane while inactive tabs sit on the bar.
+            .overlay(TabBarColors.barRecess)
+            // Baseline dividing bar from content — the active tab's opaque
+            // fill covers its own segment, breaking the line where it merges.
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(TabBarColors.separator)

@@ -15,16 +15,34 @@ enum TabBarColors {
 
     // MARK: - Tab States
 
+    /// The active tab is filled with the content-area color so it reads as
+    /// continuous with the pane below it.
     static var activeTabBackground: Color {
-        Color(nsColor: .controlBackgroundColor)
+        Color(nsColor: .windowBackgroundColor)
     }
 
+    /// A subtle lift layered over the active tab so it clearly reads as
+    /// raised/selected against the recessed bar. Adding light shows up on the
+    /// dark theme (where darkening the near-black bar barely registers); on a
+    /// light theme it's negligible and the bar recess carries the contrast.
+    static var activeTabLift: Color {
+        Color.white.opacity(0.07)
+    }
+
+    /// Hover wash for an inactive squircle button — a soft, theme-aware
+    /// lightening that works on both the dark and light bar.
     static var hoveredTabBackground: Color {
-        Color(nsColor: .controlBackgroundColor).opacity(0.5)
+        Color(nsColor: .labelColor).opacity(0.08)
     }
 
     static var inactiveTabBackground: Color {
         .clear
+    }
+
+    /// A subtle darkening laid over the bar so it reads as a recessed strip
+    /// distinct from the (brighter) active tab + content it frames.
+    static var barRecess: Color {
+        Color.black.opacity(0.14)
     }
 
     // MARK: - Text Colors

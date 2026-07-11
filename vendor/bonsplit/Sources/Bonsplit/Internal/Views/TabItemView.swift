@@ -21,7 +21,7 @@ struct TabItemView: View {
 
             // Title
             Text(tab.title)
-                .font(.system(size: TabBarMetrics.titleFontSize))
+                .font(.system(size: TabBarMetrics.titleFontSize, weight: isSelected ? .medium : .regular))
                 .lineLimit(1)
                 .foregroundStyle(isSelected ? TabBarColors.activeText : TabBarColors.inactiveText)
 
@@ -31,14 +31,11 @@ struct TabItemView: View {
             closeOrDirtyIndicator
         }
         .padding(.horizontal, TabBarMetrics.tabHorizontalPadding)
-        .offset(y: isSelected ? 0.5 : 0)
         .frame(
             minWidth: TabBarMetrics.tabMinWidth,
             maxWidth: TabBarMetrics.tabMaxWidth,
-            minHeight: TabBarMetrics.tabHeight,
-            maxHeight: TabBarMetrics.tabHeight
+            maxHeight: .infinity
         )
-        .padding(.bottom, isSelected ? 1 : 0)
         .background(tabBackground)
         .contentShape(Rectangle())
         .onTapGesture {
@@ -59,32 +56,36 @@ struct TabItemView: View {
 
     @ViewBuilder
     private var tabBackground: some View {
-        ZStack(alignment: .top) {
-            // Background fill
-            if isSelected {
-                Rectangle()
-                    .fill(TabBarColors.activeTabBackground)
-            } else if isHovered {
-                Rectangle()
-                    .fill(TabBarColors.hoveredTabBackground)
-            } else {
-                Color.clear
-            }
-
-            // Top accent indicator for selected tab
-            if isSelected {
-                Rectangle()
-                    .fill(Color.accentColor)
-                    .frame(height: TabBarMetrics.activeIndicatorHeight)
-            }
-
-            // Right border separator
-            HStack {
-                Spacer()
-                Rectangle()
-                    .fill(TabBarColors.separator)
-                    .frame(width: 1)
-            }
+        if isSelected {
+            // The active tab is a top-rounded squircle whose flat bottom sits
+            // flush against the content. Filled with the content-area color
+            // and drawn opaquely to the bar's bottom edge, it covers the
+            // bar's baseline so tab + content read as one continuous surface.
+            UnevenRoundedRectangle(
+                topLeadingRadius: TabBarMetrics.activeCornerRadius,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: TabBarMetrics.activeCornerRadius,
+                style: .continuous
+            )
+            .fill(TabBarColors.activeTabBackground)
+            .overlay(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: TabBarMetrics.activeCornerRadius,
+                    bottomLeadingRadius: 0,
+                    bottomTrailingRadius: 0,
+                    topTrailingRadius: TabBarMetrics.activeCornerRadius,
+                    style: .continuous
+                )
+                .fill(TabBarColors.activeTabLift)
+            )
+        } else {
+            // Inactive tabs are floating squircle buttons: transparent until
+            // hovered, then a soft wash. No separators, no accent line.
+            RoundedRectangle(cornerRadius: TabBarMetrics.inactiveCornerRadius, style: .continuous)
+                .fill(isHovered ? TabBarColors.hoveredTabBackground : Color.clear)
+                .padding(.vertical, TabBarMetrics.inactiveVerticalInset)
+                .padding(.horizontal, TabBarMetrics.inactiveHorizontalInset)
         }
     }
 
