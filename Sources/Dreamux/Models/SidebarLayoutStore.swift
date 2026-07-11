@@ -27,7 +27,7 @@ final class SidebarLayoutStore {
     var specFilesExpanded: Bool {
         didSet { if specFilesExpanded != oldValue { save() } }
     }
-    /// The Apps section (App Studio applets adopted/created in this project).
+    /// The Applets section (Applet Studio applets adopted/created in this project).
     var appsExpanded: Bool {
         didSet { if appsExpanded != oldValue { save() } }
     }

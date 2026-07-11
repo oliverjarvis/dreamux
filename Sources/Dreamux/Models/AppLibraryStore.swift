@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Tracks the global App Studio applet library — the reusable applets a
+/// Tracks the global Applet Studio applet library — the reusable applets a
 /// user builds once and can adopt into any project. Applets live under
 /// `~/Documents/Dreamux/Apps/` by default, a reserved subdirectory of
 /// `ProjectStore.projectsRootURL()` (see `ProjectStore.isReservedProjectFolderName`

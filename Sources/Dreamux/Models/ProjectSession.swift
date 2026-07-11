@@ -29,9 +29,9 @@ final class ProjectSession {
     let planQueue: PlanQueueController
     let nudgeCenter: PlanNudgeCenter
     let flows: FlowStore
-    /// App Studio applets living under `<project>/apps/` (adopted + local-born).
+    /// Applet Studio applets living under `<project>/apps/` (adopted + local-born).
     let applets: ProjectAppletStore
-    /// The global App Studio applet library — the source for the Adopt path
+    /// The global Applet Studio applet library — the source for the Adopt path
     /// and the destination for Publish.
     let appLibrary: AppLibraryStore
 

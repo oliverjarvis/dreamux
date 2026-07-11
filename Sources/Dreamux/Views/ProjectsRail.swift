@@ -52,19 +52,6 @@ struct ProjectsRail: View {
                     }
                 }
             }
-            // App Studio is pinned directly above New Project — a launcher
-            // row for the global applet library, same construction as the
-            // row below it (it isn't a project, so it stays out of the
-            // project list proper).
-            Button {
-                openWindow(id: "app-studio")
-            } label: {
-                Label("App Studio", systemImage: "shippingbox")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Open the App Studio applet library")
-
             // New Project rides directly below the last project, one of
             // the rows rather than a pinned bottom bar.
             Button {
@@ -75,6 +62,20 @@ struct ProjectsRail: View {
             }
             .buttonStyle(.plain)
             .help("Create a new project")
+
+            // The global applet library gets its own titled section rather
+            // than trailing the project list as a bare row — it isn't a
+            // project, so a header reads it as a distinct destination.
+            Section("Studio") {
+                Button {
+                    openWindow(id: "app-studio")
+                } label: {
+                    Label("Applet Studio", systemImage: "shippingbox")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open the Applet Studio library")
+            }
         }
         .listStyle(.sidebar)
         // The rail sits flat on the window's inset backdrop, like the

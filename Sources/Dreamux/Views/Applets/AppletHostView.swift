@@ -96,7 +96,7 @@ struct AppletHostView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1).truncationMode(.tail)
             if session.applet.isAdopted {
-                Text("Adopted from App Studio")
+                Text("Adopted from Applet Studio")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }

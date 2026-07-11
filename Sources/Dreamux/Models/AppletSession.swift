@@ -6,7 +6,7 @@ import WebKit
 /// Everything live behind one open applet: the preview `WKWebView` (lazy,
 /// custom scheme + native bridge + nav lockdown), the optional builder-agent
 /// terminal, and a folder poller for hot reload. Held per-applet by whatever
-/// owns App Studio (`ProjectSession` / `AppStudioView`) — NOT rebuilt per
+/// owns Applet Studio (`ProjectSession` / `AppStudioView`) — NOT rebuilt per
 /// render, the same discipline `FileEditorTabSession`/`WebTabSession` use to
 /// keep a `WKWebView` alive across SwiftUI redraws.
 @MainActor

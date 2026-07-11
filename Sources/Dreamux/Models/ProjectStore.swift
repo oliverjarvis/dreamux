@@ -56,7 +56,7 @@ final class ProjectStore {
     /// `~/Library/Application Support/Dreamux` by default, or
     /// `$DREAMUX_STATE_DIR`. Created if absent. Nonisolated and static so
     /// any caller that needs the same app-support root — the `dreamux` CLI,
-    /// or App Studio's scratch applet data (`AppStudioData/<slug>`) — gets
+    /// or Applet Studio's scratch applet data (`AppStudioData/<slug>`) — gets
     /// the exact directory this store's `projects.json` lives under,
     /// without needing a main-actor `ProjectStore` instance.
     nonisolated static func stateRootURL() -> URL {
@@ -105,7 +105,7 @@ final class ProjectStore {
     }
 
     /// Folder names under `projectsRoot` that are NOT projects — currently
-    /// just "Apps", the App Studio applet library (`AppLibraryStore`).
+    /// just "Apps", the Applet Studio applet library (`AppLibraryStore`).
     /// Pure so it's testable without env plumbing.
     nonisolated static func isReservedProjectFolderName(_ name: String) -> Bool {
         name == "Apps"

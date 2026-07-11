@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Tracks the per-project App Studio applets under `<project>/apps/` —
+/// Tracks the per-project Applet Studio applets under `<project>/apps/` —
 /// adopted copies of library applets plus local-born (no-origin) applets.
 /// Mirrors `AppLibraryStore`'s scan-is-truth shape, one level down.
 @MainActor

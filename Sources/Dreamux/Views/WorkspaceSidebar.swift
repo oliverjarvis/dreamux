@@ -42,7 +42,7 @@ struct WorkspaceSidebar: View {
     /// Auto-run failure lookup (`ProjectSession.autoRunFailures`) —
     /// forwarded straight into `PlansSpecsSection`.
     let autoRunFailure: (String) -> String?
-    /// This project's App Studio applets (the APPS section's data).
+    /// This project's Applet Studio applets (the Applets section's data).
     @Bindable var applets: ProjectAppletStore
     /// The global applet library — the New App sheet's Adopt source and the
     /// Publish destination.
@@ -1157,7 +1157,7 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// Publish a local-born applet up to the App Studio library.
+    /// Publish a local-born applet up to the Applet Studio library.
     private func handlePublishApp(_ applet: Applet) {
         do {
             _ = try applets.publish(applet, to: appLibrary)

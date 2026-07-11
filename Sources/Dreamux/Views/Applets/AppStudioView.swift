@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The global App Studio window (`Window("App Studio", id: "app-studio")` in
-/// `DreamuxApp`) — the canonical applet library, reachable from the
+/// The global Applet Studio window (`Window("Applet Studio", id: "app-studio")`
+/// in `DreamuxApp`) — the canonical applet library, reachable from the
 /// projects rail rather than any one project. A left column lists every
 /// applet under `AppLibraryStore.root` (create/select/delete, house style
 /// borrowed from `AppsSection`); the right column hosts the selection with
@@ -43,7 +43,7 @@ struct AppStudioView: View {
             )
         }
         .confirmationDialog(
-            "Delete \(pendingDelete?.manifest.name ?? "app")?",
+            "Delete \(pendingDelete?.manifest.name ?? "applet")?",
             isPresented: Binding(
                 get: { pendingDelete != nil },
                 set: { if !$0 { pendingDelete = nil } }
@@ -89,13 +89,13 @@ struct AppStudioView: View {
         .frame(maxHeight: .infinity, alignment: .top)
     }
 
-    /// "APP STUDIO" — 13pt semibold uppercase, kern 0.4, house style — plus
-    /// a Refresh `.soft` button. The one deliberate header-icon exception:
-    /// this is a standalone window (no toolbar), not the project sidebar
-    /// where add-actions live as foot rows only.
+    /// "APPLET STUDIO" — 13pt semibold uppercase, kern 0.4, house style —
+    /// plus a Refresh `.soft` button. The one deliberate header-icon
+    /// exception: this is a standalone window (no toolbar), not the project
+    /// sidebar where add-actions live as foot rows only.
     private var header: some View {
         HStack(spacing: 8) {
-            Text("App Studio")
+            Text("Applet Studio")
                 .font(.system(size: 13, weight: .semibold))
                 .kerning(0.4)
                 .textCase(.uppercase)
@@ -107,7 +107,7 @@ struct AppStudioView: View {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.soft)
-            .help("Refresh the applet library")
+            .help("Refresh the Applet Studio library")
         }
         .padding(.horizontal, 12)
         .padding(.top, 14)
@@ -171,7 +171,7 @@ struct AppStudioView: View {
                 Image(systemName: "plus")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 28, height: 28)
-                Text("New app")
+                Text("New applet")
                     .font(.system(size: 15))
                 Spacer(minLength: 0)
             }
