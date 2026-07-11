@@ -554,17 +554,15 @@ struct WorkspaceOverviewView: View {
 
     private func modeB() -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 20) {
                 headerB()
-                Divider()
-                actionsRowB()
                 if session.workspace.isMain {
-                    Divider()
+                    OverviewSectionLabel(title: "Project Runs")
                     projectRunsSection()
                 }
-                Spacer(minLength: 0)
             }
             .padding(24)
+            .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -573,49 +571,46 @@ struct WorkspaceOverviewView: View {
         }
     }
 
-    /// Branch name, linked repos, and working-tree status — the same
-    /// data the header git chip shows for the *active* workspace
-    /// (`ContentView.resolveGitStatus`), resolved here for *this*
-    /// workspace specifically since the Overview can be any workspace's
-    /// tab, active or not.
     private func headerB() -> some View {
-        let flow: FlowStatus = headStatus.map {
-            ($0.insertions > 0 || $0.deletions > 0) ? .running : .done
-        } ?? .queued
-        return HStack(alignment: .top, spacing: 14) {
-            Image(systemName: FlowStatusGlyph.symbol(flow))
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(FlowStatusGlyph.color(flow))
-                .frame(width: 26)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(session.workspace.name)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.primary)
-                HStack(spacing: 6) {
-                    if let headStatus {
-                        Text(headStatus.shortSHA)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+        let pill = OverviewModeBStatus.pill(
+            insertions: headStatus?.insertions, deletions: headStatus?.deletions)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                if let pill {
+                    OverviewStatusPill(text: pill.text, flow: pill.flow)
+                }
+                Spacer(minLength: 0)
+                makeRunControls(session.workspace)
+            }
+            Text(session.workspace.name)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .padding(.top, 13)
+            HStack(spacing: 9) {
+                if let headStatus {
+                    Text(headStatus.shortSHA)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    if headStatus.insertions > 0 || headStatus.deletions > 0 {
                         Text("·").foregroundStyle(.tertiary)
-                        if headStatus.insertions > 0 || headStatus.deletions > 0 {
-                            Text("+\(headStatus.insertions)").foregroundStyle(.green)
-                            Text("−\(headStatus.deletions)").foregroundStyle(.red)
-                        } else {
-                            Text("Clean")
-                        }
-                    }
-                    if !session.workspace.linkedRepoIDs.isEmpty {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+                        Text("+\(headStatus.insertions)").foregroundStyle(.green)
+                        Text("−\(headStatus.deletions)").foregroundStyle(.red)
                     }
                 }
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                if !session.workspace.linkedRepoIDs.isEmpty {
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.top, 9)
+            actionsRowB()
+                .padding(.top, 16)
         }
+        .overviewSurface(padding: 20)
     }
 
     /// This workspace's worktree, resolved the same way the header chip
@@ -637,27 +632,23 @@ struct WorkspaceOverviewView: View {
     }
 
     private func actionsRowB() -> some View {
-        HStack(spacing: 12) {
-            makeRunControls(session.workspace)
+        HStack(spacing: 10) {
+            Button(action: onNewPlan) {
+                Label("Plan something here", systemImage: "sparkles")
+            }
+            .buttonStyle(.soft)
             Button(action: session.createTab) {
                 Label("Open terminal", systemImage: "terminal")
             }
             .buttonStyle(.soft)
             BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
-            Button(action: onNewPlan) {
-                Label("Plan something here", systemImage: "sparkles")
-            }
-            .buttonStyle(.soft)
             Spacer(minLength: 0)
         }
         .controlSize(.regular)
     }
 
-    // MARK: - Main's mini-dashboard (project runs, Group 3)
+    // MARK: - Main's mini-dashboard (project runs)
 
-    /// Every active (non-merged) plan across the project as a compact
-    /// run row, most-urgent first — `main`'s home turf, so it doubles
-    /// as a project-wide status board.
     @ViewBuilder
     private func projectRunsSection() -> some View {
         let runs = ProjectRunsSummary.runs(
@@ -665,28 +656,24 @@ struct WorkspaceOverviewView: View {
             status: { docStore.status(for: $0, featureExists: featureExists) },
             featureName: featureName,
             relativePath: { docStore.relativePath(of: $0) })
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Project Runs")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .kerning(0.4)
-                .textCase(.uppercase)
-            if runs.isEmpty {
-                Text("No active runs. Kick one off from a plan in the sidebar.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(runs) { run in
-                        projectRunRow(run)
-                    }
+        if runs.isEmpty {
+            Text("No active runs. Kick one off from a plan in the sidebar.")
+                .font(.system(size: 13))
+                .foregroundStyle(.tertiary)
+                .overviewSurface(padding: 16)
+        } else {
+            VStack(spacing: 4) {
+                ForEach(runs) { run in
+                    projectRunRow(run)
                 }
             }
+            .overviewSurface(padding: 8)
         }
     }
 
     private func projectRunRow(_ run: ProjectRun) -> some View {
         let flow = flowStatus(for: run.status)
+        let complete = run.total > 0 && run.checked == run.total
         return Button { openRun(run) } label: {
             HStack(spacing: 12) {
                 Image(systemName: FlowStatusGlyph.symbol(flow))
@@ -708,9 +695,9 @@ struct WorkspaceOverviewView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     if run.total > 0 {
-                        ProgressView(value: Double(run.checked), total: Double(run.total))
-                            .controlSize(.mini)
-                            .frame(maxWidth: .infinity)
+                        OverviewProgressBar(
+                            fraction: Double(run.checked) / Double(max(1, run.total)),
+                            complete: complete)
                     }
                 }
                 Spacer(minLength: 0)
