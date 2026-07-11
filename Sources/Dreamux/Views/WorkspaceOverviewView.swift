@@ -115,6 +115,11 @@ struct WorkspaceOverviewView: View {
     /// "View changes" button, keyed by the task's line (mirrors the
     /// rail's now-deleted `hoveredTaskLine`).
     @State private var hoveredTaskLine: Int?
+    /// Task rows currently expanded to reveal their steps, keyed by the
+    /// task's line. The current task auto-expands once on open (see
+    /// `modeA`'s `.onAppear`); every other task starts collapsed so the
+    /// checklist reads as a scannable outline until you drill in.
+    @State private var expandedTaskLines: Set<Int> = []
     /// The row a *Course correct…* was fired from, driving the sheet —
     /// this view's own copy of `PlansSpecsSection.CorrectionTarget` (the
     /// checklist's task/phase rows are its only remaining trigger for
@@ -199,6 +204,24 @@ struct WorkspaceOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear {
+            // Auto-expand the current task the first time this Overview
+            // appears — the one row you most want to see steps for — while
+            // leaving the rest collapsed. Guarded on empty so re-appearing
+            // never re-opens a task the user has since collapsed.
+            if expandedTaskLines.isEmpty, let line = currentTaskLine(plan) {
+                expandedTaskLines.insert(line)
+            }
+        }
+    }
+
+    /// Line of the first task carrying an unchecked step — the run's
+    /// current task, and the one `modeA` auto-expands on open.
+    private func currentTaskLine(_ plan: PlanDoc) -> Int? {
+        plan.tasks
+            .filter { !$0.steps.isEmpty }
+            .first { $0.steps.contains { !$0.checked } }?
+            .line
     }
 
     // MARK: - Mode A hero
@@ -442,68 +465,118 @@ struct WorkspaceOverviewView: View {
         let checked = task.steps.filter(\.checked).count
         let total = task.steps.count
         let allChecked = checked == total
-        return Button {
-            onOpenDocAtLine(plan.fileURL, task.line)
-        } label: {
-            HStack(spacing: 11) {
-                Text("\(number)")
-                    .font(.system(size: 12.5).monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .frame(width: 20, alignment: .trailing)
-                checkGlyph(allChecked: allChecked, isCurrent: isCurrent)
-                Text(cleanTitle(task.title))
-                    .font(.system(size: 15))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1).truncationMode(.tail)
-                if isCurrent { currentTag() }
-                Spacer(minLength: 0)
-                if checked > 0 {
-                    let show = hoveredTaskLine == task.line
-                    Button {
-                        onViewTaskChanges(plan, task)
-                    } label: {
-                        Image(systemName: "plus.forwardslash.minus")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
+        let isExpanded = expandedTaskLines.contains(task.line)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                toggleExpanded(task.line)
+            } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 12)
+                    Text("\(number)")
+                        .font(.system(size: 12.5).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 20, alignment: .trailing)
+                    checkGlyph(allChecked: allChecked, isCurrent: isCurrent)
+                    Text(cleanTitle(task.title))
+                        .font(.system(size: 15))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1).truncationMode(.tail)
+                    if isCurrent { currentTag() }
+                    Spacer(minLength: 0)
+                    if checked > 0 {
+                        let show = hoveredTaskLine == task.line
+                        Button {
+                            onViewTaskChanges(plan, task)
+                        } label: {
+                            Image(systemName: "plus.forwardslash.minus")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("View this task's changes")
+                        .opacity(show ? 1 : 0)
+                        .allowsHitTesting(show)
                     }
-                    .buttonStyle(.plain)
-                    .help("View this task's changes")
-                    .opacity(show ? 1 : 0)
-                    .allowsHitTesting(show)
+                    Text("\(checked)/\(total)")
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.primary.opacity(0.05)))
                 }
-                Text("\(checked)/\(total)")
-                    .font(.system(size: 12).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.primary.opacity(0.05)))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isCurrent
-                      ? Color.accentColor.opacity(0.08)
-                      : (hoveredTaskLine == task.line ? Color.primary.opacity(0.04) : Color.clear))
-        }
-        .contextMenu {
-            Button("View changes") { onViewTaskChanges(plan, task) }
-            Button("Course correct…") {
-                correcting = CorrectionTarget(
-                    plan: plan,
-                    anchor: .task(line: task.line),
-                    description: task.title.isEmpty ? "this task" : task.title)
+            .buttonStyle(.plain)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isCurrent
+                          ? Color.accentColor.opacity(0.08)
+                          : (hoveredTaskLine == task.line ? Color.primary.opacity(0.04) : Color.clear))
+            }
+            .contextMenu {
+                Button("Open in plan") { onOpenDocAtLine(plan.fileURL, task.line) }
+                Button("View changes") { onViewTaskChanges(plan, task) }
+                Button("Course correct…") {
+                    correcting = CorrectionTarget(
+                        plan: plan,
+                        anchor: .task(line: task.line),
+                        description: task.title.isEmpty ? "this task" : task.title)
+                }
+            }
+            .onHover { inside in
+                if inside { hoveredTaskLine = task.line }
+                else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
+            }
+            if isExpanded {
+                stepsList(task)
             }
         }
-        .onHover { inside in
-            if inside { hoveredTaskLine = task.line }
-            else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
+    }
+
+    /// The task's steps, revealed when its row is expanded — a check glyph
+    /// (green when done) and the readable step title, wrapping rather than
+    /// truncating since a step line can be a full sentence. Indented one
+    /// level past the disclosure chevron so it reads as belonging to the
+    /// task above it.
+    private func stepsList(_ task: PlanTask) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(Array(task.steps.enumerated()), id: \.offset) { _, step in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: step.checked ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(step.checked ? Color.green : Color.secondary)
+                    Text(step.title)
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(step.checked ? .secondary : .primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.leading, 43)
+        .padding(.trailing, 14)
+        .padding(.top, 4)
+        .padding(.bottom, 10)
+    }
+
+    /// Flip a task row between collapsed and expanded, animated so the
+    /// chevron rotation and the steps' reveal move together.
+    private func toggleExpanded(_ line: Int) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            if expandedTaskLines.contains(line) {
+                expandedTaskLines.remove(line)
+            } else {
+                expandedTaskLines.insert(line)
+            }
         }
     }
 
