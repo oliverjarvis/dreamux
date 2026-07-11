@@ -183,63 +183,153 @@ struct WorkspaceOverviewView: View {
     // MARK: - Mode A
 
     private func modeA(_ plan: PlanDoc) -> some View {
-        // The workspace this Overview belongs to unarguably exists (we're
-        // rendering its tab), so the plan behind it is never `.ready`/
-        // `.specOnly` in practice — `featureExists` is trivially true here.
+        // The workspace exists (we're rendering its tab), so `featureExists`
+        // is trivially true here.
         let status = docStore.status(for: plan, featureExists: { _ in true })
+        let hero = RunHeroState.resolve(status: status, hasLiveAgent: hasLiveAgent(session.workspace))
+        let tasks = plan.tasks.filter { !$0.steps.isEmpty }
         return ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                header(plan, status: status)
-                Divider()
-                specAndProgress(plan)
-                Divider()
+            VStack(alignment: .leading, spacing: 20) {
+                heroCard(plan, hero: hero)
+                OverviewSectionLabel(title: "Tasks", trailing: "\(tasks.count) tasks")
                 checklist(plan)
-                Divider()
-                actionsRow(plan)
-                gateSection(plan)
             }
             .padding(24)
+            .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    // MARK: - Header
+    // MARK: - Mode A hero
 
-    private func header(_ plan: PlanDoc, status: PlanStatus) -> some View {
+    private func heroCard(_ plan: PlanDoc, hero: RunHeroState) -> some View {
         let startedAt = docStore.ledger.recordForPlan(docStore.relativePath(of: plan))?.startedAt
-        let flow = flowStatus(for: status)
-        return HStack(alignment: .top, spacing: 14) {
-            Image(systemName: FlowStatusGlyph.symbol(flow))
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(FlowStatusGlyph.color(flow))
-                .frame(width: 26)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(plan.title)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.primary)
-                HStack(spacing: 6) {
-                    Text(status.label)
-                    if let startedAt {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(startedAt, style: .relative)
-                    }
-                    Text("·").foregroundStyle(.tertiary)
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(session.workspace.name)
-                    if !session.workspace.linkedRepoIDs.isEmpty {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
-                    }
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                OverviewStatusPill(text: hero.pillText, flow: hero.flow,
+                                   pulse: hero.phase == .running)
+                Spacer(minLength: 0)
+                if let startedAt {
+                    (Text("Started ") + Text(startedAt, style: .relative) + Text(" ago"))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.tertiary)
                 }
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                makeRunControls(session.workspace)
+            }
+            Text(plan.title)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 13)
+            heroMeta(plan)
+                .padding(.top, 9)
+            if plan.totalSteps > 0 {
+                heroProgress(plan, complete: hero.progressComplete)
+                    .padding(.top, 17)
+            }
+            if hero.phase == .merged {
+                mergedNote()
+                    .padding(.top, 16)
+            }
+            heroActions(plan, hero: hero)
+                .padding(.top, 16)
+        }
+        .overviewSurface(padding: 20)
+    }
+
+    private func heroMeta(_ plan: PlanDoc) -> some View {
+        let chips = docChips(for: plan)
+        return HStack(spacing: 9) {
+            Label(session.workspace.name, systemImage: "arrow.triangle.branch")
+                .labelStyle(.titleAndIcon)
+            if !session.workspace.linkedRepoIDs.isEmpty {
+                Text("·").foregroundStyle(.tertiary)
+                Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+            }
+            if !chips.isEmpty {
+                Text("·").foregroundStyle(.tertiary)
+                Image(systemName: "paperclip").font(.system(size: 11)).foregroundStyle(.tertiary)
+                ForEach(Array(chips.enumerated()), id: \.offset) { index, chip in
+                    if index > 0 { Text("·").foregroundStyle(.tertiary) }
+                    Button { onOpenDoc(chip.url) } label: {
+                        Text(chip.label).underline()
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             Spacer(minLength: 0)
         }
+        .font(.system(size: 13))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+
+    private func heroProgress(_ plan: PlanDoc, complete: Bool) -> some View {
+        let fraction = Double(plan.checkedSteps) / Double(max(1, plan.totalSteps))
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("\(plan.checkedSteps) / \(plan.totalSteps) steps")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(complete ? Color.green : Color.secondary)
+                Spacer(minLength: 0)
+                Text("\(Int((fraction * 100).rounded()))%")
+                    .font(.system(size: 12.5).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            OverviewProgressBar(fraction: fraction, complete: complete)
+        }
+    }
+
+    private func mergedNote() -> some View {
+        let base = repoStore.repositories.first?.defaultBranch ?? "main"
+        return HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.green)
+            Text("Merged — this run's changes are on \(base).")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func heroActions(_ plan: PlanDoc, hero: RunHeroState) -> some View {
+        HStack(spacing: 10) {
+            switch hero.primary {
+            case .run:
+                RunPlanButton { onRunPlan(plan) }
+            case .running:
+                RunningIndicator()
+            case .reviewAndMerge:
+                Button {
+                    gateActions.requestMerge(session.workspace.id)
+                } label: {
+                    Label(mergePrimaryLabel(plan), systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.borderedProminent)
+            case .noPrimary:
+                EmptyView()
+            }
+            BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
+            Button(action: openOrFocusTerminal) {
+                Label("Open terminal", systemImage: "terminal")
+            }
+            .buttonStyle(.soft)
+            Spacer(minLength: 0)
+        }
+        .controlSize(.regular)
+    }
+
+    /// "Merge & continue" when this plan is the queue's current gate (so the
+    /// queue advances), else "Review & merge". Both call the same
+    /// `gateActions.requestMerge`, which itself routes queue-gated vs. off-queue.
+    private func mergePrimaryLabel(_ plan: PlanDoc) -> String {
+        if planQueue.state == .atGate,
+           planQueue.currentPlanPath == docStore.relativePath(of: plan) {
+            return "Merge & continue"
+        }
+        return "Review & merge"
     }
 
     /// `PlanStatus` → `FlowStatus`, so the header can reuse
@@ -251,41 +341,6 @@ struct WorkspaceOverviewView: View {
         case .awaitingReview: return .waiting
         case .merged: return .done
         case .inProgress, .ready, .specOnly: return .queued
-        }
-    }
-
-    // MARK: - Spec + progress
-
-    private func specAndProgress(_ plan: PlanDoc) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            let chips = docChips(for: plan)
-            if !chips.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                    ForEach(Array(chips.enumerated()), id: \.offset) { index, chip in
-                        if index > 0 {
-                            Text("·").foregroundStyle(.tertiary)
-                        }
-                        Button { onOpenDoc(chip.url) } label: {
-                            Text(chip.label)
-                                .underline()
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 13, weight: .medium))
-            }
-            if plan.totalSteps > 0 {
-                Text("\(plan.checkedSteps) / \(plan.totalSteps) steps")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                ProgressView(value: Double(plan.checkedSteps), total: Double(plan.totalSteps))
-                    .frame(maxWidth: .infinity)
-            }
         }
     }
 
@@ -452,34 +507,6 @@ struct WorkspaceOverviewView: View {
         }
     }
 
-    // MARK: - Actions
-
-    private func actionsRow(_ plan: PlanDoc) -> some View {
-        // Lime pill runs the *plan* (start/resume the agent); shown while the
-        // plan is incomplete AND no agent is live on it (a `.running` status
-        // alone just means it was started). `makeRunControls` is the
-        // separate run.toml services control.
-        let status = docStore.status(for: plan, featureExists: featureExists)
-        let incomplete = status == .ready || status == .inProgress || status == .running
-        let live = hasLiveAgent(session.workspace)
-        let canRun = incomplete && !live
-        return HStack(spacing: 12) {
-            if canRun {
-                RunPlanButton { onRunPlan(plan) }
-            } else if incomplete && live {
-                RunningIndicator()
-            }
-            makeRunControls(session.workspace)
-            Button(action: openOrFocusTerminal) {
-                Label("Open terminal", systemImage: "terminal")
-            }
-            .buttonStyle(.soft)
-            BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
-            Spacer(minLength: 0)
-        }
-        .controlSize(.regular)
-    }
-
     /// Reuse an already-open shell tab if this workspace has one; otherwise
     /// open a fresh one. No new session machinery — just the existing
     /// controller/tabSession lookups `WorkspaceSession` already exposes.
@@ -491,16 +518,6 @@ struct WorkspaceOverviewView: View {
             TerminalFocus.focusVisibleTerminal()
         } else {
             session.createTab()
-        }
-    }
-
-    // MARK: - Gate
-
-    @ViewBuilder
-    private func gateSection(_ plan: PlanDoc) -> some View {
-        if planQueue.state == .atGate,
-           planQueue.currentPlanPath == docStore.relativePath(of: plan) {
-            GateActionCard(workspaceID: session.workspace.id, mergeActionable: true, actions: gateActions)
         }
     }
 
