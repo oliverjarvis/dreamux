@@ -135,6 +135,11 @@ struct WorkspaceOverviewView: View {
     /// `modeA`'s `.onAppear`); every other task starts collapsed so the
     /// checklist reads as a scannable outline until you drill in.
     @State private var expandedTaskLines: Set<Int> = []
+    /// Whether the one-time current-task auto-expand has run for this view
+    /// instance. A plain `isEmpty` guard would re-seed if the user collapsed
+    /// the auto-expanded task and expanded nothing else; this fires the seed
+    /// exactly once so a deliberate collapse always sticks.
+    @State private var didSeedExpansion = false
     /// The row a *Course correct…* was fired from, driving the sheet —
     /// this view's own copy of `PlansSpecsSection.CorrectionTarget` (the
     /// checklist's task/phase rows are its only remaining trigger for
@@ -227,9 +232,12 @@ struct WorkspaceOverviewView: View {
         .onAppear {
             // Auto-expand the current task the first time this Overview
             // appears — the one row you most want to see steps for — while
-            // leaving the rest collapsed. Guarded on empty so re-appearing
-            // never re-opens a task the user has since collapsed.
-            if expandedTaskLines.isEmpty, let line = currentTaskLine(plan) {
+            // leaving the rest collapsed. Fires exactly once (guarded on
+            // `didSeedExpansion`, not on emptiness) so a later collapse of
+            // that row is never undone by a re-appear.
+            guard !didSeedExpansion else { return }
+            didSeedExpansion = true
+            if let line = currentTaskLine(plan) {
                 expandedTaskLines.insert(line)
             }
         }
