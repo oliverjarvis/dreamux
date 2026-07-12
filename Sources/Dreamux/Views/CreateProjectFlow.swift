@@ -46,6 +46,10 @@ struct CreateProjectSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New Project")
                 .font(.headline)
+            SheetScopeBadge(icon: {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11, weight: .medium))
+            }, text: "Global · new top-level project")
             Text("A folder is created under ~/Documents/Dreamux with a git repository inside.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

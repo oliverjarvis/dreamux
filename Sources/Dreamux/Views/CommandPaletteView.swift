@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The ⌘K palette: a centered panel over a scrim, fuzzy-searching
-/// projects, workspaces & plans, commands, and file names. Pure
-/// presentation — all data and actions arrive through `PaletteModel`;
-/// executing any row calls `onDismiss` after the action runs.
+/// The ⌘K palette: a centered panel, fuzzy-searching projects,
+/// workspaces & plans, commands, and file names. Pure presentation — all
+/// data and actions arrive through `PaletteModel`; executing any row
+/// calls `onDismiss` after the action runs.
 struct CommandPaletteView: View {
     @Bindable var model: PaletteModel
     let onDismiss: () -> Void
@@ -13,7 +13,11 @@ struct CommandPaletteView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .top) {
-                Color.black.opacity(0.2)
+                // Invisible hit target spanning the full window so a
+                // click anywhere outside the panel dismisses — no
+                // dimming scrim (it never reached full window height).
+                Color.clear
+                    .contentShape(Rectangle())
                     .onTapGesture(perform: onDismiss)
                 panel
                     .frame(width: 600)

@@ -254,6 +254,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showNewPlan) {
             NewPlanSheet(
+                project: session.project,
                 autoRunParallel: Binding(
                     get: { layout.autoRunParallel },
                     set: { layout.autoRunParallel = $0 }

@@ -1194,6 +1194,9 @@ struct RunPlanSheet: View {
 /// Collects the idea, then the caller opens the planning terminal with
 /// a brainstorming kickoff carrying it.
 struct NewPlanSheet: View {
+    /// The project this plan lands in — badged at the top of the sheet so
+    /// it reads distinctly from ⌘N's app-global "New Project" sheet.
+    let project: Project
     /// Per-project auto-run toggle (spec: Decisions §1). Bound to
     /// `SidebarLayoutStore.autoRunParallel` so a change persists immediately;
     /// default OFF. When ON, a discovered `**Runs:** parallel` plan launches
@@ -1208,6 +1211,10 @@ struct NewPlanSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New Plan")
                 .font(.title3.weight(.semibold))
+            SheetScopeBadge(icon: {
+                ProjectGlyph(name: project.name, size: 14,
+                             symbol: project.symbol, tint: project.glyphTint())
+            }, text: "\(project.name) · this project only")
             Text("Describe the idea. A claude planning session opens in a project terminal, brainstorms it with you, and writes the spec and plan into this project's docs/ folder — they'll appear in the sidebar.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

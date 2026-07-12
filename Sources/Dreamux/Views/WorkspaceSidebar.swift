@@ -151,6 +151,7 @@ struct WorkspaceSidebar: View {
         }
         .sheet(isPresented: $showNewPlan) {
             NewPlanSheet(
+                project: repoStore.project,
                 autoRunParallel: $layout.autoRunParallel,
                 onSubmit: { idea in
                     showNewPlan = false
