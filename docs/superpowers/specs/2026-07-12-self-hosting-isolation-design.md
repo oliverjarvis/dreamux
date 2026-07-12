@@ -194,3 +194,4 @@ the e2e harness.
   it may bind an MCP to the wrong instance. Revisit once tagged builds are common.
 - **FileTreeStore not pruning `.build`.**
 - **Global Claude session registry** (shared across instances; not bundle-keyed).
+- **Keychain credential namespace** (`SecretStore.swift:31` — `KeychainSecretStore.service = "com.dreamux.Dreamux.connection"`) is a hardcoded constant, not keyed to the runtime bundle id, so a tagged instance shares the credential namespace with the untagged app. Non-blocking (Keychain is concurrency-safe; items are keyed by connection id and the now-isolated `connections.json` files don't share ids), but it makes the "connections.json isolated for free" claim only partially true. Key the service to the bundle id if per-instance credential isolation is ever wanted.
