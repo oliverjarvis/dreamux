@@ -169,3 +169,78 @@ enum GhOperations {
         }
     }
 }
+
+extension GhOperations {
+    /// Decoded `gh pr view <branch> --json
+    /// isDraft,reviewDecision,statusCheckRollup,state,url`. Internal so the
+    /// mapping to PRLifecycle is unit-testable straight from gh JSON.
+    struct PRDetailPayload: Decodable, Equatable {
+        let state: String
+        let url: String
+        let isDraft: Bool
+        let reviewDecision: String?        // "", APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED
+        let statusCheckRollup: [Check]?
+
+        struct Check: Decodable, Equatable {
+            var status: String?      // CheckRun: QUEUED/IN_PROGRESS/COMPLETED
+            var conclusion: String?  // CheckRun: SUCCESS/FAILURE/...
+            var state: String?       // StatusContext: SUCCESS/FAILURE/PENDING/...
+        }
+
+        enum ChecksVerdict { case none, running, passing, failing }
+
+        var checksVerdict: ChecksVerdict {
+            guard let rollup = statusCheckRollup, !rollup.isEmpty else { return .none }
+            var running = false
+            for c in rollup {
+                if let s = c.state?.uppercased() {           // StatusContext
+                    switch s {
+                    case "FAILURE", "ERROR": return .failing
+                    case "PENDING", "EXPECTED": running = true
+                    default: break
+                    }
+                } else {                                      // CheckRun
+                    if (c.status?.uppercased() ?? "") != "COMPLETED" { running = true; continue }
+                    switch c.conclusion?.uppercased() {
+                    case "FAILURE", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE", "ACTION_REQUIRED":
+                        return .failing
+                    default: break                            // SUCCESS/NEUTRAL/SKIPPED
+                    }
+                }
+            }
+            return running ? .running : .passing
+        }
+
+        /// Precedence, first match wins: merged, closed, draft,
+        /// changesRequested, checksFailed, checksRunning, approved, open.
+        var lifecycle: PRLifecycle {
+            switch state.uppercased() {
+            case "MERGED": return .merged
+            case "CLOSED": return .closed
+            default: break
+            }
+            if isDraft { return .draft }
+            if reviewDecision?.uppercased() == "CHANGES_REQUESTED" { return .changesRequested }
+            switch checksVerdict {
+            case .failing: return .checksFailed
+            case .running: return .checksRunning
+            case .none, .passing: break
+            }
+            if reviewDecision?.uppercased() == "APPROVED" { return .approved }
+            return .open
+        }
+    }
+
+    /// Richer sibling of `prStatus`: the full lifecycle for the poller.
+    /// nil when there's no PR / gh unavailable — treated as "nothing to
+    /// report", never an error.
+    static func prDetail(branch: String, in worktreeURL: URL) async -> (lifecycle: PRLifecycle, url: String)? {
+        guard let output = try? await runGh(
+            ["pr", "view", branch, "--json", "isDraft,reviewDecision,statusCheckRollup,state,url"],
+            in: worktreeURL
+        ), let data = output.data(using: .utf8),
+           let payload = try? JSONDecoder().decode(PRDetailPayload.self, from: data)
+        else { return nil }
+        return (payload.lifecycle, payload.url)
+    }
+}
