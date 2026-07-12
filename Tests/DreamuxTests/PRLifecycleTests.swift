@@ -36,4 +36,11 @@ final class PRLifecycleTests: XCTestCase {
             rollup: #"[{"status":"COMPLETED","conclusion":"SUCCESS"}]"#)), .approved)
     }
     func testOpenIsDefault() throws { XCTAssertEqual(try lifecycle(json()), .open) }
+
+    func testEveryLifecycleHasSymbolAndLabel() {
+        for s in PRLifecycle.allCases {
+            XCTAssertFalse(PRStatusGlyph.symbol(s).isEmpty, "\(s)")
+            XCTAssertFalse(PRStatusGlyph.label(s).isEmpty, "\(s)")
+        }
+    }
 }
