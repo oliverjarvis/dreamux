@@ -7,6 +7,12 @@ import SwiftUI
 struct FlowsOverviewView: View {
     @ObservedObject var flows: FlowStore
     let planLaneInputs: () -> [PlanLaneInput]
+    /// PR lifecycle per workspace (`ContentView.prStatesByWorkspace`),
+    /// re-keyed onto `Lane.id` by `FlowsBoard.compose` — a plain value
+    /// (not a closure) since it's already the cheap re-keyed dictionary,
+    /// unlike `planLaneInputs`/`projectGraph` which recompute from raw
+    /// store state.
+    var prStatesByWorkspace: [UUID: PRLaneState] = [:]
     /// Grafts a plan lane's live subagents (Task 3's `RunLaneGraft`) onto its
     /// task nodes before the lane reaches `FlowsBoard.compose` — a closure
     /// (not a stored value) so it always sees live `FlowStore`/`DocStore`
@@ -39,7 +45,8 @@ struct FlowsOverviewView: View {
         let inputs = planLaneInputs()
         let board = FlowsBoard.compose(
             planLanes: PlanFlowBuilder.lanes(from: inputs).map(graftSubagents),
-            sessionLanes: flows.flows
+            sessionLanes: flows.flows,
+            prStatesByWorkspace: prStatesByWorkspace
         )
         // Which plan lanes may offer "merge & continue" (Task 2's
         // predicate), keyed by lane id so `lanesList` can look it up

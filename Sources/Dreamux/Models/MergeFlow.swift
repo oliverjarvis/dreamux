@@ -113,6 +113,11 @@ final class MergeFlow {
     /// from the sidebar, delete the now-empty `features/<name>/`
     /// aggregation directory, and dismiss the sheet.
     let onAllCleanedUp: () -> Void
+    /// Fires right after a PR is successfully opened in `publish`. The
+    /// sheet's parent uses it to start tracking the feature on
+    /// `ProjectSession.prStatus` so the Flows lane picks up the PR
+    /// badge without waiting for the next app launch's seed pass.
+    let onPublished: (Repository, String) -> Void
 
     private(set) var states: [String: MergeRepoState] = [:]
     private(set) var commitErrors: [String: String] = [:]
@@ -138,13 +143,15 @@ final class MergeFlow {
         repos: [Repository],
         project: Project,
         onRepoCleanedUp: @escaping (Repository) -> Void = { _ in },
-        onAllCleanedUp: @escaping () -> Void = {}
+        onAllCleanedUp: @escaping () -> Void = {},
+        onPublished: @escaping (Repository, String) -> Void = { _, _ in }
     ) {
         self.workspace = workspace
         self.repos = repos
         self.project = project
         self.onRepoCleanedUp = onRepoCleanedUp
         self.onAllCleanedUp = onAllCleanedUp
+        self.onPublished = onPublished
     }
 
     /// State for one repo, defaulting to `.pending` the same way the
@@ -394,6 +401,7 @@ final class MergeFlow {
                     in: featureWorktreeURL(for: repo)
                 )
                 states[repo.name] = .prOpen(url: url)
+                onPublished(repo, url)
             } catch is CancellationError {
                 states[repo.name] = .failed(message: "Cancelled.")
             } catch {

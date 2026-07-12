@@ -14,6 +14,10 @@ struct WorkspaceSidebar: View {
     /// Only to focus a runner's logs from the run-control popover
     /// (`showLogs`) — sets `pendingSourceFocus` and flips to Signals.
     let signals: SignalStore
+    /// `ProjectSession.prStatus` — the merge sheet's publish path tracks
+    /// a feature here the instant its PR opens, so the Flows lane picks
+    /// up the badge without waiting for the next launch's seed pass.
+    let prStatus: PRStatusStore
     @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
     @Bindable var docStore: DocStore
@@ -1050,6 +1054,14 @@ struct WorkspaceSidebar: View {
             },
             onAllCleanedUp: {
                 finalizeFeatureCleanup(workspace)
+            },
+            onPublished: { repo, _ in
+                // The PR's URL itself isn't needed here — the next
+                // `PRStatusPoller` pass (~10s) fetches lifecycle + url
+                // together via `gh pr view` and populates the store.
+                prStatus.track(
+                    feature: workspace.name,
+                    worktreeURL: repo.rootURL.appendingPathComponent(workspace.name))
             },
             onDismiss: { pendingMerge = nil },
             emphasizePublish: emphasizePublish

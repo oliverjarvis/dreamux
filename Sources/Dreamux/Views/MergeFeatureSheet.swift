@@ -33,6 +33,7 @@ struct MergeFeatureSheet: View {
         onOpenConflictTab: @escaping (URL, String) -> Void,
         onRepoCleanedUp: @escaping (Repository) -> Void = { _ in },
         onAllCleanedUp: @escaping () -> Void = {},
+        onPublished: @escaping (Repository, String) -> Void = { _, _ in },
         onDismiss: @escaping () -> Void,
         emphasizePublish: Bool = false
     ) {
@@ -44,7 +45,8 @@ struct MergeFeatureSheet: View {
             repos: repos,
             project: project,
             onRepoCleanedUp: onRepoCleanedUp,
-            onAllCleanedUp: onAllCleanedUp
+            onAllCleanedUp: onAllCleanedUp,
+            onPublished: onPublished
         ))
     }
 

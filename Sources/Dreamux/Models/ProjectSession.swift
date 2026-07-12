@@ -34,6 +34,11 @@ final class ProjectSession {
     /// The global Applet Studio applet library — the source for the Adopt path
     /// and the destination for Publish.
     let appLibrary: AppLibraryStore
+    /// The persistent PR-status axis (Task 4): latest known lifecycle +
+    /// url per tracked feature. Fed by `prStatusPoller` below and by
+    /// `WorkspaceSidebar`'s merge sheet the instant a publish succeeds;
+    /// `ContentView` re-keys it onto workspace ids for `FlowsBoard.compose`.
+    let prStatus = PRStatusStore()
 
     /// Live sessions for open applets, cached by applet id so a `WKWebView`
     /// and its builder-agent terminal survive SwiftUI redraws — the same
@@ -93,6 +98,10 @@ final class ProjectSession {
     /// ARC-teardown reason as `registryPoller`; `startPolling`'s
     /// `onSnapshot` reconciles it on every poll.
     @ObservationIgnored private var flowTailerPool: FlowTailerPool?
+    /// ~10s PR-status heartbeat over `prStatus`'s tracked set. Held for
+    /// the same ARC-teardown reason as `registryPoller` — it cancels its
+    /// own polling `Task` in its own `deinit`.
+    @ObservationIgnored private var prStatusPoller: PRStatusPoller?
 
     init(project: Project) {
         self.project = project
@@ -528,6 +537,22 @@ final class ProjectSession {
         )
         registryPoller = poller
         poller.startPolling()
+
+        // 6. PR-status heartbeat: only tracked features (publish-flagged
+        // by `WorkspaceSidebar`, or seeded in `bootstrapIfNeeded` for
+        // branches already pushed before this launch) ever hit `gh`.
+        let prStore = self.prStatus
+        let prPoller = PRStatusPoller(
+            tracked: { [weak prStore] in prStore?.trackedFeatures ?? [] },
+            fetch: { feature, worktree in
+                guard let detail = await GhOperations.prDetail(branch: feature, in: worktree)
+                else { return nil }
+                return PRStatusStore.Entry(lifecycle: detail.lifecycle, url: detail.url)
+            },
+            onSnapshot: { [weak prStore] snapshot in prStore?.apply(snapshot) }
+        )
+        prStatusPoller = prPoller
+        prPoller.startPolling()
     }
 
     private func installSignalForwarding(projectDir: String, bus: SignalBus) {
@@ -652,6 +677,30 @@ final class ProjectSession {
         didBootstrap = true
         Task {
             await store.reloadFeatures(in: project, repoStore: repoStore)
+            await seedPRTracking()
+        }
+    }
+
+    /// One-time PR-tracking seed (Task 8), run once `reloadFeatures` has
+    /// repopulated `store.workspaces` from disk: a feature branch pushed
+    /// in a previous launch (or from outside Dreamux) would otherwise
+    /// stay untracked — and hence badge-less on the Flows lane — until
+    /// the user re-opens the merge sheet and republishes. For each
+    /// feature workspace, walk its linked repos in order and track the
+    /// first one whose branch already exists on `origin` (an offline
+    /// probe — no `gh` call here; `prStatusPoller` does the real fetch).
+    private func seedPRTracking() async {
+        for workspace in store.workspaces where !workspace.isMain {
+            for repoName in workspace.linkedRepoIDs {
+                guard let repo = repoStore.repositories.first(where: { $0.name == repoName })
+                else { continue }
+                guard await GitOperations.hasRemoteBranch(workspace.name, in: repo.rootURL)
+                else { continue }
+                prStatus.track(
+                    feature: workspace.name,
+                    worktreeURL: repo.rootURL.appendingPathComponent(workspace.name))
+                break
+            }
         }
     }
 

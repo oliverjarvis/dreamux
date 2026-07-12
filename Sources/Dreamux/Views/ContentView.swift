@@ -114,6 +114,21 @@ struct ContentView: View {
 
     private var currentProject: Project? { projects.project(id: currentProjectID) }
 
+    /// PR lifecycle glue for the Flows board, keyed by workspace id —
+    /// `session.prStatus` keys by feature *name* (== branch), so this
+    /// re-keys onto `store.workspaces`' ids the way `FlowsBoard.Lane`
+    /// needs. Pulled out of `mainPane`'s `.flows` case (rather than
+    /// inlined) so a `Dictionary(uniqueKeysWithValues:)` literal doesn't
+    /// push that switch's expression over the type checker's budget —
+    /// the same reasoning as `mergeSheet(for:)` in `WorkspaceSidebar`.
+    private var prStatesByWorkspace: [UUID: PRLaneState] {
+        Dictionary(uniqueKeysWithValues: store.workspaces.compactMap { ws in
+            session.prStatus.state(for: ws.name).map {
+                (ws.id, PRLaneState(lifecycle: $0.lifecycle, url: $0.url))
+            }
+        })
+    }
+
     /// The window's whole layout tree plus every sheet/alert modifier that
     /// doesn't need to chain with the palette's own state below — split
     /// out of `body` because the combined chain (this stack + the palette
@@ -164,6 +179,7 @@ struct ContentView: View {
                         repoStore: repoStore,
                         runners: runners,
                         signals: signals,
+                        prStatus: session.prStatus,
                         layout: layout,
                         sidebarMode: $sidebarMode,
                         docStore: docStore,
@@ -472,6 +488,7 @@ struct ContentView: View {
             FlowsOverviewView(
                 flows: session.flows,
                 planLaneInputs: planLaneInputs,
+                prStatesByWorkspace: prStatesByWorkspace,
                 graftSubagents: { lane in
                     // A graft closure keyed by lane id ("plan-<planPath>"). For each
                     // plan with a live workspace, pull its subagents (slice 1) and
