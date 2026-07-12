@@ -17,6 +17,15 @@
 - Double-click maps `AppleActionOnDoubleClick`: `"Minimize"` → miniaturize, `"None"` → nothing, everything else (nil/"Maximize"/"Fill"/junk) → `performZoom` (never fullscreen).
 - Installs unconditionally (also in e2e mode — the driver never synthesizes mouse events, so scenarios are unaffected; the full e2e suite is the regression gate).
 - Commit style `Prefix: summary`; stage ONLY named files; never touch `.claude/worktrees/`.
+- **2026-07-12 deviation (final-review fix wave, approved rationale):** the
+  40pt full-width top strip and the unconditional empty-list-is-chrome
+  rule below (Task 1, Step 3's embedded listing) shipped differently than
+  written — see the dated deviation note in
+  `docs/superpowers/specs/2026-07-12-window-chrome-interactions-design.md`
+  §2 for the full rationale and the shipped shape (rail-scoped strip,
+  left-edge-only empty-list rule, corrected Applet Studio claim). The
+  code listing below is left as-is (superseded); the spec note is the
+  guard.
 
 ---
 

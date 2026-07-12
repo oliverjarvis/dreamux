@@ -63,6 +63,26 @@ For each left mouse-down:
      the project window that is exactly the projects rail below its last
      row; in Applet Studio, its own list's empty body.
    Otherwise pass the event through.
+
+   **2026-07-12 deviation (final-review fix wave):** the full-width 40pt
+   strip proved impossible to ship — plain SwiftUI controls are invisible
+   to AppKit's hit-test tree (they resolve to the enclosing
+   `NSHostingView`, empirically verified), and Flush-mode header controls
+   (`AppearanceSettings.edgeInsetsKey` = "Flush") sit just 9pt from the
+   window's physical top edge, so no strip height is both wide enough to
+   be useful and short enough to clear them. The shipped strip is instead
+   rail-scoped: `x ≤ 210` (the expanded projects rail's fixed width),
+   `y > window.frame.height − 30`. Separately, the empty-list rule above
+   is bounded to left-edge sidebars only (`table.convert(.zero, to:
+   nil).x < 1`) — a content-area list (file tree, signals log, diff rail)
+   also resolves `row(at:) == -1` below its last row, and those clicks
+   must stay ordinary. And the Applet Studio claim above is corrected:
+   its library column is a `ScrollView` + `VStack`, not a native `List`,
+   so the empty-list rule never fires there — Applet Studio's chrome
+   coverage is top-strip only. See
+   `Sources/Dreamux/Shell/WindowChromeInteractions.swift` for the
+   shipped constants (`topStripHeight`, `railStripXBound`) and the
+   left-edge guard in `classify`.
 5. **Act:**
    - `clickCount >= 2` → perform `TitlebarDoubleClickAction.from(
      UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick"))`:

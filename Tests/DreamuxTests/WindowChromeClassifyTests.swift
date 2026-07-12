@@ -65,6 +65,22 @@ final class WindowChromeClassifyTests: XCTestCase {
             .chrome)
     }
 
+    /// Content-area lists (file tree, signals log, diff rail) are not
+    /// flush against the window's left edge; their empty tail must NOT be
+    /// classified as chrome, unlike the left-edge-sidebar case above.
+    func testEmptyTableAwayFromLeftEdgeIsNotChrome() {
+        let (window, boundary) = makeWindow()
+        let table = NSTableView(frame: NSRect(x: 300, y: 0, width: 200, height: 300))
+        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("col")))
+        boundary.addSubview(table)
+        let point = NSPoint(x: 350, y: 50)
+        let hit = boundary.hitTest(point)!
+        XCTAssertNotEqual(
+            WindowChromeInteractions.classify(
+                hit: hit, locationInWindow: point, window: window, boundary: boundary),
+            .chrome)
+    }
+
     func testTableWithOneRowHitAtRowIsInteractive() {
         let (window, boundary) = makeWindow()
         let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 200, height: 300))

@@ -46,10 +46,11 @@ enum WindowChromeInteractions {
               !window.isSheet,
               let frameView = window.contentView?.superview else { return false }
         // `hitTest(_:)` is documented to take a point in the RECEIVER'S
-        // SUPERVIEW's coordinate space. `frameView` is the window's root
-        // content view, whose superview is the window's own NSThemeFrame —
-        // i.e. window-coordinate space — so `event.locationInWindow` is
-        // already the right space; no conversion needed.
+        // SUPERVIEW's coordinate space. `frameView` (== window.contentView's
+        // superview) IS the window's theme frame — the hierarchy's root
+        // view, with no superview of its own — so its coordinate space is
+        // already the window's base coordinate space, exactly what
+        // `event.locationInWindow` is expressed in; no conversion needed.
         guard let hit = frameView.hitTest(event.locationInWindow) else { return false }
         guard classify(
             hit: hit, locationInWindow: event.locationInWindow, window: window, boundary: frameView
@@ -57,12 +58,16 @@ enum WindowChromeInteractions {
             return false
         }
 
+        // A native titlebar click activates the window; consuming the event
+        // bypasses that, so restore it explicitly.
+        if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+
         if event.clickCount >= 2 {
             switch TitlebarDoubleClickAction.from(
                 defaultsValue: UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick")
             ) {
-            case .zoom: window.performZoom(nil)
-            case .minimize: window.performMiniaturize(nil)
+            case .zoom: if window.styleMask.contains(.resizable) { window.performZoom(nil) }
+            case .minimize: if window.styleMask.contains(.miniaturizable) { window.performMiniaturize(nil) }
             case .none: break
             }
         } else {
@@ -84,7 +89,8 @@ enum WindowChromeInteractions {
     ///     `Color.clear.frame(height: 26)` spacer plus 10pt of `VStack`
     ///     spacing precedes `railToggle`, so its top edge sits at y = 36.
     /// 30 clears both (with the collapsed stub keeping a 6pt margin), and
-    /// `classify` uses a strict `<` comparison below so a click landing
+    /// `classify` uses a strict comparison (`y > H − 30`, i.e.
+    /// distance-from-top strictly under 30pt) below so a click landing
     /// exactly on the Search button's top pixel (y == 30) still resolves
     /// as interactive, not chrome.
     private static let topStripHeight: CGFloat = 30
@@ -112,6 +118,10 @@ enum WindowChromeInteractions {
     /// `.frame(width: 210)`); the collapsed stub is narrower (76), so
     /// bounding to 210 safely covers both rail states without needing to
     /// know which one is showing.
+    ///
+    /// `ContentView.projectHeaderRow` (the work-items column's header,
+    /// which starts at the collapsed stub's x = 76) also has a doc
+    /// comment cross-referencing this bound — see that declaration.
     private static let railStripXBound: CGFloat = 210
 
     /// Walks the hit view's ancestry: controls, text, scrollers, and
@@ -119,8 +129,12 @@ enum WindowChromeInteractions {
     /// one exception — NSTableView is an NSControl subclass, but a click
     /// landing below the last row (row(at:) == -1) hits no row and is
     /// chrome, not interaction; the table check must therefore precede
-    /// the control check. Non-interactive hits are chrome only in the
-    /// top strip, and only above the projects rail's column — see
+    /// the control check. That empty-body rule only fires for tables
+    /// flush against the window's left edge (the projects rail, the
+    /// Settings sidebar) — a content-area list (file tree, signals log,
+    /// diff rail) also has an empty tail below its last row, and clicks
+    /// there must stay ordinary. Non-interactive hits are chrome only in
+    /// the top strip, and only above the projects rail's column — see
     /// `topStripHeight`/`railStripXBound` for why the strip can't safely
     /// span the full window width. `internal` (not `private`) so
     /// `WindowChromeClassifyTests` can exercise it directly against real
@@ -132,6 +146,11 @@ enum WindowChromeInteractions {
         var current: NSView? = hit
         while let candidate = current, candidate !== boundary {
             if let table = candidate as? NSTableView {
+                // Only left-edge sidebars are chrome (the projects rail, the Settings
+                // sidebar). Content-area lists — file tree, signals log, diff rail —
+                // also hit row(at:) == -1 below their last row, and those clicks must
+                // stay ordinary.
+                guard table.convert(NSPoint.zero, to: nil).x < 1 else { return .interactive }
                 let local = table.convert(locationInWindow, from: nil)
                 return table.row(at: local) == -1 ? .chrome : .interactive
             }

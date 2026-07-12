@@ -694,6 +694,13 @@ struct ContentView: View {
     /// Compact project identity — a small accent-gradient glyph and the
     /// project name — heading the Work-Items column (the rail picks the
     /// project; this column is that project's work).
+    ///
+    /// Collapsed-rail state: the chrome monitor's top strip (x ≤
+    /// WindowChromeInteractions.railStripXBound, top
+    /// WindowChromeInteractions.topStripHeight) overlays this row's
+    /// leading edge — any interactive control added in that corner
+    /// would have its clicks swallowed as window-drag chrome. Keep the
+    /// leading ~210pt of this row non-interactive, or narrow the strip.
     private var projectHeaderRow: some View {
         let project = currentProject
         let name = project?.name ?? ""
