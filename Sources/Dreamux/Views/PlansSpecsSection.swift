@@ -81,12 +81,6 @@ struct PlansSpecsSection: View {
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
     @State private var hoveredChipURL: URL?
-    /// User overrides of a multi-plan family's expansion, keyed by
-    /// initiative id. Absence means "follow the default" — expanded while a
-    /// child is in flight (see `isInitiativeExpanded`); once the user
-    /// toggles, their choice sticks. Not persisted.
-    @State private var initiativeExpansion: [String: Bool] = [:]
-    @State private var hoveredInitiativeID: String?
     /// Queue row currently being dragged for reorder — see `queueSection`.
     @State private var draggingQueueItem: QueueItem?
     /// The row a *Course correct…* was fired from, driving the sheet. Only
@@ -293,11 +287,12 @@ struct PlansSpecsSection: View {
 
         VStack(spacing: 2) {
             ForEach(active) { initiative in
-                if initiative.plans.count > 1 {
-                    multiPlanBlock(initiative, statuses: statuses)
-                } else if let plan = initiative.plans.first {
-                    planRow(plan, status: statuses[plan.fileURL] ?? .ready,
-                            ordinal: nil, blockedBy: nil)
+                ForEach(initiative.plans) { plan in
+                    let status = statuses[plan.fileURL] ?? .ready
+                    if status != .merged {
+                        planRow(plan, status: status)
+                            .id(plan.fileURL)
+                    }
                 }
             }
             ForEach(needsPlan) { initiative in
@@ -336,130 +331,6 @@ struct PlansSpecsSection: View {
     /// plan list used, lifted to the initiative level.
     private func initiativeRank(_ initiative: Initiative, _ statuses: [URL: PlanStatus]) -> Int {
         initiative.plans.map { rank(statuses[$0.fileURL] ?? .ready) }.min() ?? rank(.ready)
-    }
-
-    // MARK: - Multi-plan family
-
-    /// A multi-plan initiative: a grouping row (aggregate glyph, title,
-    /// `plan k/n · pct`) with the doc-chip line beneath, and — when
-    /// expanded — every phase as an indented child row carrying its
-    /// ordinal, status, and a `blocked by k` annotation.
-    @ViewBuilder
-    private func multiPlanBlock(_ initiative: Initiative, statuses: [URL: PlanStatus]) -> some View {
-        let memberStatuses = initiative.plans.map { statuses[$0.fileURL] ?? .ready }
-        let progress = InitiativeProgress.resolve(
-            statuses: memberStatuses,
-            checked: initiative.plans.reduce(0) { $0 + $1.checkedSteps },
-            total: initiative.plans.reduce(0) { $0 + $1.totalSteps })
-        let expanded = isInitiativeExpanded(initiative, memberStatuses)
-        let chips = docChips(for: initiative)
-        VStack(alignment: .leading, spacing: 2) {
-            initiativeGroupingRow(initiative, memberStatuses: memberStatuses,
-                                  progress: progress, expanded: expanded)
-            if !chips.isEmpty { chipLine(chips) }
-            if expanded {
-                ForEach(Array(initiative.plans.enumerated()), id: \.element.id) { index, plan in
-                    // A merged phase is never "blocked" — the annotation is
-                    // for the phases still waiting their turn.
-                    let blockedBy = memberStatuses[index] == .merged
-                        ? nil
-                        : InitiativeProgress.blockingOrdinal(statuses: memberStatuses, index: index)
-                    planRow(plan, status: memberStatuses[index],
-                            ordinal: index + 1, blockedBy: blockedBy)
-                        .padding(.leading, 14)
-                }
-            }
-        }
-    }
-
-    private func initiativeGroupingRow(
-        _ initiative: Initiative,
-        memberStatuses: [PlanStatus],
-        progress: (currentIndex: Int?, label: String, fraction: Double?),
-        expanded: Bool
-    ) -> some View {
-        let anyRunning = memberStatuses.contains(.running)
-        let glyph = progress.currentIndex == nil ? "checkmark.seal.fill" : "circle.lefthalf.filled"
-        return Button {
-            withAnimation(.snappy(duration: 0.18)) {
-                setInitiative(initiative.id, expanded: !expanded)
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(expanded ? 90 : 0))
-                    .frame(width: chevronColumnWidth, height: 18)
-                Image(systemName: glyph)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(anyRunning ? Color.green : Color.secondary)
-                    .frame(width: 18)
-                Text(initiative.title)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1).truncationMode(.tail)
-                Spacer(minLength: 0)
-                Text(progressSummary(progress))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background {
-            if hoveredInitiativeID == initiative.id {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(0.04))
-                    .padding(.horizontal, 4)
-            }
-        }
-        .contextMenu {
-            Button("Run remaining plans") { runRemaining(initiative, statuses: memberStatuses) }
-        }
-        .onHover { hovering in
-            if hovering { hoveredInitiativeID = initiative.id }
-            else if hoveredInitiativeID == initiative.id { hoveredInitiativeID = nil }
-        }
-    }
-
-    /// `plan 2/3 · 41%` — the resolver's label plus a rounded percentage
-    /// when the family carries checkboxes.
-    private func progressSummary(_ progress: (currentIndex: Int?, label: String, fraction: Double?)) -> String {
-        guard let fraction = progress.fraction else { return progress.label }
-        return "\(progress.label) · \(Int((fraction * 100).rounded()))%"
-    }
-
-    /// Enqueue every non-merged phase in order — the grouping row's
-    /// *Run remaining plans*. Blocking is presentational, so this walks the
-    /// whole remaining sequence and lets the queue gate between them.
-    private func runRemaining(_ initiative: Initiative, statuses: [PlanStatus]) {
-        for (index, plan) in initiative.plans.enumerated() where statuses[index] != .merged {
-            onEnqueue(plan)
-        }
-    }
-
-    /// A family follows its default expansion (running/awaiting child, or
-    /// the queue parked on one of its plans) until the user toggles it.
-    private func isInitiativeExpanded(_ initiative: Initiative, _ memberStatuses: [PlanStatus]) -> Bool {
-        if let override = initiativeExpansion[initiative.id] { return override }
-        return InitiativeProgress.defaultsExpanded(
-            statuses: memberStatuses,
-            queueParkedOnMember: queueParked(on: initiative))
-    }
-
-    private func setInitiative(_ id: String, expanded: Bool) {
-        initiativeExpansion[id] = expanded
-    }
-
-    /// Whether the queue sits at a gate/attention on one of the initiative's
-    /// plans (matched by relative path).
-    private func queueParked(on initiative: Initiative) -> Bool {
-        guard queue.state == .atGate || queue.state == .attention,
-              let current = queue.currentPlanPath else { return false }
-        return initiative.plans.contains { docStore.relativePath(of: $0) == current }
     }
 
     /// Sidebar ordering: running → awaiting review → ready/in-progress
@@ -650,7 +521,7 @@ struct PlansSpecsSection: View {
     /// jump there. A single click activates the plan's workspace (and its
     /// Overview) when one exists, else opens the plan doc — a not-yet-run
     /// plan has no workspace to jump to.
-    private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {
+    private func planRow(_ plan: PlanDoc, status: PlanStatus) -> some View {
         let name = featureName(plan)
         let openableFeature = PlanWorkspacePresence.workspaceToOpen(
             status: status, featureName: name, featureExists: featureExists)
@@ -700,11 +571,6 @@ struct PlansSpecsSection: View {
                         .frame(width: 18, height: 18)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 4) {
-                            if let ordinal {
-                                Text("\(ordinal) ·")
-                                    .font(.callout.weight(.medium).monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                            }
                             Text(plan.title)
                                 .font(.system(size: 15, weight: .medium))
                                 .lineLimit(1).truncationMode(.tail)
@@ -714,8 +580,7 @@ struct PlansSpecsSection: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        planMetaLine(plan, blockedBy: blockedBy,
-                                     afterCaption: afterCaption)
+                        planMetaLine(plan, afterCaption: afterCaption)
                         if plan.totalSteps > 0 {
                             planProgressBar(checked: plan.checkedSteps,
                                             total: plan.totalSteps)
@@ -761,17 +626,11 @@ struct PlansSpecsSection: View {
     /// progress bar, so this line renders nothing for an ordinary plan.
     @ViewBuilder
     private func planMetaLine(
-        _ plan: PlanDoc, blockedBy: Int?, afterCaption: String?
+        _ plan: PlanDoc, afterCaption: String?
     ) -> some View {
         let failure = autoRunFailure(docStore.relativePath(of: plan))
-        if blockedBy != nil || afterCaption != nil || failure != nil {
+        if afterCaption != nil || failure != nil {
             HStack(spacing: 6) {
-                if let blockedBy {
-                    Text("blocked by \(blockedBy)")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
                 if let afterCaption {
                     Text(afterCaption)
                         .font(.system(size: 13))
@@ -876,12 +735,6 @@ struct PlansSpecsSection: View {
         }
     }
 
-    /// Width of the leading column reserved for the multi-plan family's
-    /// disclosure chevron (`initiativeGroupingRow`) — plan cards no longer
-    /// have one of their own; the full checklist lives on the workspace's
-    /// Overview now.
-    private let chevronColumnWidth: CGFloat = 10
-
     // MARK: - Doc chips
 
     /// A compact, tappable label for an initiative-level doc.
@@ -889,16 +742,6 @@ struct PlansSpecsSection: View {
         let label: String
         let url: URL
         var id: URL { url }
-    }
-
-    private func docChips(for initiative: Initiative) -> [Chip] {
-        var chips: [Chip] = []
-        if let spec = initiative.spec {
-            chips.append(Chip(label: DocChipLabel.label(title: spec.title, isSpec: true),
-                              url: spec.fileURL))
-        }
-        chips.append(contentsOf: supportingChips(for: initiative))
-        return chips
     }
 
     /// The initiative's supporting docs (roadmap, notes) as chips — the
