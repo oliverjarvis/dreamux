@@ -17,6 +17,7 @@
 - Hint style everywhere: `Text("<hint>").font(.system(size: 12, weight: .medium))`, inheriting the row's `.secondary` foreground, pushed right by the row's existing `Spacer`.
 - Menu shortcuts use the `Commands` + focused-binding pattern (never `.keyboardShortcut` on content buttons); ⌘⇧L is the exception by design — it uses `@Environment(\.openWindow)` inside the Commands struct and is never disabled.
 - **Plan-level deviation from the spec (approved rationale):** the spec's separate `AppletCommands` struct cannot interleave into `ProjectCommands`' `CommandGroup(replacing: .newItem)`; "New Global Applet…" therefore lives inside `ProjectCommands`, right after "New Applet…". Spec placement intent (menu order) wins over spec wiring prose.
+- **Second plan-level deviation:** the spec's "restyle the New Project row to the shared add-row shape" is overridden — rail rows are native `List(.sidebar)` rows, and a custom 28pt-frame row would break icon-column alignment with the project rows; the row keeps its `Label` and gains only the HStack-wrapped trailing hint (matches the project's native-controls preference).
 - Rail rows are native `List(.sidebar)` rows — keep `Label` for leading icon/text so the icon column stays aligned; hints wrap the Label in an HStack rather than rebuilding the row.
 - Commit style `Prefix: summary`; stage ONLY named files; never touch `.claude/worktrees/`.
 - Build: `swift build`. Tests: `swift test --filter <Class>` / full `swift test`. E2E: `Scripts/e2e/run-e2e.sh`.
