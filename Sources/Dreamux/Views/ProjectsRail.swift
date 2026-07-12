@@ -18,6 +18,9 @@ struct ProjectsRail: View {
     /// Collapses the rail — the toggle sits in the rail's top zone, next
     /// to the floating traffic lights (there is no window toolbar).
     let onToggleRail: () -> Void
+    /// Opens the ⌘K command palette (the rail's search bar is a second
+    /// entry point to the same overlay).
+    let onOpenPalette: () -> Void
 
     @Environment(\.openWindow) private var openWindow
     @State private var showCreate = false
@@ -86,6 +89,33 @@ struct ProjectsRail: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 Color.clear.frame(height: 30)
+                Button(action: onOpenPalette) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Search")
+                            .font(.system(size: 15))
+                        Spacer(minLength: 0)
+                        Text("⌘K")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.primary.opacity(0.04))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.secondary.opacity(0.3))
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Search and quick actions (⌘K)")
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
                 HStack {
                     Text("Projects")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))

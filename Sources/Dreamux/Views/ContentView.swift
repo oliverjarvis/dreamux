@@ -131,7 +131,8 @@ struct ContentView: View {
                     onSelect: onSwitchProject,
                     onToggleRail: {
                         withAnimation(.snappy(duration: 0.18)) { showProjectsRail.toggle() }
-                    }
+                    },
+                    onOpenPalette: { showPalette = true }
                 )
                 .frame(width: 210)
             } else {
@@ -506,6 +507,17 @@ struct ContentView: View {
         VStack(spacing: 10) {
             Color.clear.frame(height: 26)
             railToggle
+            Button {
+                showPalette = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Search (⌘K)")
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 8) {
                     ForEach(projects.projects) { project in
