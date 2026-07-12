@@ -206,6 +206,8 @@ struct PlansSpecsSection: View {
                 Text("New workspace")
                     .font(.system(size: 15))
                 Spacer(minLength: 0)
+                Text("⌘P")
+                    .font(.system(size: 12, weight: .medium))
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)

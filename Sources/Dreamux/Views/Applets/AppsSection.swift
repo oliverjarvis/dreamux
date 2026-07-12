@@ -152,6 +152,8 @@ struct AppsSection: View {
                 Text("New applet")
                     .font(.system(size: 15))
                 Spacer(minLength: 0)
+                Text("⌘L")
+                    .font(.system(size: 12, weight: .medium))
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 10)

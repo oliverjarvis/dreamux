@@ -119,7 +119,9 @@ struct ProjectsRail: View {
                     .padding(.vertical, 5)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.primary.opacity(0.04))
+                            // Card-surface fill (the panels' color) so the field stands off the
+                            // tinted-glass rail backdrop — primary-0.04 was invisible against it.
+                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.8))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)

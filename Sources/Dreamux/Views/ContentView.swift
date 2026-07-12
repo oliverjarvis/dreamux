@@ -1266,6 +1266,17 @@ struct ContentView: View {
                              subtitle: nil, icon: "plus") { showCreateProject = true },
             PaletteCandidate(id: "command-new-plan", title: "New Plan…",
                              subtitle: nil, icon: "list.bullet.clipboard") { showNewPlan = true },
+            PaletteCandidate(id: "command-new-applet", title: "New Applet…",
+                             subtitle: nil, icon: "plus.app") { showNewApplet = true },
+            PaletteCandidate(id: "command-new-global-applet", title: "New Global Applet…",
+                             subtitle: nil, icon: "shippingbox") {
+                AppStudioIntents.shared.pendingNewApplet = true
+                openWindow(id: "app-studio")
+            },
+            PaletteCandidate(id: "command-open-applet-studio", title: "Open Applet Studio",
+                             subtitle: nil, icon: "shippingbox") {
+                openWindow(id: "app-studio")
+            },
             PaletteCandidate(id: "command-new-workspace", title: "New Scratch Workspace",
                              subtitle: nil, icon: "plus.square") { _ = store.addWorkspace() },
             PaletteCandidate(id: "command-new-tab", title: "New Tab",
