@@ -47,6 +47,9 @@ struct FlowNode: Identifiable, Hashable, Codable, Sendable {
     /// Inspector's "last activity" line — a tool summary or agent
     /// description, refreshed as transcript events arrive.
     var lastActivity: String?
+    /// Optional grouping key (e.g. a task node's owning phase title), used
+    /// to cluster nodes visually without introducing a separate node kind.
+    var group: String? = nil
 
     init(
         id: String,
@@ -56,7 +59,8 @@ struct FlowNode: Identifiable, Hashable, Codable, Sendable {
         startedAt: Date? = nil,
         endedAt: Date? = nil,
         counters: FlowCounters = FlowCounters(),
-        lastActivity: String? = nil
+        lastActivity: String? = nil,
+        group: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -66,6 +70,7 @@ struct FlowNode: Identifiable, Hashable, Codable, Sendable {
         self.endedAt = endedAt
         self.counters = counters
         self.lastActivity = lastActivity
+        self.group = group
     }
 }
 

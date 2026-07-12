@@ -99,21 +99,28 @@ enum PlanFlowBuilder {
         var nodes: [FlowNode] = [
             FlowNode(id: "src", kind: .source, label: "plan", status: started ? .done : .queued),
         ]
-        let phases = input.phases.isEmpty
-            ? [PlanPhaseSummary(title: "tasks", checkedSteps: 0, totalSteps: 1)]
-            : input.phases
-        for (index, phase) in phases.enumerated() {
-            let status: FlowStatus
-            if input.status == .merged || (phase.totalSteps > 0 && phase.checkedSteps == phase.totalSteps) {
-                status = .done
-            } else if isActive && phase.checkedSteps > 0 {
-                status = .running
-            } else if isActive && isFirstUnfinished(phases, index) {
-                status = .running
-            } else {
-                status = .queued
+        if !input.tasks.isEmpty {
+            for t in input.tasks {
+                nodes.append(FlowNode(id: "plan-task-\(t.line)", kind: .task, label: t.title,
+                                      status: taskStatus(t), group: t.phase))
             }
-            nodes.append(FlowNode(id: "phase-\(index)", kind: .phase, label: phase.title, status: status))
+        } else {
+            let phases = input.phases.isEmpty
+                ? [PlanPhaseSummary(title: "tasks", checkedSteps: 0, totalSteps: 1)]
+                : input.phases
+            for (index, phase) in phases.enumerated() {
+                let status: FlowStatus
+                if input.status == .merged || (phase.totalSteps > 0 && phase.checkedSteps == phase.totalSteps) {
+                    status = .done
+                } else if isActive && phase.checkedSteps > 0 {
+                    status = .running
+                } else if isActive && isFirstUnfinished(phases, index) {
+                    status = .running
+                } else {
+                    status = .queued
+                }
+                nodes.append(FlowNode(id: "phase-\(index)", kind: .phase, label: phase.title, status: status))
+            }
         }
         if needsHuman {
             nodes.append(FlowNode(id: "gate", kind: .gate, label: "review & merge", status: .waiting))
@@ -146,6 +153,13 @@ enum PlanFlowBuilder {
     private static func isFirstUnfinished(_ phases: [PlanPhaseSummary], _ index: Int) -> Bool {
         let firstUnfinished = phases.firstIndex { $0.checkedSteps < $0.totalSteps }
         return firstUnfinished == index
+    }
+
+    /// One task node's status: done once every step is checked, running
+    /// for the plan's current task, else queued.
+    private static func taskStatus(_ t: PlanTaskSummary) -> FlowStatus {
+        if t.totalSteps > 0 && t.checkedSteps == t.totalSteps { return .done }
+        return t.isCurrent ? .running : .queued
     }
 
     /// Whether the gate card may offer "merge & continue" for this plan.

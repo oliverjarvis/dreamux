@@ -112,6 +112,33 @@ final class PlanFlowBuilderTests: XCTestCase {
         XCTAssertEqual(lanes[0].nodes.first { $0.id == "phase-0" }?.status, .done)
     }
 
+    func testTaskDagWhenInputHasTasks() {
+        let tasks = [
+            PlanTaskSummary(line: 5, title: "a", phase: "Phase 1", checkedSteps: 1, totalSteps: 1, isCurrent: false),
+            PlanTaskSummary(line: 9, title: "b", phase: "Phase 2", checkedSteps: 0, totalSteps: 2, isCurrent: true),
+            PlanTaskSummary(line: 14, title: "c", phase: "Phase 2", checkedSteps: 0, totalSteps: 1, isCurrent: false),
+        ]
+        let input = PlanLaneInput(planPath: "docs/plans/x.md", title: "X", status: .running,
+                                  phases: [], queueOrdinal: nil, isCurrentQueuePlan: false,
+                                  queueState: nil, workspaceID: nil, startedAt: nil, tasks: tasks)
+        let lane = PlanFlowBuilder.lanes(from: [input]).first!
+        XCTAssertEqual(lane.nodes.map(\.id).prefix(4).map { $0 },
+                       ["src", "plan-task-5", "plan-task-9", "plan-task-14"])
+        let t9 = lane.nodes.first { $0.id == "plan-task-9" }!
+        XCTAssertEqual(t9.kind, .task)
+        XCTAssertEqual(t9.status, .running)      // current
+        XCTAssertEqual(t9.group, "Phase 2")
+        XCTAssertEqual(lane.nodes.first { $0.id == "plan-task-5" }?.status, .done)  // all checked
+        XCTAssertEqual(lane.nodes.first { $0.id == "plan-task-14" }?.status, .queued)
+        XCTAssertTrue(lane.nodes.contains { $0.id == "drain" })
+    }
+
+    func testEmptyTasksKeepsPhaseSkeleton() {
+        // No tasks provided: the phase-skeleton fallback path is unchanged.
+        let lanes = PlanFlowBuilder.lanes(from: [input()])
+        XCTAssertEqual(lanes[0].nodes.map(\.id), ["src", "phase-0", "phase-1", "phase-2", "drain"])
+    }
+
     func testGateMergeActionability() {
         // Truly at review — merge is on the table:
         XCTAssertTrue(PlanFlowBuilder.isGateMergeActionable(
