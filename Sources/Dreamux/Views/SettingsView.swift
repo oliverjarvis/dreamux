@@ -52,6 +52,39 @@ enum WorkflowSettings {
     }
 }
 
+/// Sidebar categories of the Settings window — System Settings style:
+/// tinted icon badge + label on the left, one grouped form per category
+/// on the right.
+private enum SettingsCategory: String, CaseIterable, Identifiable {
+    case appearance, workflow, connections
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .appearance: "Appearance"
+        case .workflow: "Workflow"
+        case .connections: "Connections"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .appearance: "paintbrush.fill"
+        case .workflow: "arrow.triangle.branch"
+        case .connections: "key.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .appearance: .blue
+        case .workflow: .green
+        case .connections: .orange
+        }
+    }
+}
+
 struct SettingsView: View {
     @AppStorage(AppearanceSettings.cardShadowKey) private var cardShadow = true
     @AppStorage(AppearanceSettings.edgeInsetsKey) private var edgeInsets = true
@@ -63,6 +96,10 @@ struct SettingsView: View {
     @AppStorage(AppearanceSettings.cardOpacityKey) private var cardOpacity = 1.0
     @AppStorage(WorkflowSettings.autoCommitKey) private var autoCommitPerTask = true
 
+    /// Optional so List deselection can't blank the pane — the detail
+    /// falls back to .appearance.
+    @State private var category: SettingsCategory? = .appearance
+
     /// ColorPicker bindings bridged onto the persisted hex strings.
     private func colorBinding(_ hex: Binding<String>, fallback: Color) -> Binding<Color> {
         Binding(
@@ -72,88 +109,120 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section("Inset card") {
-                Toggle("Drop shadow", isOn: $cardShadow)
-                Picker("Edge padding", selection: $edgeInsets) {
-                    Text("Inset — floating card with gutters").tag(true)
-                    Text("Flush — content runs to the window edge").tag(false)
+        NavigationSplitView {
+            List(SettingsCategory.allCases, selection: $category) { item in
+                Label {
+                    Text(item.title)
+                } icon: {
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(item.tint.gradient)
+                        .frame(width: 22, height: 22)
+                        .overlay {
+                            Image(systemName: item.symbol)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
                 }
-                .pickerStyle(.radioGroup)
-                LabeledContent("Corner radius") {
-                    HStack(spacing: 10) {
-                        Slider(value: $cornerRadius, in: 6...26, step: 1)
-                            .frame(width: 180)
-                        Text("\(Int(cornerRadius)) pt")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
-                    }
+                .tag(item)
+            }
+            .navigationSplitViewColumnWidth(190)
+        } detail: {
+            Form {
+                switch category ?? .appearance {
+                case .appearance: appearanceSections
+                case .workflow: workflowSection
+                case .connections: connectionsSection
                 }
             }
+            .formStyle(.grouped)
+            .navigationTitle((category ?? .appearance).title)
+        }
+        .frame(width: 720, height: 440)
+    }
 
-            Section {
-                LabeledContent("Backdrop transparency") {
-                    HStack(spacing: 10) {
-                        Slider(value: $backdropTransparency, in: 0...1)
-                            .frame(width: 180)
-                        Text("\(Int(backdropTransparency * 100))%")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
-                    }
-                }
-                ColorPicker(
-                    "Backdrop color",
-                    selection: colorBinding($backdropTintHex, fallback: .black),
-                    supportsOpacity: false
-                )
-                LabeledContent("Card transparency") {
-                    HStack(spacing: 10) {
-                        Slider(value: $cardOpacity, in: 0.5...1.0)
-                            .frame(width: 180)
-                        Text("\(Int(cardOpacity * 100))%")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 44, alignment: .trailing)
-                    }
-                }
-                LabeledContent("Card background") {
-                    HStack(spacing: 10) {
-                        ColorPicker(
-                            "",
-                            selection: colorBinding(
-                                $cardColorHex,
-                                fallback: Color(nsColor: .windowBackgroundColor)),
-                            supportsOpacity: false
-                        )
-                        .labelsHidden()
-                        Button("Use system color") { cardColorHex = "" }
-                            .disabled(cardColorHex.isEmpty)
-                    }
-                }
-            } header: {
-                Text("Colors & transparency")
-            } footer: {
-                Text("Backdrop transparency runs from solid color (0%) to raw desktop glass (100%). Card transparency lets the backdrop show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
-                    .foregroundStyle(.secondary)
+    /// "Inset card" + "Colors & transparency" — moved unchanged from the
+    /// old single-form body.
+    @ViewBuilder private var appearanceSections: some View {
+        Section("Inset card") {
+            Toggle("Drop shadow", isOn: $cardShadow)
+            Picker("Edge padding", selection: $edgeInsets) {
+                Text("Inset — floating card with gutters").tag(true)
+                Text("Flush — content runs to the window edge").tag(false)
             }
-
-            Section {
-                Toggle("Commit after each task", isOn: $autoCommitPerTask)
-                Text("Plan agents commit each finished task; the app commits any leftovers when it sees a task complete. Off means plans only commit when the agent chooses to. Takes effect from the next task boundary.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Workflow")
-            }
-
-            Section("Connections") {
-                ConnectionsSettingsView(store: .shared)
+            .pickerStyle(.radioGroup)
+            LabeledContent("Corner radius") {
+                HStack(spacing: 10) {
+                    Slider(value: $cornerRadius, in: 6...26, step: 1)
+                        .frame(width: 180)
+                    Text("\(Int(cornerRadius)) pt")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
             }
         }
-        .formStyle(.grouped)
-        .frame(width: 470)
-        .fixedSize(horizontal: false, vertical: true)
+        Section {
+            LabeledContent("Backdrop transparency") {
+                HStack(spacing: 10) {
+                    Slider(value: $backdropTransparency, in: 0...1)
+                        .frame(width: 180)
+                    Text("\(Int(backdropTransparency * 100))%")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+            ColorPicker(
+                "Backdrop color",
+                selection: colorBinding($backdropTintHex, fallback: .black),
+                supportsOpacity: false
+            )
+            LabeledContent("Card transparency") {
+                HStack(spacing: 10) {
+                    Slider(value: $cardOpacity, in: 0.5...1.0)
+                        .frame(width: 180)
+                    Text("\(Int(cardOpacity * 100))%")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+            LabeledContent("Card background") {
+                HStack(spacing: 10) {
+                    ColorPicker(
+                        "",
+                        selection: colorBinding(
+                            $cardColorHex,
+                            fallback: Color(nsColor: .windowBackgroundColor)),
+                        supportsOpacity: false
+                    )
+                    .labelsHidden()
+                    Button("Use system color") { cardColorHex = "" }
+                        .disabled(cardColorHex.isEmpty)
+                }
+            }
+        } header: {
+            Text("Colors & transparency")
+        } footer: {
+            Text("Backdrop transparency runs from solid color (0%) to raw desktop glass (100%). Card transparency lets the backdrop show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var workflowSection: some View {
+        Section {
+            Toggle("Commit after each task", isOn: $autoCommitPerTask)
+            Text("Plan agents commit each finished task; the app commits any leftovers when it sees a task complete. Off means plans only commit when the agent chooses to. Takes effect from the next task boundary.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text("Workflow")
+        }
+    }
+
+    @ViewBuilder private var connectionsSection: some View {
+        Section("Connections") {
+            ConnectionsSettingsView(store: .shared)
+        }
     }
 }
