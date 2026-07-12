@@ -95,3 +95,13 @@ final class SQLiteSignalStoreTests: XCTestCase {
         XCTAssertEqual(rows.count, 2)
     }
 }
+
+extension SQLiteSignalStoreTests {
+    /// The ledger's default lives under the per-bundle-id App Support dir —
+    /// wired through BundleIdentity, so a tagged build forks automatically.
+    func testDefaultURLIsBundleIDKeyed() throws {
+        let url = try SQLiteSignalStore.defaultURL()
+        XCTAssertEqual(url.lastPathComponent, "signals.db")
+        XCTAssertEqual(url.deletingLastPathComponent().lastPathComponent, BundleIdentity.bundleID())
+    }
+}

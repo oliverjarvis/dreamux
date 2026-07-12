@@ -204,3 +204,15 @@ final class ProjectSessionTests: XCTestCase {
         XCTAssertEqual(notified?.title, "Solo Implementation Plan")
     }
 }
+
+extension ProjectSessionTests {
+    /// Untagged state dir is the legacy `Dreamux` folder — byte-identical
+    /// to pre-isolation. Skipped under the e2e `DREAMUX_STATE_DIR` override.
+    func testStateRootUntaggedIsLegacyDreamuxDir() throws {
+        try XCTSkipUnless(
+            (ProcessInfo.processInfo.environment["DREAMUX_STATE_DIR"] ?? "").isEmpty,
+            "DREAMUX_STATE_DIR override active"
+        )
+        XCTAssertEqual(ProjectStore.stateRootURL().lastPathComponent, "Dreamux")
+    }
+}
