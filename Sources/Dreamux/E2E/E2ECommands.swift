@@ -1193,7 +1193,8 @@ enum E2ECommands {
     /// resumes any existing PR's state from gh, exactly like a sheet
     /// re-open does.
     private static func singleRepoFlow(
-        request: [String: Any]
+        request: [String: Any],
+        onPublished: @escaping (Repository, String) -> Void = { _, _ in }
     ) async throws -> (repo: Repository, flow: MergeFlow) {
         let workspace = try workspace(named: try string("name", in: request))
         let repoName = try string("repo", in: request)
@@ -1204,7 +1205,8 @@ enum E2ECommands {
         guard workspace.linkedRepoIDs.contains(repo.name) else {
             throw CommandError(message: "feature \"\(workspace.name)\" is not linked to repo \"\(repo.name)\"")
         }
-        let flow = MergeFlow(workspace: workspace, repos: [repo], project: repoStore.project)
+        let flow = MergeFlow(
+            workspace: workspace, repos: [repo], project: repoStore.project, onPublished: onPublished)
         await flow.initializeStates()
         return (repo, flow)
     }
@@ -1276,7 +1278,19 @@ enum E2ECommands {
     /// resumed from gh is reported rather than re-created — re-running
     /// the command is as idempotent as re-clicking the button.
     private static func publishFeature(request: [String: Any]) async throws -> [String: Any] {
-        let (repo, flow) = try await singleRepoFlow(request: request)
+        // Same feature key + worktree path WorkspaceSidebar.mergeSheet's
+        // onPublished uses, reached the same way ~8 sibling e2e commands
+        // (createApplet, openApplet, ...) reach the live session: so a PR
+        // opened through this headless path live-badges immediately via
+        // PRStatusPoller instead of waiting for the next app launch's
+        // seed pass.
+        let featureName = try string("name", in: request)
+        let (_, session) = try activeSession()
+        let (repo, flow) = try await singleRepoFlow(request: request) { repo, _ in
+            session.prStatus.track(
+                feature: featureName,
+                worktreeURL: repo.rootURL.appendingPathComponent(featureName))
+        }
 
         // The sheet hides (no remote) or disables (no gh) the button on
         // these verdicts; headless, they're failures the driver must see.
