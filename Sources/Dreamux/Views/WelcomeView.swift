@@ -23,12 +23,12 @@ struct WelcomeView: View {
                 .multilineTextAlignment(.center)
             Button("Create Project") { showCreate = true }
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut("n", modifiers: [.command])
                 .padding(.top, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
         .onAppear { store.refresh() }
+        .focusedSceneValue(\.createProjectPresented, $showCreate)
         .sheet(isPresented: $showCreate) {
             CreateProjectSheet(store: store) { project in
                 onOpenProject(project.id)

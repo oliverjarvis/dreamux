@@ -75,6 +75,7 @@ struct DreamuxApp: App {
         .commands {
             ProjectCommands()
             FileExplorerCommands()
+            PrintCommandRemoval()
             IntegrationCommands()
             NotificationCommands()
         }
@@ -190,6 +191,14 @@ private struct FileExplorerCommands: Commands {
     }
 }
 
+/// Removes the default Print/Page Setup items — nothing in Dreamux
+/// prints, and freeing ⌘P lets the File menu's "New Plan…" own it.
+private struct PrintCommandRemoval: Commands {
+    var body: some Commands {
+        CommandGroup(replacing: .printItem) {}
+    }
+}
+
 // MARK: - Integration commands
 
 private struct IntegrationCommands: Commands {
@@ -245,9 +254,25 @@ private struct NotificationCommands: Commands {
 
 private struct ProjectCommands: Commands {
     @FocusedValue(\.activeStore) private var store: WorkspaceStore?
+    @FocusedBinding(\.createProjectPresented) private var createProjectPresented: Bool?
+    @FocusedBinding(\.newPlanPresented) private var newPlanPresented: Bool?
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
+            Button("New Project…") {
+                createProjectPresented = true
+            }
+            .keyboardShortcut("n", modifiers: [.command])
+            .disabled(createProjectPresented == nil)
+
+            Button("New Plan…") {
+                newPlanPresented = true
+            }
+            .keyboardShortcut("p", modifiers: [.command])
+            .disabled(newPlanPresented == nil)
+
+            Divider()
+
             Button("New Tab") {
                 store?.activeSession?.createTab()
             }

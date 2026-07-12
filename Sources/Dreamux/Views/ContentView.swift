@@ -36,7 +36,9 @@ struct ContentView: View {
     /// File-tree column width (third card column), same drag treatment.
     @State private var fileTreeWidth: CGFloat = 280
     @State private var fileTreeDragBaseWidth: CGFloat?
-    /// New Project sheet fired from the collapsed rail stub.
+    /// New Project sheet — fired from the collapsed rail stub's tile and
+    /// from the File menu's ⌘N (`ProjectCommands`, via the
+    /// `createProjectPresented` focused binding).
     @State private var showCreateProject = false
     /// New Plan sheet fired from a plain workspace's Overview (Mode B's
     /// "Plan something here") — a second trigger for the same
@@ -274,6 +276,11 @@ struct ContentView: View {
                 onCancel: { overviewRunningPlan = nil }
             )
         }
+        .sheet(isPresented: $showCreateProject) {
+            CreateProjectSheet(store: projects) { project in
+                onSwitchProject(project.id)
+            }
+        }
         .alert(
             "Couldn't apply change",
             isPresented: Binding(
@@ -294,6 +301,8 @@ struct ContentView: View {
         // this window's state via `@FocusedBinding`, the same way
         // `ProjectCommands` reaches the active store.
         .focusedSceneValue(\.fileTreeVisible, $showFileTree)
+        .focusedSceneValue(\.createProjectPresented, $showCreateProject)
+        .focusedSceneValue(\.newPlanPresented, $showNewPlan)
         .onAppear {
             // e2e only (no-op otherwise): sync the bridge with this
             // window's starting mode. (Store registration and the plan
@@ -512,11 +521,6 @@ struct ContentView: View {
                 }
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity)
-            }
-        }
-        .sheet(isPresented: $showCreateProject) {
-            CreateProjectSheet(store: projects) { project in
-                onSwitchProject(project.id)
             }
         }
     }
@@ -1245,6 +1249,32 @@ extension FocusedValues {
     var fileTreeVisible: Binding<Bool>? {
         get { self[FileTreeVisibleKey.self] }
         set { self[FileTreeVisibleKey.self] = newValue }
+    }
+}
+
+// MARK: - Menu-shortcut focused values
+
+/// Bindings the File-menu items (⌘N New Project…, ⌘P New Plan…) use to
+/// present the focused window's sheets — same bridge as
+/// `fileTreeVisible`, so the shortcuts fire even while a terminal is
+/// first responder.
+private struct CreateProjectPresentedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+private struct NewPlanPresentedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+extension FocusedValues {
+    var createProjectPresented: Binding<Bool>? {
+        get { self[CreateProjectPresentedKey.self] }
+        set { self[CreateProjectPresentedKey.self] = newValue }
+    }
+
+    var newPlanPresented: Binding<Bool>? {
+        get { self[NewPlanPresentedKey.self] }
+        set { self[NewPlanPresentedKey.self] = newValue }
     }
 }
 
