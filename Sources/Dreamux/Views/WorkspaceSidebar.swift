@@ -32,6 +32,11 @@ struct WorkspaceSidebar: View {
     /// workspace id here (it doesn't own the confirm alert); consumed below
     /// exactly like `gateMergeWorkspaceID`, driving the `pendingClose` alert.
     @Binding var gateCloseWorkspaceID: UUID?
+    /// Set alongside `gateMergeWorkspaceID` when the gate card's "Create
+    /// PR" button (not "Merge locally"/"Merge & continue") fired the
+    /// sheet — read and cleared in the `gateMergeWorkspaceID` handler
+    /// below to drive `emphasizePublish`.
+    @Binding var emphasizePublishWorkspaceID: UUID?
     let onOpenDoc: (URL) -> Void
     /// Open a doc jumped to a 1-based line (phase/task rows).
     let onOpenDocAtLine: (URL, Int) -> Void
@@ -69,6 +74,10 @@ struct WorkspaceSidebar: View {
     @State private var isWorking = false
     @State private var pendingClose: Workspace?
     @State private var pendingMerge: Workspace?
+    /// Whether the pending merge sheet should open with the publish
+    /// button emphasized — set from `emphasizePublishWorkspaceID` when a
+    /// gate card's "Create PR" opened the sheet; otherwise false.
+    @State private var emphasizePublish = false
     @State private var switchNotice: SwitchNotice?
     @State private var runningPlan: PlanDoc?
     @State private var showNewPlan = false
@@ -109,22 +118,8 @@ struct WorkspaceSidebar: View {
                 onCancel: { showAddRepo = false }
             )
         }
-        .sheet(item: $pendingMerge, onDismiss: {}) { workspace in
-            MergeFeatureSheet(
-                workspace: workspace,
-                repos: repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) },
-                project: repoStore.project,
-                onOpenConflictTab: { url, title in
-                    openConflictTab(workspace: workspace, url: url, title: title)
-                },
-                onRepoCleanedUp: { repo in
-                    stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
-                },
-                onAllCleanedUp: {
-                    finalizeFeatureCleanup(workspace)
-                },
-                onDismiss: { pendingMerge = nil }
-            )
+        .sheet(item: $pendingMerge, onDismiss: { emphasizePublish = false }) { workspace in
+            mergeSheet(for: workspace)
         }
         .sheet(item: $customizing) { workspace in
             CustomizeWorkspaceSheet(
@@ -216,6 +211,8 @@ struct WorkspaceSidebar: View {
             guard let id, let workspace = store.workspaces.first(where: { $0.id == id })
             else { return }
             gateMergeWorkspaceID = nil
+            emphasizePublish = emphasizePublishWorkspaceID == id
+            emphasizePublishWorkspaceID = nil
             pendingMerge = workspace
         }
         .onChange(of: gateCloseWorkspaceID) { _, id in
@@ -1033,6 +1030,30 @@ struct WorkspaceSidebar: View {
     /// inactive, making the merge-sheet consumption above a no-op.
     private var e2eBridge: E2EBridge? {
         E2ERegistry.shared.bridge(forProject: repoStore.project.id)
+    }
+
+    /// Broken out of the `.sheet(item:)` trailing closure — with
+    /// `emphasizePublish` added to the initializer call, the inline
+    /// closure form pushed `body`'s modifier chain over the
+    /// type-checker's complexity budget ("unable to type-check this
+    /// expression in reasonable time").
+    private func mergeSheet(for workspace: Workspace) -> some View {
+        MergeFeatureSheet(
+            workspace: workspace,
+            repos: repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) },
+            project: repoStore.project,
+            onOpenConflictTab: { url, title in
+                openConflictTab(workspace: workspace, url: url, title: title)
+            },
+            onRepoCleanedUp: { repo in
+                stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
+            },
+            onAllCleanedUp: {
+                finalizeFeatureCleanup(workspace)
+            },
+            onDismiss: { pendingMerge = nil },
+            emphasizePublish: emphasizePublish
+        )
     }
 
     /// The automation server's `openMergeSheet` command parks the

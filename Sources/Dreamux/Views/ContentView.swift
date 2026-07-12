@@ -172,6 +172,7 @@ struct ContentView: View {
                         planQueue: planQueue,
                         gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
                         gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
+                        emphasizePublishWorkspaceID: $session.emphasizePublishWorkspaceID,
                         onOpenDoc: openFile,
                         onOpenDocAtLine: { openFile($0, atLine: $1) },
                         onCourseCorrectionNudge: { plan, summary, priority in
@@ -944,7 +945,9 @@ struct ContentView: View {
         FlowGateActions(
             openDiff: { workspaceID in openGateDiff(workspaceID: workspaceID) },
             requestMerge: { workspaceID in requestGateMerge(workspaceID: workspaceID) },
-            fetchDiffStat: { workspaceID in await gateDiffStat(workspaceID: workspaceID) }
+            fetchDiffStat: { workspaceID in await gateDiffStat(workspaceID: workspaceID) },
+            requestPublish: { workspaceID in requestGatePublish(workspaceID: workspaceID) },
+            fetchPublishAvailability: { workspaceID in await gatePublishAvailability(workspaceID: workspaceID) }
         )
     }
 
@@ -1126,6 +1129,29 @@ struct ContentView: View {
         } else {
             session.pendingGateMergeWorkspaceID = workspaceID
         }
+    }
+
+    /// "Create PR" on the gate card: always routes through the sidebar's
+    /// merge sheet (never `mergeAndContinue`, which only ever runs a
+    /// local merge) with publish emphasized — `WorkspaceSidebar` reads
+    /// and clears `emphasizePublishWorkspaceID` when it adopts the
+    /// matching `pendingGateMergeWorkspaceID`.
+    private func requestGatePublish(workspaceID: UUID) {
+        session.emphasizePublishWorkspaceID = workspaceID
+        session.pendingGateMergeWorkspaceID = workspaceID
+    }
+
+    /// Gate-card twin of `MergeFlow.initializeStates`' PR pre-check,
+    /// collapsed to one verdict across the workspace's linked repos: any
+    /// repo with a remote makes the shared `gh` probe worth running: if
+    /// none, publish can never apply and we skip straight to `.noRemote`.
+    private func gatePublishAvailability(workspaceID: UUID) async -> PublishAvailability {
+        guard let ws = store.workspaces.first(where: { $0.id == workspaceID }) else { return .noRemote }
+        let repos = repoStore.repositories.filter { ws.linkedRepoIDs.contains($0.name) }
+        var anyRemote = false
+        for repo in repos where await GitOperations.remoteURL(in: repo.rootURL) != nil { anyRemote = true }
+        let gh = anyRemote ? await GhOperations.isAvailable() : false
+        return PublishAvailability.decide(anyRemote: anyRemote, ghAvailable: gh)
     }
 
     /// One "everything this branch changes" diff tab per linked repo —

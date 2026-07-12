@@ -11,6 +11,12 @@ struct FlowGateActions {
     let openDiff: (UUID) -> Void
     let requestMerge: (UUID) -> Void
     let fetchDiffStat: (UUID) async -> GitBranchDiffStat?
+    /// Present the merge sheet with publish emphasized (reuses the
+    /// existing pendingGateMergeWorkspaceID channel + MergeFlow.publish).
+    let requestPublish: (UUID) -> Void
+    /// Async, appearance-time — mirrors fetchDiffStat. Decides whether
+    /// "Create PR" is offered for this workspace.
+    let fetchPublishAvailability: (UUID) async -> PublishAvailability
 }
 
 /// The expanded gate card (spec "Gate cards"): headline, branch-vs-base
@@ -30,6 +36,11 @@ struct GateActionCard: View {
     /// One-shot fetch on appearance; a stat seconds stale is fine and
     /// the card is rare (spec: no new pollers).
     @State private var stat: GitBranchDiffStat?
+    /// One-shot fetch alongside `stat` — decides whether "Create PR"
+    /// is offered next to "Merge locally". Defaults to `.noRemote` so
+    /// the card renders today's single "Merge & continue" button until
+    /// the fetch lands.
+    @State private var publish: PublishAvailability = .noRemote
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -52,8 +63,14 @@ struct GateActionCard: View {
             HStack(spacing: 8) {
                 Button("View diff") { actions.openDiff(workspaceID) }
                 if mergeActionable {
-                    Button("Merge & continue") { actions.requestMerge(workspaceID) }
-                        .buttonStyle(.borderedProminent)
+                    if publish == .available {
+                        Button("Merge locally") { actions.requestMerge(workspaceID) }
+                        Button("Create PR") { actions.requestPublish(workspaceID) }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Merge & continue") { actions.requestMerge(workspaceID) }
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
             }
             .controlSize(.small)
@@ -68,6 +85,9 @@ struct GateActionCard: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(FlowStatusGlyph.color(.waiting).opacity(0.25), lineWidth: 1)
         )
-        .task { stat = await actions.fetchDiffStat(workspaceID) }
+        .task {
+            stat = await actions.fetchDiffStat(workspaceID)
+            publish = await actions.fetchPublishAvailability(workspaceID)
+        }
     }
 }

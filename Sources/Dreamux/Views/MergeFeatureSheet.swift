@@ -6,6 +6,11 @@ struct MergeFeatureSheet: View {
     /// with a tab title indicating the conflict.
     let onOpenConflictTab: (URL, String) -> Void
     let onDismiss: () -> Void
+    /// True when the sheet was opened from the gate card's "Create PR"
+    /// button rather than "Merge locally"/"Merge & continue" — swaps
+    /// which button per row reads as prominent: the publish button
+    /// instead of the local Merge/Commit & Merge buttons.
+    var emphasizePublish: Bool = false
 
     /// Every decision and git sequence lives in the flow, which is
     /// shared with the e2e automation server's `mergeFeature` /
@@ -28,10 +33,12 @@ struct MergeFeatureSheet: View {
         onOpenConflictTab: @escaping (URL, String) -> Void,
         onRepoCleanedUp: @escaping (Repository) -> Void = { _ in },
         onAllCleanedUp: @escaping () -> Void = {},
-        onDismiss: @escaping () -> Void
+        onDismiss: @escaping () -> Void,
+        emphasizePublish: Bool = false
     ) {
         self.onOpenConflictTab = onOpenConflictTab
         self.onDismiss = onDismiss
+        self.emphasizePublish = emphasizePublish
         _flow = State(initialValue: MergeFlow(
             workspace: workspace,
             repos: repos,
@@ -170,10 +177,17 @@ struct MergeFeatureSheet: View {
                     .buttonStyle(.bordered)
                 }
                 if state == .featureDirty {
-                    Button("Commit & Merge") {
-                        Task { await flow.commitAndMerge(repo) }
+                    if emphasizePublish {
+                        Button("Commit & Merge") {
+                            Task { await flow.commitAndMerge(repo) }
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button("Commit & Merge") {
+                            Task { await flow.commitAndMerge(repo) }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.borderedProminent)
                     publishButton(repo, title: "Commit & Create PR", state: state)
                     Button("Open in Terminal") {
                         let url = flow.featureWorktreeURL(for: repo)
@@ -220,17 +234,31 @@ struct MergeFeatureSheet: View {
     private func publishButton(_ repo: Repository, title: String, state: MergeRepoState) -> some View {
         switch flow.publishAvailability[repo.name] {
         case .available:
-            Button(title) {
-                Task {
-                    if state == .featureDirty {
-                        await flow.commitAndPublish(repo)
-                    } else {
-                        await flow.publish(repo)
+            if emphasizePublish {
+                Button(title) {
+                    Task {
+                        if state == .featureDirty {
+                            await flow.commitAndPublish(repo)
+                        } else {
+                            await flow.publish(repo)
+                        }
                     }
                 }
+                .buttonStyle(.borderedProminent)
+                .help("Push \(workspace.name) to origin and open a pull request against \(repo.defaultBranch)")
+            } else {
+                Button(title) {
+                    Task {
+                        if state == .featureDirty {
+                            await flow.commitAndPublish(repo)
+                        } else {
+                            await flow.publish(repo)
+                        }
+                    }
+                }
+                .buttonStyle(.bordered)
+                .help("Push \(workspace.name) to origin and open a pull request against \(repo.defaultBranch)")
             }
-            .buttonStyle(.bordered)
-            .help("Push \(workspace.name) to origin and open a pull request against \(repo.defaultBranch)")
         case .ghMissing:
             Button(title) {}
                 .buttonStyle(.bordered)

@@ -48,6 +48,12 @@ final class ProjectSession {
     /// while the project is in a background window position isn't lost.
     var pendingGateMergeWorkspaceID: UUID?
 
+    /// Set alongside `pendingGateMergeWorkspaceID` when the gate card's
+    /// "Create PR" (not "Merge locally"/"Merge & continue") button fired
+    /// the merge sheet — tells `WorkspaceSidebar` to open the sheet with
+    /// the publish button emphasized instead of the local-merge buttons.
+    var emphasizePublishWorkspaceID: UUID?
+
     /// Non-e2e channel for the plan-row *Close* action: `PlansSpecsSection`
     /// doesn't own the close confirm-alert (it lives on `WorkspaceSidebar`),
     /// so it parks the target workspace id here and the sidebar adopts it —
