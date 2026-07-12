@@ -45,6 +45,10 @@ struct DreamuxApp: App {
         // before any project session or external MCP client needs them.
         _ = SignalBus.shared
 
+        // Standard titlebar behaviors on the custom chrome (drag + double-click
+        // zoom) — .hiddenTitleBar removes them; this puts them back app-wide.
+        WindowChromeInteractions.install()
+
         if let socketPath = E2EMode.socketPath {
             // e2e harness launch: skip the notification permission
             // dialog (nothing can click it mid-run) and bring the
