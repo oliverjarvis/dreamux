@@ -35,6 +35,19 @@ enum PlanStatus: String, Sendable {
     }
 }
 
+extension PlanStatus {
+    /// The shared status vocabulary this plan maps to (glyph/color via
+    /// `FlowStatusGlyph`).
+    var flowStatus: FlowStatus {
+        switch self {
+        case .running: return .running
+        case .awaitingReview: return .waiting
+        case .merged: return .done
+        case .inProgress, .ready, .specOnly: return .queued
+        }
+    }
+}
+
 enum PlanStatusResolver {
     /// Status for a PLAN doc. `hasRun` = a ledger record links this plan
     /// to a feature; `featureExists` = that feature is currently in the
