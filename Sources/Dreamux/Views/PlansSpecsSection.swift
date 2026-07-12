@@ -81,12 +81,6 @@ struct PlansSpecsSection: View {
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
     @State private var hoveredChipURL: URL?
-    /// User overrides of a multi-plan family's expansion, keyed by
-    /// initiative id. Absence means "follow the default" — expanded while a
-    /// child is in flight (see `isInitiativeExpanded`); once the user
-    /// toggles, their choice sticks. Not persisted.
-    @State private var initiativeExpansion: [String: Bool] = [:]
-    @State private var hoveredInitiativeID: String?
     /// Queue row currently being dragged for reorder — see `queueSection`.
     @State private var draggingQueueItem: QueueItem?
     /// The row a *Course correct…* was fired from, driving the sheet. Only
@@ -99,6 +93,14 @@ struct PlansSpecsSection: View {
     @State private var mainRowHovered = false
     /// Hover state for the borderless "＋ New workspace" row.
     @State private var newWorkspaceHovered = false
+    /// The blocked plan whose card is currently flashed after a jump-to-
+    /// blocker click — see `jumpToBlocker`.
+    @State private var flashedPlanURL: URL?
+    /// The sidebar's own `ScrollView` proxy, captured from the
+    /// `ScrollViewReader` wrapping `rows` — drives `jumpToBlocker`'s
+    /// `scrollTo`.
+    @State private var scrollProxy: ScrollViewProxy?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The plan + anchor + header a course correction is being filed
     /// against. Built at the clicked row — only the plan row (`.currentPhase`)
@@ -293,34 +295,42 @@ struct PlansSpecsSection: View {
             .sorted { initiativeRank($0, statuses) < initiativeRank($1, statuses) }
         let needsPlan = docStore.initiatives.filter(\.needsPlan)
 
-        VStack(spacing: 2) {
-            ForEach(active) { initiative in
-                if initiative.plans.count > 1 {
-                    multiPlanBlock(initiative, statuses: statuses)
-                } else if let plan = initiative.plans.first {
-                    planRow(plan, status: statuses[plan.fileURL] ?? .ready,
-                            ordinal: nil, blockedBy: nil)
+        // `ScrollViewReader` wraps the smallest ancestor holding every
+        // `.id(plan.fileURL)` row — the sidebar's own `ScrollView` (an
+        // ancestor of this section) is what actually scrolls; this proxy
+        // just targets it. Captured into `scrollProxy` for `jumpToBlocker`.
+        ScrollViewReader { proxy in
+            VStack(spacing: 2) {
+                ForEach(active) { initiative in
+                    ForEach(initiative.plans) { plan in
+                        let status = statuses[plan.fileURL] ?? .ready
+                        if status != .merged {
+                            planRow(plan, status: status)
+                                .id(plan.fileURL)
+                        }
+                    }
                 }
-            }
-            ForEach(needsPlan) { initiative in
-                if let spec = initiative.spec {
-                    VStack(alignment: .leading, spacing: 2) {
-                        specOnlyRow(spec)
-                        // Carry the initiative's absorbed docs (a roadmap or
-                        // notes that paired with the spec) onto the row —
-                        // otherwise they'd be silently hidden.
-                        let chips = supportingChips(for: initiative)
-                        if !chips.isEmpty { chipLine(chips) }
+                ForEach(needsPlan) { initiative in
+                    if let spec = initiative.spec {
+                        VStack(alignment: .leading, spacing: 2) {
+                            specOnlyRow(spec)
+                            // Carry the initiative's absorbed docs (a roadmap or
+                            // notes that paired with the spec) onto the row —
+                            // otherwise they'd be silently hidden.
+                            let chips = supportingChips(for: initiative)
+                            if !chips.isEmpty { chipLine(chips) }
+                        }
+                    }
+                }
+                // Merged plans are intentionally NOT listed here — a done run is
+                // archived to the Flows page, not kept in the Workspaces rail.
+                if !docStore.looseDocs.isEmpty {
+                    disclosure("Docs (\(docStore.looseDocs.count))", isExpanded: $docsExpanded) {
+                        ForEach(docStore.looseDocs) { doc in plainDocRow(doc) }
                     }
                 }
             }
-            // Merged plans are intentionally NOT listed here — a done run is
-            // archived to the Flows page, not kept in the Workspaces rail.
-            if !docStore.looseDocs.isEmpty {
-                disclosure("Docs (\(docStore.looseDocs.count))", isExpanded: $docsExpanded) {
-                    ForEach(docStore.looseDocs) { doc in plainDocRow(doc) }
-                }
-            }
+            .onAppear { scrollProxy = proxy }
         }
     }
 
@@ -338,130 +348,6 @@ struct PlansSpecsSection: View {
     /// plan list used, lifted to the initiative level.
     private func initiativeRank(_ initiative: Initiative, _ statuses: [URL: PlanStatus]) -> Int {
         initiative.plans.map { rank(statuses[$0.fileURL] ?? .ready) }.min() ?? rank(.ready)
-    }
-
-    // MARK: - Multi-plan family
-
-    /// A multi-plan initiative: a grouping row (aggregate glyph, title,
-    /// `plan k/n · pct`) with the doc-chip line beneath, and — when
-    /// expanded — every phase as an indented child row carrying its
-    /// ordinal, status, and a `blocked by k` annotation.
-    @ViewBuilder
-    private func multiPlanBlock(_ initiative: Initiative, statuses: [URL: PlanStatus]) -> some View {
-        let memberStatuses = initiative.plans.map { statuses[$0.fileURL] ?? .ready }
-        let progress = InitiativeProgress.resolve(
-            statuses: memberStatuses,
-            checked: initiative.plans.reduce(0) { $0 + $1.checkedSteps },
-            total: initiative.plans.reduce(0) { $0 + $1.totalSteps })
-        let expanded = isInitiativeExpanded(initiative, memberStatuses)
-        let chips = docChips(for: initiative)
-        VStack(alignment: .leading, spacing: 2) {
-            initiativeGroupingRow(initiative, memberStatuses: memberStatuses,
-                                  progress: progress, expanded: expanded)
-            if !chips.isEmpty { chipLine(chips) }
-            if expanded {
-                ForEach(Array(initiative.plans.enumerated()), id: \.element.id) { index, plan in
-                    // A merged phase is never "blocked" — the annotation is
-                    // for the phases still waiting their turn.
-                    let blockedBy = memberStatuses[index] == .merged
-                        ? nil
-                        : InitiativeProgress.blockingOrdinal(statuses: memberStatuses, index: index)
-                    planRow(plan, status: memberStatuses[index],
-                            ordinal: index + 1, blockedBy: blockedBy)
-                        .padding(.leading, 14)
-                }
-            }
-        }
-    }
-
-    private func initiativeGroupingRow(
-        _ initiative: Initiative,
-        memberStatuses: [PlanStatus],
-        progress: (currentIndex: Int?, label: String, fraction: Double?),
-        expanded: Bool
-    ) -> some View {
-        let anyRunning = memberStatuses.contains(.running)
-        let glyph = progress.currentIndex == nil ? "checkmark.seal.fill" : "circle.lefthalf.filled"
-        return Button {
-            withAnimation(.snappy(duration: 0.18)) {
-                setInitiative(initiative.id, expanded: !expanded)
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(expanded ? 90 : 0))
-                    .frame(width: chevronColumnWidth, height: 18)
-                Image(systemName: glyph)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(anyRunning ? Color.green : Color.secondary)
-                    .frame(width: 18)
-                Text(initiative.title)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1).truncationMode(.tail)
-                Spacer(minLength: 0)
-                Text(progressSummary(progress))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background {
-            if hoveredInitiativeID == initiative.id {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.primary.opacity(0.04))
-                    .padding(.horizontal, 4)
-            }
-        }
-        .contextMenu {
-            Button("Run remaining plans") { runRemaining(initiative, statuses: memberStatuses) }
-        }
-        .onHover { hovering in
-            if hovering { hoveredInitiativeID = initiative.id }
-            else if hoveredInitiativeID == initiative.id { hoveredInitiativeID = nil }
-        }
-    }
-
-    /// `plan 2/3 · 41%` — the resolver's label plus a rounded percentage
-    /// when the family carries checkboxes.
-    private func progressSummary(_ progress: (currentIndex: Int?, label: String, fraction: Double?)) -> String {
-        guard let fraction = progress.fraction else { return progress.label }
-        return "\(progress.label) · \(Int((fraction * 100).rounded()))%"
-    }
-
-    /// Enqueue every non-merged phase in order — the grouping row's
-    /// *Run remaining plans*. Blocking is presentational, so this walks the
-    /// whole remaining sequence and lets the queue gate between them.
-    private func runRemaining(_ initiative: Initiative, statuses: [PlanStatus]) {
-        for (index, plan) in initiative.plans.enumerated() where statuses[index] != .merged {
-            onEnqueue(plan)
-        }
-    }
-
-    /// A family follows its default expansion (running/awaiting child, or
-    /// the queue parked on one of its plans) until the user toggles it.
-    private func isInitiativeExpanded(_ initiative: Initiative, _ memberStatuses: [PlanStatus]) -> Bool {
-        if let override = initiativeExpansion[initiative.id] { return override }
-        return InitiativeProgress.defaultsExpanded(
-            statuses: memberStatuses,
-            queueParkedOnMember: queueParked(on: initiative))
-    }
-
-    private func setInitiative(_ id: String, expanded: Bool) {
-        initiativeExpansion[id] = expanded
-    }
-
-    /// Whether the queue sits at a gate/attention on one of the initiative's
-    /// plans (matched by relative path).
-    private func queueParked(on initiative: Initiative) -> Bool {
-        guard queue.state == .atGate || queue.state == .attention,
-              let current = queue.currentPlanPath else { return false }
-        return initiative.plans.contains { docStore.relativePath(of: $0) == current }
     }
 
     /// Sidebar ordering: running → awaiting review → ready/in-progress
@@ -652,7 +538,7 @@ struct PlansSpecsSection: View {
     /// jump there. A single click activates the plan's workspace (and its
     /// Overview) when one exists, else opens the plan doc — a not-yet-run
     /// plan has no workspace to jump to.
-    private func planRow(_ plan: PlanDoc, status: PlanStatus, ordinal: Int?, blockedBy: Int?) -> some View {
+    private func planRow(_ plan: PlanDoc, status: PlanStatus) -> some View {
         let name = featureName(plan)
         let openableFeature = PlanWorkspacePresence.workspaceToOpen(
             status: status, featureName: name, featureExists: featureExists)
@@ -661,13 +547,16 @@ struct PlansSpecsSection: View {
         // feature existing, not the in-flight gate the → affordance uses.
         let showUnread = name.map { featureExists($0) && hasUnread($0) } ?? false
         let workspace = name.flatMap(workspaceForFeature)
-        // A `**Runs:** after <blocker>` plan carries the blocker's title in
-        // its caption (resolved via DocStore; `<filename> (missing)` when the
-        // path doesn't resolve — never a silent drop).
-        let afterCaption = IntakeEnactment.afterCaption(runsAfter: plan.runsAfter) { reference in
-            let target = docStore.resolvedURL(forReference: reference)
-            return docStore.docs.first { $0.fileURL.standardizedFileURL == target }?.title
-        }
+        // A `**Runs:** after <blocker>` plan is *waiting* iff the blocker
+        // resolves to a known, non-merged plan — `PlanBlocking` is the single
+        // source of truth the dim treatment and the after-link both key off.
+        let blocker = PlanBlocking.blocker(
+            for: plan, status: status,
+            resolveBlocker: { ref in
+                let target = docStore.resolvedURL(forReference: ref)
+                return docStore.plans.first { $0.fileURL.standardizedFileURL == target }
+            },
+            statusOf: { docStore.status(for: $0, featureExists: featureExists) })
         // "Run the plan" is offered whenever the plan is incomplete AND no
         // agent is actually working it. Liveness is the app's own durable
         // signal — the tracked plan-agent terminal tab (`hasLivePlanAgent`) —
@@ -702,11 +591,6 @@ struct PlansSpecsSection: View {
                         .frame(width: 18, height: 18)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 4) {
-                            if let ordinal {
-                                Text("\(ordinal) ·")
-                                    .font(.callout.weight(.medium).monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                            }
                             Text(plan.title)
                                 .font(.system(size: 15, weight: .medium))
                                 .lineLimit(1).truncationMode(.tail)
@@ -716,8 +600,7 @@ struct PlansSpecsSection: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        planMetaLine(plan, blockedBy: blockedBy,
-                                     afterCaption: afterCaption)
+                        planMetaLine(plan, blocker: blocker)
                         if plan.totalSteps > 0 {
                             planProgressBar(checked: plan.checkedSteps,
                                             total: plan.totalSteps)
@@ -745,8 +628,13 @@ struct PlansSpecsSection: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(blocker != nil ? 0.78 : 1)
         .background {
-            if isHovered {
+            if flashedPlanURL == plan.fileURL {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.22))
+                    .padding(.horizontal, 4)
+            } else if isHovered {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(0.04))
                     .padding(.horizontal, 4)
@@ -758,27 +646,53 @@ struct PlansSpecsSection: View {
         }
     }
 
+    /// Scrolls the sidebar to a blocker plan's row and flashes it briefly —
+    /// the target of the `after ↳ ⟨blocker⟩` link. Reduce Motion drops both
+    /// the scroll animation and the flash's fade-out.
+    private func jumpToBlocker(_ url: URL) {
+        if reduceMotion {
+            scrollProxy?.scrollTo(url, anchor: .center)
+        } else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                scrollProxy?.scrollTo(url, anchor: .center)
+            }
+        }
+        flashedPlanURL = url
+        Task {
+            try? await Task.sleep(for: .seconds(1.1))
+            if flashedPlanURL == url {
+                if reduceMotion {
+                    flashedPlanURL = nil
+                } else {
+                    withAnimation(.easeInOut(duration: 0.3)) { flashedPlanURL = nil }
+                }
+            }
+        }
+    }
+
     /// Exceptional annotations only — blocked/after/auto-run-failed. The
     /// status word moved to the leading glyph and the step count to the
     /// progress bar, so this line renders nothing for an ordinary plan.
+    /// The blocked caption is itself a link — clicking jumps to (scrolls to
+    /// + flashes) the blocker's card via `jumpToBlocker`.
     @ViewBuilder
     private func planMetaLine(
-        _ plan: PlanDoc, blockedBy: Int?, afterCaption: String?
+        _ plan: PlanDoc, blocker: PlanBlocking.Blocker?
     ) -> some View {
         let failure = autoRunFailure(docStore.relativePath(of: plan))
-        if blockedBy != nil || afterCaption != nil || failure != nil {
+        if blocker != nil || failure != nil {
             HStack(spacing: 6) {
-                if let blockedBy {
-                    Text("blocked by \(blockedBy)")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                if let afterCaption {
-                    Text(afterCaption)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1).truncationMode(.tail)
+                if let blocker {
+                    Button {
+                        jumpToBlocker(blocker.fileURL)
+                    } label: {
+                        Text("after ↳ \(blocker.title)")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Waiting on “\(blocker.title)” — jump to it")
                 }
                 if let failure {
                     // An unattended launch failed (name collision, no repos,
@@ -878,12 +792,6 @@ struct PlansSpecsSection: View {
         }
     }
 
-    /// Width of the leading column reserved for the multi-plan family's
-    /// disclosure chevron (`initiativeGroupingRow`) — plan cards no longer
-    /// have one of their own; the full checklist lives on the workspace's
-    /// Overview now.
-    private let chevronColumnWidth: CGFloat = 10
-
     // MARK: - Doc chips
 
     /// A compact, tappable label for an initiative-level doc.
@@ -891,16 +799,6 @@ struct PlansSpecsSection: View {
         let label: String
         let url: URL
         var id: URL { url }
-    }
-
-    private func docChips(for initiative: Initiative) -> [Chip] {
-        var chips: [Chip] = []
-        if let spec = initiative.spec {
-            chips.append(Chip(label: DocChipLabel.label(title: spec.title, isSpec: true),
-                              url: spec.fileURL))
-        }
-        chips.append(contentsOf: supportingChips(for: initiative))
-        return chips
     }
 
     /// The initiative's supporting docs (roadmap, notes) as chips — the
