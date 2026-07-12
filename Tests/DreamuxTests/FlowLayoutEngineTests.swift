@@ -183,4 +183,17 @@ final class FlowLayoutEngineTests: XCTestCase {
         let b = layout.positions["b"]!
         XCTAssertGreaterThanOrEqual(abs(b.x - a.x), nodeWidth)
     }
+
+    // MARK: Custom node-size/gap params shrink the layout below defaults
+    func testCustomNodeSizeShrinksLayout() {
+        let nodes = [FlowNode(id: "a", kind: .plan, label: "a", status: .queued),
+                     FlowNode(id: "b", kind: .plan, label: "b", status: .queued)]
+        let edges = [FlowEdge(from: "a", to: "b", kind: .dependency)]
+        let big = FlowLayoutEngine.layout(nodes: nodes, edges: edges)
+        let small = FlowLayoutEngine.layout(nodes: nodes, edges: edges,
+                                            nodeSize: CGSize(width: 16, height: 16),
+                                            rankGap: 12, siblingGap: 8, margin: 6)
+        XCTAssertLessThan(small.size.height, big.size.height)
+        XCTAssertLessThan(small.size.width, big.size.width)
+    }
 }

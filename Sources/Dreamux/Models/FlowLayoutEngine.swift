@@ -32,7 +32,11 @@ enum FlowLayoutEngine {
     /// view's self-loop arc bulges into off the session node's edge.
     static let margin: CGFloat = 24
 
-    static func layout(nodes: [FlowNode], edges: [FlowEdge]) -> FlowLayout {
+    static func layout(
+        nodes: [FlowNode], edges: [FlowEdge],
+        nodeSize: CGSize = Self.nodeSize, rankGap: CGFloat = Self.rankGap,
+        siblingGap: CGFloat = Self.siblingGap, margin: CGFloat = Self.margin
+    ) -> FlowLayout {
         guard !nodes.isEmpty else {
             return FlowLayout(positions: [:], size: .zero, edgePoints: [:])
         }
