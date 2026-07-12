@@ -66,7 +66,7 @@ struct ProjectGraphView: View {
                 Text(node.label).font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1).foregroundStyle(blocked ? .secondary : .primary)
             }
-            .padding(.horizontal, 11).frame(height: 40)
+            .padding(.horizontal, 11).frame(height: FlowLayoutEngine.nodeSize.height)
             .frame(maxWidth: FlowLayoutEngine.nodeSize.width)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)

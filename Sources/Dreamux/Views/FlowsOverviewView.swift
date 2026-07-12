@@ -69,7 +69,7 @@ struct FlowsOverviewView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14, pinnedViews: []) {
                         headerRow(board)
-                        projectGraphPanel
+                        projectGraphPanel(board)
                         if board.sections.isEmpty {
                             emptyState
                         } else {
@@ -119,7 +119,7 @@ struct FlowsOverviewView: View {
     /// has nothing to say here. A node tap zooms straight to that plan's
     /// lane, same destination as clicking its row below.
     @ViewBuilder
-    private var projectGraphPanel: some View {
+    private func projectGraphPanel(_ board: FlowsBoard) -> some View {
         let graph = projectGraph()
         if graph.nodes.count > 1 {
             VStack(alignment: .leading, spacing: 8) {
@@ -129,7 +129,12 @@ struct FlowsOverviewView: View {
                     .kerning(0.4)
                     .foregroundStyle(.secondary)
                 ScrollView(.horizontal, showsIndicators: false) {
-                    ProjectGraphView(graph: graph, compact: false) { id in zoomedLaneID = id }
+                    ProjectGraphView(graph: graph, compact: false) { id in
+                        // Only zoom when a lane exists for this plan — a merged/
+                        // done node has none, so leave the overview as-is rather
+                        // than dangle `zoomedLaneID` at a laneless id.
+                        if lane(forID: id, in: board) != nil { zoomedLaneID = id }
+                    }
                         .padding(8)
                 }
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.03)))
