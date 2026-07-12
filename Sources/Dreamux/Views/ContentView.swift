@@ -179,6 +179,7 @@ struct ContentView: View {
                                 plan: plan, summary: summary, priority: priority)
                         },
                         autoRunFailure: { session.autoRunFailures[$0] },
+                        onOpenProjectGraph: { sidebarMode = .flows; flowsZoomLaneID = nil },
                         applets: session.applets,
                         appLibrary: session.appLibrary,
                         appletSessionProvider: { session.appletSession(for: $0) },

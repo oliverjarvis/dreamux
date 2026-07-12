@@ -42,6 +42,9 @@ struct WorkspaceSidebar: View {
     /// Auto-run failure lookup (`ProjectSession.autoRunFailures`) —
     /// forwarded straight into `PlansSpecsSection`.
     let autoRunFailure: (String) -> String?
+    /// Opens the Flows project panel (un-zoomed) — forwarded straight into
+    /// `PlansSpecsSection`'s dependency mini-map.
+    let onOpenProjectGraph: () -> Void
     /// This project's Applet Studio applets (the Applets section's data).
     @Bindable var applets: ProjectAppletStore
     /// The global applet library — the New App sheet's Adopt source and the
@@ -276,6 +279,7 @@ struct WorkspaceSidebar: View {
                     store.activate(workspace.id)
                     store.session(for: workspace).focusOverview()
                 },
+                onOpenProjectGraph: onOpenProjectGraph,
                 onEnqueue: { doc in planQueue.enqueue(docStore.relativePath(of: doc)) },
                 featureName: { featureName(for: $0) },
                 hasUnread: { name in

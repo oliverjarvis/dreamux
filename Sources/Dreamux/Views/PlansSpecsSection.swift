@@ -25,6 +25,9 @@ struct PlansSpecsSection: View {
     let onWritePlan: (PlanDoc) -> Void
     @Bindable var queue: PlanQueueController
     let onOpenFeature: (String) -> Void   // feature name → activate workspace
+    /// Opens the Flows project panel (un-zoomed) — the mini-map's nav
+    /// target, at the foot of this section.
+    let onOpenProjectGraph: () -> Void
     let onEnqueue: (PlanDoc) -> Void
     /// The feature a plan runs (or ran) as — ledger record wins, else the
     /// name derived from the filename. Drives the → workspace affordance and
@@ -132,6 +135,7 @@ struct PlansSpecsSection: View {
                     rows
                 }
                 newWorkspaceRow
+                projectGraphMiniMap
             }
         }
         .onAppear { docStore.startWatching() }
@@ -225,6 +229,45 @@ struct PlansSpecsSection: View {
             }
         }
         .onHover { newWorkspaceHovered = $0 }
+    }
+
+    /// A tiny "Dependencies" preview of the project's plan graph, at the
+    /// foot of the section — the same `ProjectGraphBuilder`/`ProjectGraphView`
+    /// the Flows "This project" panel uses (Task 5), rendered `compact` and
+    /// hidden when there's nothing to show a dependency between (≤1 node).
+    /// Tapping the card (or, for now, any node) jumps to the full graph on
+    /// Flows — a per-node zoom is a later refinement.
+    @ViewBuilder
+    private var projectGraphMiniMap: some View {
+        let graph = ProjectGraphBuilder.build(
+            plans: docStore.plans,
+            relativePath: { docStore.relativePath(of: $0) },
+            resolveBlocker: { ref in
+                let target = docStore.resolvedURL(forReference: ref)
+                return docStore.plans.first { $0.fileURL.standardizedFileURL == target }
+            },
+            statusOf: { docStore.status(for: $0, featureExists: featureExists) })
+        if graph.nodes.count > 1 {
+            Button(action: onOpenProjectGraph) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Dependencies")
+                            .font(.system(size: 11, weight: .semibold))
+                            .textCase(.uppercase).kerning(0.4).foregroundStyle(.tertiary)
+                        Spacer()
+                        Text("Open in Flows →")
+                            .font(.system(size: 11)).foregroundStyle(Color.accentColor)
+                    }
+                    ProjectGraphView(graph: graph, compact: true) { _ in onOpenProjectGraph() }
+                        .frame(maxWidth: .infinity, minHeight: 70)
+                }
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08)))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+        }
     }
 
     /// The permanent main-branch row — a place, not a plan: no status
