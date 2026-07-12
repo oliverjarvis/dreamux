@@ -106,13 +106,18 @@ enum IntakeEnactment {
         }
     }
 
-    /// The `after <blocker>` caption a waiting plan carries beside its status
-    /// (spec: "Enactment (app side)" — the sidebar treatment). `nil` for a
-    /// plan with no `runsAfter`; `after <title>` when the blocker resolves to
-    /// a known doc via `resolveTitle`; `after <filename> (missing)` when it
-    /// doesn't — an unresolvable blocker degrades visibly rather than
-    /// vanishing (spec: Decisions §3). Pure over `resolveTitle` so the view
-    /// can inject DocStore resolution and the formatting stays unit-testable.
+    /// Formats an `after <blocker>` caption from a plan's `runsAfter`: `nil`
+    /// for a plan with no blocker; `after <title>` when the blocker resolves
+    /// to a known doc via `resolveTitle`; `after <filename> (missing)` when it
+    /// doesn't. Pure over `resolveTitle` so callers inject DocStore resolution
+    /// and the formatting stays unit-testable.
+    ///
+    /// NOTE: no longer wired to the Workspaces rail. As of the
+    /// 2026-07-12 sidebar-dependency-legibility slice the rail shows the
+    /// waiting relationship via `PlanBlocking` + a clickable link (which
+    /// resolves the blocker's own title, and renders no caption at all for an
+    /// unresolvable/merged blocker). This stays as a pure, tested formatter
+    /// for reuse — e.g. the graph mini-map's edge labels (slice 3).
     static func afterCaption(runsAfter: String?, resolveTitle: (String) -> String?) -> String? {
         guard let runsAfter else { return nil }
         if let title = resolveTitle(runsAfter) { return "after \(title)" }
