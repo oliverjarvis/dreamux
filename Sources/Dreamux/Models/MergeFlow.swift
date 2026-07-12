@@ -75,6 +75,16 @@ enum PublishAvailability: Equatable {
     case ghMissing
 }
 
+extension PublishAvailability {
+    /// Pure verdict from the two probes the pre-check gathers: no remote
+    /// ⇒ the option can never apply (hidden); a remote but no gh ⇒
+    /// fixable, shown disabled; both present ⇒ available.
+    static func decide(anyRemote: Bool, ghAvailable: Bool) -> PublishAvailability {
+        guard anyRemote else { return .noRemote }
+        return ghAvailable ? .available : .ghMissing
+    }
+}
+
 /// The merge sheet's orchestration, extracted from the view — the
 /// `StartPlan` pattern again — so the exact same code runs whether the
 /// user clicks through `MergeFeatureSheet`, the e2e automation server
@@ -190,20 +200,18 @@ final class MergeFlow {
         // PR availability: per-repo remote check, plus one shared gh
         // probe (skipped entirely when no repo has a remote — common
         // for local-only projects, and it keeps the sheet snappy).
-        var availability: [String: PublishAvailability] = [:]
+        var hasRemote: [String: Bool] = [:]
         var anyRemote = false
         for repo in repos {
-            if await GitOperations.remoteURL(in: repo.rootURL) != nil {
-                availability[repo.name] = .available
-                anyRemote = true
-            } else {
-                availability[repo.name] = .noRemote
-            }
+            let remote = await GitOperations.remoteURL(in: repo.rootURL) != nil
+            hasRemote[repo.name] = remote
+            if remote { anyRemote = true }
         }
-        if anyRemote, !(await GhOperations.isAvailable()) {
-            for (name, value) in availability where value == .available {
-                availability[name] = .ghMissing
-            }
+        let ghAvailable = anyRemote ? await GhOperations.isAvailable() : false
+        var availability: [String: PublishAvailability] = [:]
+        for repo in repos {
+            availability[repo.name] = PublishAvailability.decide(
+                anyRemote: hasRemote[repo.name] ?? false, ghAvailable: ghAvailable)
         }
         publishAvailability = availability
 

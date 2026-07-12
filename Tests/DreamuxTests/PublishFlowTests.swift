@@ -211,6 +211,19 @@ final class PublishFlowTests: XCTestCase {
         XCTAssertEqual(flow.state(for: repo), .pending)
     }
 
+    /// Pure verdict table for `PublishAvailability.decide`, independent
+    /// of `MergeFlow` — `initializeStates` is just one caller of it.
+    func testDecideNoRemoteIsNoRemote() {
+        XCTAssertEqual(PublishAvailability.decide(anyRemote: false, ghAvailable: true), .noRemote)
+        XCTAssertEqual(PublishAvailability.decide(anyRemote: false, ghAvailable: false), .noRemote)
+    }
+    func testDecideRemoteButNoGhIsGhMissing() {
+        XCTAssertEqual(PublishAvailability.decide(anyRemote: true, ghAvailable: false), .ghMissing)
+    }
+    func testDecideRemoteAndGhIsAvailable() {
+        XCTAssertEqual(PublishAvailability.decide(anyRemote: true, ghAvailable: true), .available)
+    }
+
     // MARK: - Publish
 
     /// The core contract of `publish`: the feature branch must actually
