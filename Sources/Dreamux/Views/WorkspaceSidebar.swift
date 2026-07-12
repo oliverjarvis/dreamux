@@ -303,7 +303,8 @@ struct WorkspaceSidebar: View {
                 onOpenMain: { openMainWorkspace() },
                 mainBranchDisplayName: repoStore.repositories.first?.defaultBranch ?? "main",
                 mainRepoNames: repoStore.repositories.map(\.name),
-                mainWorkspace: { store.workspaces.first(where: \.isMain) }
+                mainWorkspace: { store.workspaces.first(where: \.isMain) },
+                prState: { name in prState(forFeature: name) }
             )
 
             contextSection
@@ -1066,6 +1067,16 @@ struct WorkspaceSidebar: View {
             onDismiss: { pendingMerge = nil },
             emphasizePublish: emphasizePublish
         )
+    }
+
+    /// GitHub PR lifecycle for a tracked feature name — the read side of
+    /// `prStatus` (the write side is `mergeSheet(for:)`'s `onPublished`
+    /// above). Reuses the one `prStatus` channel Task 8 threaded in rather
+    /// than opening a second one; passed down into `PlansSpecsSection` so
+    /// its `mainRow`/`planRow` can badge a tracked PR the same way the
+    /// Flows lane does (`ContentView.prStatesByWorkspace`).
+    private func prState(forFeature name: String) -> PRLaneState? {
+        prStatus.state(for: name).map { PRLaneState(lifecycle: $0.lifecycle, url: $0.url) }
     }
 
     /// The automation server's `openMergeSheet` command parks the

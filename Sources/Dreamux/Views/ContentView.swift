@@ -129,6 +129,15 @@ struct ContentView: View {
         })
     }
 
+    /// PR lifecycle lookup keyed by feature *name* directly (no re-key onto
+    /// a workspace id) — `prStatesByWorkspace`'s sibling for callers that
+    /// only have a feature/branch name in hand, like `WorkspaceOverviewView
+    /// .projectRunRow` (keyed on `ProjectRun.featureName`). Threaded into
+    /// `overviewDependencies.prState` below.
+    private func prState(forFeature name: String) -> PRLaneState? {
+        session.prStatus.state(for: name).map { PRLaneState(lifecycle: $0.lifecycle, url: $0.url) }
+    }
+
     /// The window's whole layout tree plus every sheet/alert modifier that
     /// doesn't need to chain with the palette's own state below — split
     /// out of `body` because the combined chain (this stack + the palette
@@ -1002,7 +1011,8 @@ struct ContentView: View {
                     sidebarMode = .flows
                     flowsZoomLaneID = lane.id
                 }
-            }
+            },
+            prState: { name in prState(forFeature: name) }
         )
     }
 
