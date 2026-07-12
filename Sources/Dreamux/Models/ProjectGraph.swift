@@ -52,6 +52,10 @@ enum ProjectGraphBuilder {
             .filter { includedURLs.contains($0.blocker.fileURL) && includedURLs.contains($0.waiter.fileURL) }
             .map { FlowEdge(from: "plan-\(relativePath($0.blocker))",
                             to: "plan-\(relativePath($0.waiter))", kind: .dependency) }
+            // Sort so the graph is order-independent: `ProjectGraph` is
+            // Equatable and dagre's layout is edge-insertion-order sensitive,
+            // so the same dependencies must always yield the same graph.
+            .sorted { ($0.from, $0.to) < ($1.from, $1.to) }
         return ProjectGraph(nodes: nodes, edges: edges)
     }
 }

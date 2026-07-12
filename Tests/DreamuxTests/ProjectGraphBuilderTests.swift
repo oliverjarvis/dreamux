@@ -48,4 +48,14 @@ final class ProjectGraphBuilderTests: XCTestCase {
         let b = build([plan("a"), plan("b")], status: [:]).nodes.map(\.id)
         XCTAssertEqual(a, b)
     }
+    func testWholeGraphEqualAcrossPermutations() {
+        // Two independent chains; permuting the input must yield an EQUAL
+        // graph (nodes AND edges), since ProjectGraph is Equatable and dagre
+        // layout is edge-order sensitive.
+        let g1 = build([plan("b", runsAfter: "a"), plan("a"), plan("d", runsAfter: "c"), plan("c")],
+                       status: ["a": .running, "c": .running])
+        let g2 = build([plan("c"), plan("d", runsAfter: "c"), plan("a"), plan("b", runsAfter: "a")],
+                       status: ["a": .running, "c": .running])
+        XCTAssertEqual(g1, g2)
+    }
 }
