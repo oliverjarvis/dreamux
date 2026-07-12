@@ -676,13 +676,7 @@ struct WorkspaceOverviewView: View {
 
     /// A leading "Task 12:" is redundant once a number badge carries the
     /// index — strip it; keep any other title verbatim.
-    private func cleanTitle(_ title: String) -> String {
-        if let range = title.range(of: #"^Task\s+\d+:\s*"#, options: .regularExpression) {
-            let rest = String(title[range.upperBound...])
-            return rest.isEmpty ? "Steps" : rest
-        }
-        return title.isEmpty ? "Steps" : title
-    }
+    private func cleanTitle(_ title: String) -> String { PlanTaskTitle.clean(title) }
 
     @ViewBuilder
     private func checkGlyph(allChecked: Bool, isCurrent: Bool) -> some View {

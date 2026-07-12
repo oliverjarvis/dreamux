@@ -125,10 +125,19 @@ struct FlowLaneView: View {
         .help("Loop detected: \(edge.label ?? "") repeated \(edge.iterations ?? 0) times")
     }
 
+    /// The nodes shown in the flat overview strip. On a plan lane, subagents
+    /// grafted by slice 3B belong to the zoomed task DAG (routed by edges),
+    /// not this edge-less left-to-right strip — including them would render
+    /// them after `drain` with a misleading sequence arrow. Session lanes
+    /// keep their own agent pipeline.
+    private var pipelineNodes: [FlowNode] {
+        lane.flow.kind == .plan ? lane.flow.nodes.filter { $0.kind != .agent } : lane.flow.nodes
+    }
+
     private var pipeline: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
-                ForEach(Array(lane.flow.nodes.enumerated()), id: \.element.id) { index, node in
+                ForEach(Array(pipelineNodes.enumerated()), id: \.element.id) { index, node in
                     if index > 0 {
                         Image(systemName: "arrow.right")
                             .font(.system(size: 8, weight: .semibold))
