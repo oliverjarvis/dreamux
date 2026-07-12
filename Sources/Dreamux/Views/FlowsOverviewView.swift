@@ -7,6 +7,10 @@ import SwiftUI
 struct FlowsOverviewView: View {
     @ObservedObject var flows: FlowStore
     let planLaneInputs: () -> [PlanLaneInput]
+    /// The project's plan-dependency DAG for the overview's "This project"
+    /// panel — a closure (not a stored value) so it's rebuilt each render
+    /// pass from live `DocStore` state, same pattern as `planLaneInputs`.
+    let projectGraph: () -> ProjectGraph
     /// Lane id currently zoomed into (or `nil` for the overview),
     /// lifted to `ContentView` so the e2e `zoomFlow` command and a
     /// lane tap both drive the same state.
@@ -65,6 +69,7 @@ struct FlowsOverviewView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14, pinnedViews: []) {
                         headerRow(board)
+                        projectGraphPanel
                         if board.sections.isEmpty {
                             emptyState
                         } else {
@@ -106,6 +111,30 @@ struct FlowsOverviewView: View {
             if board.needsYouCount > 0 {
                 badge("\(board.needsYouCount) needs you", color: FlowStatusGlyph.color(.waiting))
             }
+        }
+    }
+
+    /// The project's plan-dependency DAG, shown above the sections whenever
+    /// there's more than a single node to relate — a lone plan (or none)
+    /// has nothing to say here. A node tap zooms straight to that plan's
+    /// lane, same destination as clicking its row below.
+    @ViewBuilder
+    private var projectGraphPanel: some View {
+        let graph = projectGraph()
+        if graph.nodes.count > 1 {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("This project")
+                    .font(.system(size: 12, weight: .semibold))
+                    .textCase(.uppercase)
+                    .kerning(0.4)
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    ProjectGraphView(graph: graph, compact: false) { id in zoomedLaneID = id }
+                        .padding(8)
+                }
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.03)))
+            }
+            .padding(.bottom, 6)
         }
     }
 
