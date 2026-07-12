@@ -28,4 +28,13 @@ final class ArcCookieDecryptorTests: XCTestCase {
         XCTAssertEqual(k1, k2)
         XCTAssertEqual(k1.count, 16)
     }
+
+    func testDomainHashPrefixIsStripped() {
+        let key = ArcCookieDecryptor.deriveKey(fromStoragePassword: "hunter2")
+        // 32 bytes of 0xFF are never valid UTF-8, so the direct decode fails and
+        // the decryptor must drop the 32-byte prefix to recover the real value.
+        let plaintext = Data(repeating: 0xFF, count: 32) + Data("session=abc123".utf8)
+        let blob = aesCBCEncryptV10(plaintext, key: key)
+        XCTAssertEqual(ArcCookieDecryptor.decrypt(blob, key: key), "session=abc123")
+    }
 }

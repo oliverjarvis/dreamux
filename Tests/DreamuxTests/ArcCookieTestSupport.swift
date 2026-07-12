@@ -7,21 +7,21 @@ import SQLite3
 /// the fixed all-spaces IV, prefixed with "v10" — so decryptor/source tests can
 /// round-trip against a known key without a real Arc install.
 func aesCBCEncryptV10(_ plaintext: String, key: Data) -> Data {
+    aesCBCEncryptV10(Data(plaintext.utf8), key: key)
+}
+
+/// Test-only: v10-encrypt raw plaintext bytes (used to simulate the 32-byte
+/// SHA-256 domain-hash prefix modern Chromium prepends before the value).
+func aesCBCEncryptV10(_ plaintextData: Data, key: Data) -> Data {
     let iv = [UInt8](repeating: 0x20, count: 16)
-    let inputBytes = Array(plaintext.utf8)
+    let inputBytes = [UInt8](plaintextData)
     var out = [UInt8](repeating: 0, count: inputBytes.count + kCCBlockSizeAES128)
     var moved = 0
     let status = key.withUnsafeBytes { keyPtr in
-        CCCrypt(
-            CCOperation(kCCEncrypt),
-            CCAlgorithm(kCCAlgorithmAES128),
-            CCOptions(kCCOptionPKCS7Padding),
-            keyPtr.baseAddress, key.count,
-            iv,
-            inputBytes, inputBytes.count,
-            &out, out.count,
-            &moved
-        )
+        CCCrypt(CCOperation(kCCEncrypt), CCAlgorithm(kCCAlgorithmAES128),
+                CCOptions(kCCOptionPKCS7Padding),
+                keyPtr.baseAddress, key.count, iv,
+                inputBytes, inputBytes.count, &out, out.count, &moved)
     }
     precondition(status == kCCSuccess, "test encrypt failed")
     return Data("v10".utf8) + Data(out.prefix(moved))

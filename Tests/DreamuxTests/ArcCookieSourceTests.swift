@@ -84,4 +84,35 @@ final class ArcCookieSourceTests: XCTestCase {
         setenv(key, "/tmp/some-arc-dir", 1)
         XCTAssertEqual(ArcCookieSource.defaultBaseDir.path, "/tmp/some-arc-dir")
     }
+
+    func testReadCookiesThrowsWhenUnavailable() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("empty-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        let src = ArcCookieSource(baseDir: base, keyProvider: { Data() })
+        XCTAssertThrowsError(try src.readCookies()) { error in
+            XCTAssertEqual(error as? CookieImportError, .sourceUnavailable(browser: "Arc"))
+        }
+    }
+
+    func testStoragePasswordEnvOverrideDrivesDefaultKeyProvider() throws {
+        // With DREAMUX_ARC_STORAGE_PASSWORD set, the DEFAULT key provider must derive
+        // the key from that password (no Keychain), decrypting a fixture encrypted
+        // with the same password. No keyProvider is injected here — that's the point.
+        let key = "DREAMUX_ARC_STORAGE_PASSWORD"
+        let saved = ProcessInfo.processInfo.environment[key]
+        defer { if let saved { setenv(key, saved, 1) } else { unsetenv(key) } }
+        setenv(key, password, 1)   // `password` is the fixture's encryption password
+
+        let far: Int64 = 99_999_999_999_000_000
+        let base = try makeArcTree(rows: [
+            encryptedRow(host: ".github.com", name: "sess", value: "abc", expiresUTC: far),
+        ])
+        defer { try? FileManager.default.removeItem(at: base.deletingLastPathComponent()) }
+
+        let src = ArcCookieSource(baseDir: base)   // default keyProvider → env password path
+        let result = try src.readCookies()
+        XCTAssertEqual(result.cookies.map(\.value), ["abc"])
+    }
 }
