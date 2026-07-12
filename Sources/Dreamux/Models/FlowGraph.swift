@@ -16,7 +16,7 @@ enum FlowKind: String, Codable, Hashable, Sendable {
 }
 
 enum FlowNodeKind: String, Codable, Hashable, Sendable {
-    case source, phase, agent, step, task, gate, drain
+    case source, phase, agent, step, task, gate, drain, plan
 }
 
 enum FlowEdgeKind: String, Codable, Hashable, Sendable {
