@@ -11,6 +11,13 @@ import Observation
 /// `pendingIsolation` itself intentionally stays on `RunnerManager`
 /// (the Run pane already consumes it); the `isolateRunner` command
 /// writes there directly rather than duplicating the channel.
+
+/// One `setPalette` request. Equatable so views can `.onChange` on it.
+struct E2EPaletteRequest: Equatable {
+    let visible: Bool
+    let query: String
+}
+
 @MainActor
 @Observable
 final class E2EBridge {
@@ -39,6 +46,15 @@ final class E2EBridge {
     /// detect prompt to the `claude` CLI in its embedded terminal) the
     /// moment it's on screen. Consumed by `RunSetupView`.
     var pendingDetect = false
+
+    /// Palette open/close request parked by the `setPalette` command and
+    /// consumed by `ContentView` — the consume-and-clear idiom above.
+    /// `query` applies only when `visible` is true.
+    var pendingPalette: E2EPaletteRequest?
+
+    /// The live palette model while the palette is open, for the
+    /// `paletteState` command. Weak: the window's ContentView owns it.
+    weak var paletteModel: PaletteModel?
 
     /// Mirror of the project window's current sidebar mode, written by
     /// `FeaturesDetail` whenever it changes so the `state` command can

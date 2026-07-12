@@ -322,6 +322,7 @@ struct ContentView: View {
             // queue's closure wiring live in `ProjectSession`.)
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
+            consumePendingPaletteIfAny()
 
             // `store.workspaces` is empty until the async `reloadFeatures`
             // (fired from `ProjectWindowContents.onAppear`) completes —
@@ -383,6 +384,9 @@ struct ContentView: View {
         .onChange(of: e2eBridge?.pendingFlowsZoomLaneID) { _, _ in
             consumePendingFlowsZoomIfAny()
         }
+        .onChange(of: e2eBridge?.pendingPalette) { _, _ in
+            consumePendingPaletteIfAny()
+        }
         .focusedSceneValue(\.palettePresented, $showPalette)
         .onChange(of: showPalette) { _, visible in
             if visible {
@@ -393,8 +397,10 @@ struct ContentView: View {
                     model.refresh()
                     paletteModel = model
                 }
+                e2eBridge?.paletteModel = paletteModel
             } else {
                 paletteModel = nil
+                e2eBridge?.paletteModel = nil
             }
         }
         .overlay {
@@ -1259,6 +1265,31 @@ struct ContentView: View {
         guard let bridge = e2eBridge, let mode = bridge.pendingSidebarMode else { return }
         bridge.pendingSidebarMode = nil
         sidebarMode = mode
+    }
+
+    /// Same consume-and-clear shape as `consumePendingSidebarModeIfAny`.
+    /// Builds the model here (not in the `.onChange(of: showPalette)`
+    /// creation path) so the request's query lands on the fresh model.
+    /// Sets `bridge.paletteModel` directly rather than leaning on the
+    /// `.onChange(of: showPalette)` open branch to do it: a second
+    /// `setPalette` while already open (re-querying) leaves `showPalette`
+    /// at `true → true`, which SwiftUI's `.onChange` never fires for, so
+    /// the bridge's weak reference would otherwise keep pointing at the
+    /// first (stale-query) model forever.
+    private func consumePendingPaletteIfAny() {
+        guard let bridge = e2eBridge, let request = bridge.pendingPalette else { return }
+        bridge.pendingPalette = nil
+        if request.visible {
+            let model = PaletteModel(sources: paletteSources())
+            model.refresh()
+            model.query = request.query
+            paletteModel = model
+            showPalette = true
+            bridge.paletteModel = model
+        } else {
+            showPalette = false
+            bridge.paletteModel = nil
+        }
     }
 
     /// Same consume-and-clear shape as `consumePendingSidebarModeIfAny`,

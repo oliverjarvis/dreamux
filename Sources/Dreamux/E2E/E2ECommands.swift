@@ -95,6 +95,10 @@ enum E2ECommands {
             return try openFile(request: request)
         case "setFileTree":
             return try setFileTree(request: request)
+        case "setPalette":
+            return try setPalette(request: request)
+        case "paletteState":
+            return try paletteState(request: request)
         case "listDocs":
             return handleListDocs()
         case "runPlan":
@@ -522,6 +526,43 @@ enum E2ECommands {
             throw CommandError(message: "mode must be \"workspace\", \"run\", \"signals\", \"flows\", \"library\", or \"app\"")
         }
         return ["ok": true]
+    }
+
+    // MARK: - Command palette
+
+    /// Open/close the ⌘K palette, optionally pre-filling its query —
+    /// parked on the bridge and consumed by ContentView, same as
+    /// `setSidebarMode`.
+    private static func setPalette(request: [String: Any]) throws -> [String: Any] {
+        let visible = request["visible"] as? Bool ?? true
+        let query = request["query"] as? String ?? ""
+        let (handles, _, _) = try projectStores()
+        handles.bridge.pendingPalette = E2EPaletteRequest(visible: visible, query: query)
+        return ["ok": true]
+    }
+
+    /// Snapshot of the open palette's results for driver assertions.
+    /// Always carries `"ok": true` on top of the documented
+    /// `visible`/`query`/`sections` fields — like every other state
+    /// snapshot (`flowsState`, `chatFaceState`, `queueState`,
+    /// `appletsState`), so it satisfies `d.cmd()`'s default
+    /// `expect_ok=True` check without every call site special-casing it.
+    private static func paletteState(request: [String: Any]) throws -> [String: Any] {
+        let (handles, _, _) = try projectStores()
+        guard let model = handles.bridge.paletteModel else {
+            return ["ok": true, "visible": false]
+        }
+        return [
+            "ok": true,
+            "visible": true,
+            "query": model.query,
+            "sections": model.sections.map { section in
+                [
+                    "kind": section.kind.rawValue,
+                    "items": section.rows.map(\.candidate.title),
+                ] as [String: Any]
+            },
+        ]
     }
 
     /// Open a file as a Monaco editor tab in the active (or named)

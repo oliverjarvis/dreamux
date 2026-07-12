@@ -1637,6 +1637,52 @@ def scenario_applets(d):
                  "lib-probe folder + appdata to be gone from disk after removeApplet")
 
 
+def scenario_palette(d):
+    """⌘K palette: opens, reports empty-query sections, fuzzy-filters,
+    and closes. Self-contained: launches the app when nothing is
+    connected (python3 driver.py palette works standalone)."""
+    if d.sock is None:
+        d.launch_app()
+
+        def project_window_up():
+            state = d.state()
+            active = state.get("activeProject")
+            return active and active.get("name") == PROJECT_NAME
+        d.wait_until(project_window_up, 30.0, f"project window for {PROJECT_NAME}")
+
+    d.cmd("setPalette", visible=True)
+
+    def palette_open():
+        return d.cmd("paletteState").get("visible") is True
+    d.wait_until(palette_open, 10.0, "palette visible")
+
+    state = d.cmd("paletteState")
+    kinds = [s["kind"] for s in state["sections"]]
+    require("projects" in kinds, f"projects section missing on empty query: {kinds}")
+    require("commands" in kinds, f"commands section missing on empty query: {kinds}")
+    require("files" not in kinds, f"files section must wait for a query: {kinds}")
+    d.screenshot("palette-empty-query")
+
+    d.cmd("setPalette", visible=True, query="plan")
+
+    def query_applied():
+        s = d.cmd("paletteState")
+        return s.get("visible") is True and s.get("query") == "plan"
+    d.wait_until(query_applied, 10.0, "palette query applied")
+
+    state = d.cmd("paletteState")
+    titles = [t for s in state["sections"] for t in s["items"]]
+    require(any("plan" in t.lower() for t in titles),
+            f"no plan-ish result for query 'plan': {titles}")
+    d.screenshot("palette-query-plan")
+
+    d.cmd("setPalette", visible=False)
+
+    def palette_closed():
+        return d.cmd("paletteState").get("visible") is False
+    d.wait_until(palette_closed, 10.0, "palette closed")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -1655,6 +1701,7 @@ SCENARIOS = [
     ("flows", scenario_flows),
     ("plan-gate", scenario_plan_gate),
     ("overview", scenario_overview),
+    ("palette", scenario_palette),
     ("applets", scenario_applets),
     ("quit", scenario_quit),
 ]

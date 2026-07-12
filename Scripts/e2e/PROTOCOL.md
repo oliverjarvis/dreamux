@@ -584,6 +584,25 @@ Response: `{"ok":true}`
 active face of multi-mode viewers (markdown rendered/raw, tabular
 table/text).
 
+### `setPalette`
+Open or close the ⌘K command palette. `{"cmd": "setPalette", "visible": true, "query": "plan"}` — `visible` defaults to true, `query` (optional) pre-fills the search field when opening. Reply: `{"ok": true}`. Parked on the project bridge and consumed by ContentView, like `setSidebarMode`.
+
+### `paletteState`
+Snapshot the open palette. Reply when open: `{"ok": true, "visible": true, "query": "...", "sections": [{"kind": "projects", "items": ["..."]}]}`; when closed: `{"ok": true, "visible": false}`. Always carries `"ok": true` like every other state snapshot (`flowsState`, `chatFaceState`, `queueState`), even when reporting `visible: false`.
+
+```
+→ {"cmd":"setPalette","visible":true,"query":"plan"}
+← {"ok":true}
+
+→ {"cmd":"paletteState"}
+← {"ok":true,"visible":true,"query":"plan","sections":[
+    {"kind":"commands","items":["Run Plan: X"]}
+  ]}
+
+→ {"cmd":"setPalette","visible":false}
+← {"ok":true}
+```
+
 ### `listDocs`
 
 Rescan the project docs home (`<project>/docs/`) and return every
