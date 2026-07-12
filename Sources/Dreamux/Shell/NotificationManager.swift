@@ -26,7 +26,7 @@ final class NotificationManager: NSObject {
     /// after macOS denied us — `requestAuthorization` won't re-prompt
     /// once status is `.denied`, so the user has to flip the switch.
     func openSystemNotificationSettings() {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.dreamux.Dreamux"
+        let bundleID = BundleIdentity.bundleID()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications?id=\(bundleID)") {
             NSWorkspace.shared.open(url)
         }

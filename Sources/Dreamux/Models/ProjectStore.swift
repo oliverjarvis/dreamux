@@ -74,7 +74,7 @@ final class ProjectStore {
                 create: true
             )) ?? URL(fileURLWithPath: NSHomeDirectory())
                 .appendingPathComponent("Library/Application Support")
-            appDir = appSupport.appendingPathComponent("Dreamux", isDirectory: true)
+            appDir = BundleIdentity.stateDirectory(base: appSupport)
         }
         try? fm.createDirectory(at: appDir, withIntermediateDirectories: true)
         return appDir

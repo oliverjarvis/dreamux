@@ -96,8 +96,7 @@ final class SQLiteSignalStore: @unchecked Sendable {
             appropriateFor: nil,
             create: true
         )
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.dreamux.Dreamux"
-        let dir = base.appendingPathComponent(bundleID, isDirectory: true)
+        let dir = BundleIdentity.appSupportBundleDir(base: base)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("signals.db")
     }

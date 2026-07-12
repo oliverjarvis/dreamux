@@ -45,12 +45,12 @@ final class SignalEmitSocketServer: @unchecked Sendable {
         self.workQueue = DispatchQueue(label: "dreamux.signals.emit-socket.work", qos: .utility, attributes: .concurrent)
     }
 
-    /// `/tmp/dreamux-emit-<bundle-id>.sock` — /tmp because sun_path is
-    /// hard-capped at 104 bytes and App Support paths blow the limit.
-    /// The MCP bridge derives the same path from the DB's parent dir.
+    /// Emit-socket path. Delegates to `BundleIdentity` so bind
+    /// (`SignalBus`), export (`PTYShellSession`), and the
+    /// `DREAMUX_EMIT_SOCKET` override all share one source of truth.
+    /// `/tmp` keeps `sun_path` under its 104-byte cap.
     static func defaultSocketPath() -> String {
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.dreamux.Dreamux"
-        return "/tmp/dreamux-emit-\(bundleID).sock"
+        BundleIdentity.emitSocketPath()
     }
 
     /// Start (or restart) the listener. Idempotent — calling twice
