@@ -34,7 +34,10 @@ enum WindowChromeInteractions {
         }
     }
 
-    private enum Classification { case interactive, chrome, content }
+    /// `internal`, not `private`: it's `classify`'s return type, and
+    /// `classify` itself needs `internal` visibility for
+    /// `WindowChromeClassifyTests` (see that function's doc comment).
+    enum Classification { case interactive, chrome, content }
 
     /// True when the event was consumed as a chrome interaction.
     private static func handle(_ event: NSEvent) -> Bool {
@@ -42,9 +45,15 @@ enum WindowChromeInteractions {
               window.styleMask.contains(.titled),
               !window.isSheet,
               let frameView = window.contentView?.superview else { return false }
-        let point = frameView.convert(event.locationInWindow, from: nil)
-        guard let hit = frameView.hitTest(point) else { return false }
-        guard classify(hit: hit, event: event, window: window, boundary: frameView) == .chrome else {
+        // `hitTest(_:)` is documented to take a point in the RECEIVER'S
+        // SUPERVIEW's coordinate space. `frameView` is the window's root
+        // content view, whose superview is the window's own NSThemeFrame —
+        // i.e. window-coordinate space — so `event.locationInWindow` is
+        // already the right space; no conversion needed.
+        guard let hit = frameView.hitTest(event.locationInWindow) else { return false }
+        guard classify(
+            hit: hit, locationInWindow: event.locationInWindow, window: window, boundary: frameView
+        ) == .chrome else {
             return false
         }
 
@@ -62,20 +71,68 @@ enum WindowChromeInteractions {
         return true
     }
 
+    /// Height of the top chrome strip, and how far across the window it
+    /// reaches — see `railStripXBound` for why it's bounded to the rail
+    /// column rather than spanning the full width.
+    ///
+    /// Derived from the tighter of the two projects-rail states' first
+    /// interactive control:
+    ///   - expanded rail (`ProjectsRail.swift`): a `Color.clear.frame
+    ///     (height: 30)` spacer (zero `VStack` spacing) precedes the
+    ///     Search button, so its top edge sits at y = 30.
+    ///   - collapsed stub (`ContentView.collapsedRailStub`): a
+    ///     `Color.clear.frame(height: 26)` spacer plus 10pt of `VStack`
+    ///     spacing precedes `railToggle`, so its top edge sits at y = 36.
+    /// 30 clears both (with the collapsed stub keeping a 6pt margin), and
+    /// `classify` uses a strict `<` comparison below so a click landing
+    /// exactly on the Search button's top pixel (y == 30) still resolves
+    /// as interactive, not chrome.
+    private static let topStripHeight: CGFloat = 30
+
+    /// The x-range the top strip is limited to: the projects rail's
+    /// column, not the full window width.
+    ///
+    /// Plain SwiftUI `Button`s never appear as `NSControl` in AppKit's
+    /// hit-test tree — they resolve to the enclosing `NSHostingView` — so
+    /// `classify`'s `NSControl` exclusion below can't protect them, and
+    /// every clickable control in this app is a SwiftUI `Button`. That
+    /// rules out a full-width strip: `ContentView.contextHeaderRow` (the
+    /// content card's header) centers its 26pt-tall `HeaderRunControls`
+    /// pill in a 44pt-tall row, 9pt of top margin — and that row sits
+    /// flush against the window's physical top edge whenever the user
+    /// picks Settings → Appearance → "Flush" edge padding
+    /// (`AppearanceSettings.edgeInsetsKey`, `ContentView`'s `edgeInsets`
+    /// toggle — default is "Inset", but it's a live, user-facing radio
+    /// button, not dead code). That leaves the run-controls pill's top
+    /// edge just 9pt from the window top — no strip height both wide
+    /// enough to be useful and short enough to clear it exists. So
+    /// instead of shrinking the strip for the whole window, it's bounded
+    /// to the one column with real headroom: the projects rail. 210 is
+    /// the *expanded* rail's fixed width (`ContentView.mainStack`'s
+    /// `.frame(width: 210)`); the collapsed stub is narrower (76), so
+    /// bounding to 210 safely covers both rail states without needing to
+    /// know which one is showing.
+    private static let railStripXBound: CGFloat = 210
+
     /// Walks the hit view's ancestry: controls, text, scrollers, and
     /// list rows keep their clicks. A native list's EMPTY body is the
     /// one exception — NSTableView is an NSControl subclass, but a click
     /// landing below the last row (row(at:) == -1) hits no row and is
     /// chrome, not interaction; the table check must therefore precede
     /// the control check. Non-interactive hits are chrome only in the
-    /// 40pt top strip (window coordinates are bottom-origin).
-    private static func classify(
-        hit: NSView, event: NSEvent, window: NSWindow, boundary: NSView
+    /// top strip, and only above the projects rail's column — see
+    /// `topStripHeight`/`railStripXBound` for why the strip can't safely
+    /// span the full window width. `internal` (not `private`) so
+    /// `WindowChromeClassifyTests` can exercise it directly against real
+    /// AppKit hierarchies. Takes the raw point rather than the `NSEvent`
+    /// so tests don't need to synthesize one.
+    static func classify(
+        hit: NSView, locationInWindow: NSPoint, window: NSWindow, boundary: NSView
     ) -> Classification {
         var current: NSView? = hit
         while let candidate = current, candidate !== boundary {
             if let table = candidate as? NSTableView {
-                let local = table.convert(event.locationInWindow, from: nil)
+                let local = table.convert(locationInWindow, from: nil)
                 return table.row(at: local) == -1 ? .chrome : .interactive
             }
             if candidate is NSControl || candidate is NSText
@@ -84,7 +141,10 @@ enum WindowChromeInteractions {
             }
             current = candidate.superview
         }
-        if event.locationInWindow.y >= window.frame.height - 40 { return .chrome }
+        if locationInWindow.x <= railStripXBound,
+           locationInWindow.y > window.frame.height - topStripHeight {
+            return .chrome
+        }
         return .content
     }
 }
