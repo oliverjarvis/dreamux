@@ -26,4 +26,16 @@ final class AppletBridgeCoreTests: XCTestCase {
         }
         XCTAssertThrowsError(try AppletBridgeCore.checkAllowed(method: "bogus", granted: [.kv]))
     }
+
+    func testConnectionsMethodsAreKnownAndCapabilityFree() throws {
+        // Both bridge methods are recognised…
+        XCTAssertTrue(AppletBridgeCore.knownMethods.contains("connections.status"))
+        XCTAssertTrue(AppletBridgeCore.knownMethods.contains("connections.request"))
+        // …and require NO capability — they expose only non-secret status or
+        // open the bind UI, so they must be callable with an empty grant set.
+        XCTAssertNil(AppletBridgeCore.capability(forMethod: "connections.status"))
+        XCTAssertNil(AppletBridgeCore.capability(forMethod: "connections.request"))
+        XCTAssertNoThrow(try AppletBridgeCore.checkAllowed(method: "connections.status", granted: []))
+        XCTAssertNoThrow(try AppletBridgeCore.checkAllowed(method: "connections.request", granted: []))
+    }
 }

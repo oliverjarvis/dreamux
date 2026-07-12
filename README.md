@@ -108,3 +108,24 @@ applets need no changes to Dreamux itself. Capabilities that require an OS
 permission (screen capture, input control) are added to the bridge as
 deliberate Dreamux releases — see `docs/superpowers/specs/` for the design and
 the deferred roadmap (marketplace, adoption sync, entitled capabilities).
+
+**Connections — authenticated access**
+
+To show *your* data (private-repo PRs, Expo builds, …), an applet authenticates
+through a **Connection**: a named credential kept in the macOS **Keychain**,
+with an auth kind and an enforced **host allowlist**. The secret never enters
+the applet's JS — it's attached natively.
+
+- Manage them in **Settings → Connections**: paste a token, or **Import from
+  `gh` / `eas`** to reuse a CLI login you already have.
+- An applet *declares* what it needs in its manifest (`requiresConnections`,
+  carrying no secret), and you **bind** each slot to a Connection from a banner
+  in the applet — so shared applets are safe and each person wires up their own.
+- At call time the credential is attached natively:
+  `dreamux.http.fetch(url, { connection: "github" })` — sent **only over
+  `https`**, **only to an allowlisted host** (redirects included), token never
+  reaching the web view — or `dreamux.shell.exec(cmd, { connection })` to inject
+  it as env into a single process.
+
+OAuth flows are on the roadmap; today's Connections cover token/PAT APIs and
+CLI-backed logins.

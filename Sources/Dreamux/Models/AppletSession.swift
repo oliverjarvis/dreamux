@@ -6,7 +6,7 @@ import WebKit
 /// Everything live behind one open applet: the preview `WKWebView` (lazy,
 /// custom scheme + native bridge + nav lockdown), the optional builder-agent
 /// terminal, and a folder poller for hot reload. Held per-applet by whatever
-/// owns App Studio (`ProjectSession` / `AppStudioView`) — NOT rebuilt per
+/// owns Applet Studio (`ProjectSession` / `AppStudioView`) — NOT rebuilt per
 /// render, the same discipline `FileEditorTabSession`/`WebTabSession` use to
 /// keep a `WKWebView` alive across SwiftUI redraws.
 @MainActor
@@ -16,6 +16,21 @@ final class AppletSession: @MainActor Identifiable {
     let dataStore: AppletDataStore
     let projectRoot: URL
     var id: UUID { applet.id }
+
+    /// Resolves this applet's declared connection slots to live credentials
+    /// for `{connection}`-tagged `http.fetch`/`shell.exec`. Built in `init`
+    /// from the app-wide `ConnectionStore.shared` and a per-applet
+    /// `ConnectionBindingStore` under this applet's own data dir — kept
+    /// internal to the session; the bridge reaches it via `owner.connections`.
+    let connections: AppletConnectionResolver
+
+    /// Non-nil while a slot needs binding: drives the host-view bind sheet
+    /// (T8). `connections.request` sets this and awaits `completeBind()`.
+    var pendingBindSlot: String?
+
+    /// Resumed by `completeBind()` once the bind sheet dismisses. Continuation
+    /// carried out of `@Observable` tracking — it is control flow, not state.
+    @ObservationIgnored private var bindContinuation: CheckedContinuation<Void, Never>?
 
     /// Header error badge: last `window.onerror`/`unhandledrejection` text
     /// forwarded by the injected error-forwarding script.
@@ -32,8 +47,59 @@ final class AppletSession: @MainActor Identifiable {
 
     init(applet: Applet, dataDir: URL, projectRoot: URL) {
         self.applet = applet
-        self.dataStore = AppletDataStore(dataDir: dataDir)
+        let dataStore = AppletDataStore(dataDir: dataDir)
+        self.dataStore = dataStore
         self.projectRoot = projectRoot
+        self.connections = AppletConnectionResolver(
+            store: .shared,
+            bindings: ConnectionBindingStore(dataDir: dataStore.dataDir)
+        )
+    }
+
+    /// Manifest-declared connection slots this applet has no *working*
+    /// binding for — the T8 bind banner/host-view lists these. Dangling-aware:
+    /// `status(slot:).bound` is false both when the slot was never bound AND
+    /// when it's bound to a since-deleted connection, so a stale binding
+    /// still shows up here (checking `bindings.connectionID(forSlot:) == nil`
+    /// alone would miss that second case). Reads observable binding state,
+    /// so it re-evaluates when a slot is bound/unbound or a connection is
+    /// deleted out from under it.
+    var unboundConnectionSlots: [ConnectionSlot] {
+        applet.manifest.requiresConnections.filter { !connections.status(slot: $0.id).bound }
+    }
+
+    /// Binds `slot` to the connection with id `connectionID` and dismisses
+    /// the pending bind sheet — the one place the session performs a
+    /// binding write, so bind-then-complete stays atomic from the caller's
+    /// (the bind sheet's) perspective. Throws (and leaves the sheet open,
+    /// `pendingBindSlot` untouched) if the write to disk fails; the caller
+    /// can retry or the user can cancel.
+    func bind(slot: String, toConnectionID connectionID: String) throws {
+        try connections.bindings.bind(slot: slot, toConnectionID: connectionID)
+        completeBind()
+    }
+
+    /// Open the bind sheet for `slot` and suspend until it dismisses, then
+    /// report the resulting binding status back to the caller (the
+    /// `connections.request` bridge method). Any in-flight request is resolved
+    /// first so a stray second call can't leak its continuation.
+    func requestBind(slot: String) async -> AppletConnectionResolver.Status {
+        completeBind()
+        pendingBindSlot = slot
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            bindContinuation = continuation
+        }
+        return connections.status(slot: slot)
+    }
+
+    /// Called by the bind sheet on dismiss (bound or cancelled): clears the
+    /// pending slot and resumes the awaiting `requestBind`, if any.
+    func completeBind() {
+        pendingBindSlot = nil
+        if let continuation = bindContinuation {
+            bindContinuation = nil
+            continuation.resume()
+        }
     }
 
     /// The live preview surface: a locked-down `WKWebView` serving this

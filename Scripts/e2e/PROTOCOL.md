@@ -968,6 +968,132 @@ uses one).
    "libraryApplets":[{"slug":"lib-probe","name":"Lib Probe"}]}
 ```
 
+### Applet Connections
+
+Four commands cover the pieces of the Connections feature an e2e driver
+needs that aren't reachable through the applet bridge itself (a driver has
+no way to click the Settings "Add Connection" button or the host view's
+bind sheet). All four operate on the app-wide `ConnectionStore.shared`
+and the active project's applets, exactly like the bridge's own
+`connections.status`/`{connection}` handling reaches them — no parallel
+test implementation.
+
+**Launch requirement:** set `$DREAMUX_CONNECTIONS_SECRET_DIR` to a
+per-run temp dir on the app process *before* it starts. `ConnectionStore
+.shared` is a lazy singleton that decides file-backed
+(`FileSecretStore`) vs. the real macOS Keychain on its **first** touch
+anywhere in the process — as early as the first `AppletSession`'s
+`init` — reading the env var once at that moment. Setting it after
+launch, or launching without it and hoping to set it before the first
+`createConnection`, does nothing; a token would land in the real
+Keychain instead. (`Scripts/e2e/driver.py`'s `scenario_connections`
+always launches — or relaunches, quitting an already-live process from
+an earlier scenario first — its own app process with this set, for
+exactly this reason.)
+
+**Why there's no authenticated-fetch-to-localhost scenario:**
+`AppletBridge`'s `http.fetch` runs through plain `URLSession.shared`
+with no delegate, so a self-signed localhost TLS cert is rejected at
+the TLS layer before any request lands, and the authenticator correctly
+refuses to attach a token over plain `http`. Reaching a live
+authenticated `200` would require test-only TLS-trust code in the app
+itself, which isn't worth adding. `scenario_connections` instead proves
+the same security-critical slot → binding → connection → token
+composition **without any network round-trip**: an `env`-kind
+connection's token really reaches a `shell.exec` call's process env
+(asserted by having the shell echo its own injected env var back into
+`kv.json`), and a `bearer`-kind connection's token is refused for a
+host outside its own allowlist — rejected by `ConnectionAuthenticator`
+*before* `URLSession` is ever called, so the negative case needs no
+server listening at all; the assertion is that nothing was sent.
+
+#### `createConnection`
+
+Create a connection — `ConnectionStore.shared.add(...)`, the same call
+the Settings management UI (add-manually) and the CLI importer both
+make. `kind` is `"bearer"` (→ `AuthKind.header("Authorization", "Bearer
+{token}")`, an HTTP kind — pairs with `http.fetch`) or `"env"` (→
+`AuthKind.env(vars: [envVar])`, shell-only — pairs with `shell.exec`;
+requires the `envVar` parameter). `hosts` is the connection's own
+**enforced** allowlist (ignored for `"env"`, which has no HTTP surface).
+The token is written through `SecretStoreFactory.makeDefault()` — see
+the launch requirement above.
+
+```
+→ {"cmd":"createConnection","id":"github","kind":"bearer","token":"tok-123","hosts":["api.github.com"]}
+← {"ok":true,"id":"github"}
+
+→ {"cmd":"createConnection","id":"eas","kind":"env","envVar":"EAS_TOKEN","token":"tok-456","hosts":[]}
+← {"ok":true,"id":"eas"}
+
+→ {"cmd":"createConnection","id":"x","kind":"oauth","token":"t","hosts":[]}
+← {"ok":false,"error":"unknown connection kind \"oauth\" (expected \"bearer\" or \"env\")"}
+```
+
+#### `bindConnection`
+
+Bind a manifest-declared slot on one applet (matched by `slug`, in the
+active project) to a connection id — `AppletSession.bind(slot:
+toConnectionID:)` (T8's seam, the exact write the host view's bind sheet
+performs) against that applet's live `ConnectionBindingStore`, persisted
+to `<project>/.dreamux/appdata/<slug>/connections.json` (a flat
+`{slot: connectionId}` map). Reaches the applet's `AppletSession` via
+`ProjectSession.appletSession(for:)` — the same cached instance the host
+view binds through once the applet is open — so a driver may call this
+before or after `openApplet`; both land on the one live resolver.
+Errors when `slug` doesn't match any applet in the project or the
+binding write fails.
+
+```
+→ {"cmd":"bindConnection","slug":"probe","slot":"github","connectionID":"github"}
+← {"ok":true}
+
+→ {"cmd":"bindConnection","slug":"nope","slot":"github","connectionID":"github"}
+← {"ok":false,"error":"no applet with slug \"nope\" in this project"}
+```
+
+A bound slot takes effect for the applet's `{connection: "<slot>"}`
+calls immediately (the binding store is mutated in memory as well as on
+disk); it does **not** by itself re-run an already-loaded applet's page
+— rewrite `index.html` (even with identical bytes, to bump its mtime)
+and let the applet's 1s hot-reload poller pick up the change, or wait
+for a fresh `openApplet` on an applet that hasn't been opened yet.
+
+#### `importConnection`
+
+Create a connection by running an arbitrary shell command and importing
+whatever token it prints — `CLICredentialImporter.runCommand(command)`
+then `ConnectionStore.shared.add(...)`, the SAME generic path a
+manifest-declared slot's `importCommand` recipe drives from
+`AddConnectionSheet`'s "Or run a command" field (no built-in provider
+required, unlike `createConnection`'s `gh`/`eas`-shaped `"bearer"`/`"env"`
+kinds — this is the path for any CLI login Dreamux has no preset for).
+Always `.env`-kind (shell-only — pairs with `shell.exec`; `hosts` is
+carried through but has no HTTP surface to enforce). `source` is recorded
+as `.importedFromCLI(tool: "command")`. Errors when the command produces
+no parseable token (mirrors the sheet's `commandImportFailed` path rather
+than saving an empty token) — same launch requirement
+(`$DREAMUX_CONNECTIONS_SECRET_DIR`) as `createConnection` above.
+
+```
+→ {"cmd":"importConnection","id":"cmd","hosts":["127.0.0.1"],"envVar":"CMD_TOKEN","command":"printf cmd-tok-789"}
+← {"ok":true,"id":"cmd"}
+
+→ {"cmd":"importConnection","id":"nope","hosts":[],"envVar":"X","command":"true"}
+← {"ok":false,"error":"importConnection command produced no token"}
+```
+
+#### `connectionsState`
+
+Metadata snapshot of every connection in the app-wide store — id and
+allowlisted hosts only, **never** a token (tokens never leave
+`ConnectionStore`/`SecretStore`). Mostly a debugging aid for confirming
+`createConnection` landed.
+
+```
+→ {"cmd":"connectionsState"}
+← {"ok":true,"connections":[{"id":"github","hosts":["api.github.com"]},{"id":"eas","hosts":[]}]}
+```
 ### `chatFaceState`
 
 Snapshot of the active workspace's Claude **chat face** (Task 6/8/9) —

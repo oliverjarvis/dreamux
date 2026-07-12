@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// The APPS sidebar section — App Studio applets adopted or created inside
-/// this project. House style: a 13pt uppercase header with a chevron collapse
-/// (persisted via `layout.appsExpanded`), 15pt applet rows, a "+ New app"
-/// foot row, and a visible (non-clickable) warning row per invalid folder so
-/// a broken applet degrades in plain sight rather than vanishing.
+/// The APPLETS sidebar section — Applet Studio applets adopted or created
+/// inside this project. House style: a 13pt uppercase header with a chevron
+/// collapse (persisted via `layout.appsExpanded`), 15pt applet rows, a
+/// "+ New applet" foot row, and a visible (non-clickable) warning row per
+/// invalid folder so a broken applet degrades in plain sight rather than
+/// vanishing.
 struct AppsSection: View {
     @Bindable var applets: ProjectAppletStore
     @Bindable var layout: SidebarLayoutStore
@@ -37,7 +38,7 @@ struct AppsSection: View {
         // so re-scan whenever the section (re)appears.
         .onAppear { applets.refresh() }
         .confirmationDialog(
-            "Remove \(pendingRemove?.manifest.name ?? "app")?",
+            "Remove \(pendingRemove?.manifest.name ?? "applet")?",
             isPresented: Binding(
                 get: { pendingRemove != nil },
                 set: { if !$0 { pendingRemove = nil } }
@@ -47,14 +48,14 @@ struct AppsSection: View {
             Button("Delete", role: .destructive) { onRemove(applet) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("Deletes the app folder and its data. This can't be undone.")
+            Text("Deletes the applet folder and its data. This can't be undone.")
         }
     }
 
     // MARK: - Pieces
 
-    /// Chevron + "APPS" — identical construction to `PlansSpecsSection.header`,
-    /// toggling the persisted `layout.appsExpanded`.
+    /// Chevron + "APPLETS" — identical construction to
+    /// `PlansSpecsSection.header`, toggling the persisted `layout.appsExpanded`.
     private var header: some View {
         Button {
             withAnimation(.snappy(duration: 0.18)) { layout.appsExpanded.toggle() }
@@ -64,7 +65,7 @@ struct AppsSection: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(layout.appsExpanded ? 90 : 0))
-                Text("Apps")
+                Text("Applets")
                     .font(.system(size: 13, weight: .semibold))
                     .kerning(0.4)
                     .textCase(.uppercase)
@@ -99,7 +100,7 @@ struct AppsSection: View {
                     Image(systemName: "square.on.square")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
-                        .help("Adopted from App Studio")
+                        .help("Adopted from Applet Studio")
                 }
             }
             .padding(.horizontal, 10)
@@ -140,15 +141,15 @@ struct AppsSection: View {
         .help("apps/\(name)/manifest.json is missing or invalid")
     }
 
-    /// Borderless "＋ New app" foot row — the `newWorkspaceRow` shape: a plain
-    /// plus (no circle, no box), highlighting only on hover.
+    /// Borderless "＋ New applet" foot row — the `newWorkspaceRow` shape: a
+    /// plain plus (no circle, no box), highlighting only on hover.
     private var newAppRow: some View {
         Button(action: onNewApp) {
             HStack(spacing: 11) {
                 Image(systemName: "plus")
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 28, height: 28)
-                Text("New app")
+                Text("New applet")
                     .font(.system(size: 15))
                 Spacer(minLength: 0)
             }
@@ -174,7 +175,7 @@ struct AppsSection: View {
         // Publishing an *adopted* copy back would fork its origin — only a
         // local-born applet (no origin) can seed the library.
         if applet.manifest.origin == nil {
-            Button("Publish to App Studio") { onPublish(applet) }
+            Button("Publish to Applet Studio") { onPublish(applet) }
         }
         Button("Reveal in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([applet.folderURL])

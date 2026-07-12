@@ -36,6 +36,22 @@ struct PlanTask: Equatable {
 struct PlanStep: Equatable {
     let title: String
     let checked: Bool
+    /// 1-based document line of this checkbox — the jump-to target when a
+    /// step row is clicked in the Overview's expanded checklist. Defaulted
+    /// so call sites that only care about content stay terse, and
+    /// **excluded from `==`** (below) so parse tests keep asserting on
+    /// title/checked rather than brittle line positions.
+    let line: Int
+
+    init(title: String, checked: Bool, line: Int = 1) {
+        self.title = title
+        self.checked = checked
+        self.line = line
+    }
+
+    static func == (lhs: PlanStep, rhs: PlanStep) -> Bool {
+        lhs.title == rhs.title && lhs.checked == rhs.checked
+    }
 }
 
 /// One markdown document under the project docs home, classified by
@@ -215,7 +231,8 @@ struct PlanDoc: Identifiable, Equatable {
             if let isChecked = checkboxState(trimmed) {
                 total += 1
                 if isChecked { checked += 1 }
-                appendStep(PlanStep(title: stepTitle(from: trimmed), checked: isChecked),
+                appendStep(PlanStep(title: stepTitle(from: trimmed), checked: isChecked,
+                                    line: lineNumber),
                            at: lineNumber)
             }
         }

@@ -44,6 +44,7 @@ files/          — created on demand: the applet's private data directory
 | `description` | One-line summary of what the applet does. |
 | `requiresCapabilities` | Array of capability strings the applet calls through the bridge. Must exactly match what the code actually calls — see **Capabilities** below. |
 | `origin` | `null` for an applet built from scratch; set automatically when an applet is adopted from the shared library (records where it was adopted from and a content hash). Don't hand-edit. |
+| `requiresConnections` | Optional array of credential slots the applet needs — see **`dreamux.connections`** below. Omit or leave empty if the applet uses no credentials. |
 
 ## Capabilities
 
@@ -199,6 +200,137 @@ await dreamux.notify('Build finished', 'All tasks passed.');  // → undefined
 |---|---|
 | `title` | notification title (required) |
 | `body` | notification body text |
+
+### `dreamux.connections` — credential-scoped access (capability-free)
+
+Some services need a credential — a GitHub token, an API key — but your
+JS code should never see it. **Connections** solve this: the user adds a
+named credential once (Settings → Connections, or imported from a CLI like
+`gh`), the applet declares a *slot* it needs, the user binds the slot to a
+connection, and the native bridge attaches the token for you. Your code
+never touches the secret.
+
+> **Building an applet for an authenticated API?** You almost certainly
+> need a connection — and you should work out its shape *yourself*. Don't
+> hardcode a token, don't build your own token-entry UI, and don't ask the
+> user which scheme the service uses: you already know how the common ones
+> authenticate. Declare a slot with a **full recipe** (see *Declaring a
+> connection recipe* below), inferring the `authKind`, the API `hosts`, and
+> whether a CLI can print the token. When unsure, default to a Bearer token
+> (`Authorization` / `Bearer {token}`) to the service's API host — the user
+> supplies only the secret when they bind.
+
+Declare each slot your applet needs in `manifest.json`'s
+`requiresConnections`:
+
+```json
+"requiresConnections": [
+  { "id": "github", "label": "GitHub", "hosts": ["api.github.com"], "suggests": "github" }
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | The slot name — pass this as `connection` to `http.fetch`/`shell.exec`. |
+| `label` | Shown to the user in the bind sheet. |
+| `hosts` | Advisory — what you intend to call. The connection the user binds carries its OWN enforced allowlist; a mismatch is rejected at call time, not at declaration time. |
+| `suggests` | Optional provider hint (`"github"`, `"expo"`) that prefills the bind sheet's "create new" flow. |
+
+Pass `{ connection: "<slot>" }` to attach a bound slot's credential:
+
+```js
+// HTTP: capability `http` + a slot bound to an HTTP-kind connection
+// (header/basic/query). Native code attaches the credential — your
+// request/response never carries it.
+const res = await dreamux.http.fetch('https://api.github.com/user', {
+  connection: 'github',
+});
+
+// Shell: capability `shell` + a slot bound to an `env`-kind connection.
+// The token is injected as a process env var for this one exec call —
+// it is never interpolated into `cmd` or returned in the reply.
+const res = await dreamux.shell.exec('echo "token via $GH_TOKEN"', {
+  connection: 'github',
+});
+```
+
+**The token never reaches your JS.** `http.fetch`'s response and
+`shell.exec`'s `{stdout, stderr, code}` never carry it, and neither does
+any error message. A call is rejected — the promise rejects, nothing is
+sent — unless:
+
+- the URL is `https` (never plain `http`) — for `http.fetch`;
+- the target host exactly matches one of the bound connection's own
+  allowed hosts (case-insensitive, no subdomain/wildcard matching);
+- the bound connection's kind matches the call (`http.fetch` needs an
+  HTTP kind — header/basic/query; `shell.exec` needs an `env` kind).
+
+Check or request a binding without any capability declaration:
+
+```js
+const status = await dreamux.connections.status('github');
+// { bound: boolean, label: string | null, hosts: string[] }
+
+if (!status.bound) {
+  // Opens the host view's bind sheet and waits for the user; resolves
+  // with the same shape once it dismisses (bound or cancelled).
+  await dreamux.connections.request('github');
+}
+```
+
+`connections.status`/`connections.request` need no capability — they
+expose only non-secret binding state (or open the bind UI), never a
+token.
+
+### Declaring a connection recipe
+
+A slot can go further than `id`/`label`/`hosts`/`suggests`: add
+`authKind` and `importCommand` to tell Dreamux exactly how your
+service's credential is shaped. When a slot carries a recipe, binding
+pre-fills the auth kind and (if present) offers the import command as
+a one-click "import token" action — the user supplies only the secret
+itself, not the shape around it.
+
+```json
+{ "id": "linear", "label": "Linear API key", "hosts": ["api.linear.app"],
+  "authKind": { "header": { "headerName": "Authorization", "valueTemplate": "{token}" } } }
+```
+
+```json
+{ "id": "gh", "label": "GitHub", "hosts": ["api.github.com"],
+  "authKind": { "header": { "headerName": "Authorization", "valueTemplate": "Bearer {token}" } },
+  "importCommand": "gh auth token" }
+```
+
+`authKind` is the JSON shape of the `AuthKind` enum — exactly one of:
+
+```json
+{ "header": { "headerName": "Authorization", "valueTemplate": "Bearer {token}" } }
+{ "basic": { "username": "me" } }
+{ "query": { "param": "api_key" } }
+{ "env": { "vars": ["GH_TOKEN", "GITHUB_TOKEN"] } }
+```
+
+| Shape | Meaning |
+|---|---|
+| `header` | Sets an HTTP header named `headerName` to `valueTemplate` with `{token}` substituted for the secret (a raw API-key header uses `"{token}"`; a bearer scheme uses `"Bearer {token}"`; a GitHub classic PAT uses `"token {token}"`). |
+| `basic` | HTTP Basic auth: header `Authorization` = `Basic base64(username:token)`. |
+| `query` | Appends `param={token}` to the request URL's query string (legacy APIs). |
+| `env` | Injects the token as each of `vars` in the environment of a single `shell.exec` call — HTTP-only slots can't use this kind. |
+
+**Rule: a `header` `valueTemplate` MUST contain `{token}`.** It's the
+placeholder Dreamux substitutes the secret into — a template without
+it silently drops the credential.
+
+`importCommand` is a shell command that, when run, prints the token to
+stdout — a hint the bind sheet can offer so the user doesn't have to
+go find their token by hand (e.g. `"gh auth token"`, `"linear-cli
+token"`). **An `importCommand` is only ever run when the user clicks
+it — Dreamux never runs it automatically.**
+
+Both fields are optional, and both are new: a slot with just
+`id`/`label`/`hosts`/`suggests` (the shape most applets already use)
+still works exactly as before.
 
 ## UI: vendored Preact + htm
 

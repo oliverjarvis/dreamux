@@ -452,10 +452,17 @@ struct ContentView: View {
             LibraryView(projectRoot: repoStore.project.rootPath)
         case .app(let id):
             // The applet's folder is the source of truth: a removed applet
-            // resolves to nil here and shows the missing state; the APPS
+            // resolves to nil here and shows the missing state; the Applets
             // section auto-heals on its next refresh.
             if let applet = session.applets.applet(id: id) {
+                // Key on the applet id so switching from one applet to another
+                // rebuilds the host — the preview is an NSViewRepresentable
+                // whose updateNSView is a no-op, so without a fresh identity
+                // the old session's WKWebView stays parented and only the
+                // header updates (the "content doesn't change until I visit a
+                // workspace" bug).
                 AppletHostView(session: session.appletSession(for: applet))
+                    .id(id)
             } else {
                 appletMissingState
             }
@@ -469,10 +476,10 @@ struct ContentView: View {
             Image(systemName: "shippingbox")
                 .font(.system(size: 36))
                 .foregroundStyle(.tertiary)
-            Text("App not found")
+            Text("Applet not found")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("It may have been removed. The Apps list updates when its folder changes.")
+            Text("It may have been removed. The Applets list updates when its folder changes.")
                 .font(.callout)
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -530,7 +537,7 @@ struct ContentView: View {
                     ForEach(projects.projects) { project in
                         stubProjectButton(project)
                     }
-                    // App Studio rides above New Project — same dashed
+                    // Applet Studio rides above New Project — same dashed
                     // tile shape, opening the global applet library window.
                     Button {
                         openWindow(id: "app-studio")
@@ -548,7 +555,7 @@ struct ContentView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("App Studio")
+                    .help("Applet Studio")
                     // New Project rides directly below the last glyph, a
                     // tile in the same shape as the project buttons.
                     Button {
@@ -899,6 +906,15 @@ struct ContentView: View {
             onCourseCorrectionNudge: { plan, summary, priority in
                 session.enqueueCourseCorrectionNudge(
                     plan: plan, summary: summary, priority: priority)
+            },
+            flows: session.flows,
+            onOpenRunFlow: { ws in
+                let lane = session.flows.flows.first { $0.workspaceID == ws && $0.kind == .plan }
+                    ?? session.flows.flows.first { $0.workspaceID == ws }   // Mode B fallback
+                if let lane {
+                    sidebarMode = .flows
+                    flowsZoomLaneID = lane.id
+                }
             }
         )
     }

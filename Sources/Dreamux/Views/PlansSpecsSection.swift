@@ -115,13 +115,14 @@ struct PlansSpecsSection: View {
         // first row, the run queue rides beneath it, and the plan-run cards
         // follow. `main` and the runs are the same kind of thing (a worktree
         // you can open), so they share one header — "Workspaces", not "Flows",
-        // since `main` is not a run. The chevron collapses only the run list;
-        // `main` + queue stay pinned as the always-present anchor.
+        // since `main` is not a run. The chevron collapses the whole section,
+        // `main` included: a collapsed header that still showed `main` read as
+        // half-collapsed, so it behaves like every other section here.
         VStack(alignment: .leading, spacing: 4) {
             header
-            mainRow
-            queueSection()
             if layout.plansExpanded {
+                mainRow
+                queueSection()
                 if docStore.plans.isEmpty && docStore.unpairedSpecs.isEmpty
                     && docStore.otherDocs.isEmpty {
                     emptyState

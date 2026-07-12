@@ -147,6 +147,10 @@ struct SettingsView: View {
             } header: {
                 Text("Workflow")
             }
+
+            Section("Connections") {
+                ConnectionsSettingsView(store: .shared)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 470)

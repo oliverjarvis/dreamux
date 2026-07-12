@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Two paths to a new project applet: **Create** a fresh one (name +
 /// description → scaffold + builder agent) or **Adopt** an existing library
-/// applet. `onAdopt` is optional so App Studio (Task 9) can reuse this sheet
-/// create-only — nil hides the Adopt path entirely.
+/// applet. `onAdopt` is optional so Applet Studio (Task 9) can reuse this
+/// sheet create-only — nil hides the Adopt path entirely.
 struct NewAppSheet: View {
     let library: [Applet]                   // appLibrary.applets (refreshed on appear by caller)
     let onCreate: (String, String) -> Void  // (name, description)
@@ -20,7 +20,7 @@ struct NewAppSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("New App")
+            Text("New Applet")
                 .font(.title3.weight(.semibold))
             Text("Scaffold a small, buildless web tool that runs inside Dreamux. A builder agent opens in a terminal and starts from your description; the preview hot-reloads as it saves.")
                 .font(.caption)
@@ -50,7 +50,7 @@ struct NewAppSheet: View {
 
             if let onAdopt, !library.isEmpty {
                 Divider()
-                Text("Adopt from App Studio")
+                Text("Adopt from Applet Studio")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 ScrollView {

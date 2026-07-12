@@ -16,11 +16,45 @@ struct AppletManifest: Codable, Equatable, Sendable {
     var description: String
     var requiresCapabilities: [String]
     var origin: Origin?
+    /// Connection slots this applet declares it needs (bound to a `Connection`
+    /// at run time). Non-optional, so old manifests without the key decode to
+    /// `[]` via the custom `init(from:)` below rather than failing to decode.
+    var requiresConnections: [ConnectionSlot]
 
     struct Origin: Codable, Equatable, Sendable {
         var id: UUID        // library applet id this was adopted from
         var hash: String    // AppletContentHash of the library folder at adopt time
         var adoptedAt: Date
+    }
+
+    init(id: UUID, name: String, slug: String, icon: String, description: String,
+         requiresCapabilities: [String], origin: Origin?, requiresConnections: [ConnectionSlot] = []) {
+        self.id = id
+        self.name = name
+        self.slug = slug
+        self.icon = icon
+        self.description = description
+        self.requiresCapabilities = requiresCapabilities
+        self.origin = origin
+        self.requiresConnections = requiresConnections
+    }
+
+    /// Custom decode: every field decodes normally except `requiresConnections`,
+    /// which is a non-optional array that would fail synthesized decoding on
+    /// manifests written before this field existed. Read it as present-or-empty
+    /// so old manifests on disk keep loading. `encode(to:)` stays synthesized —
+    /// it still emits `requiresConnections` (defaulting to `[]`) for every
+    /// manifest this app writes going forward.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        slug = try container.decode(String.self, forKey: .slug)
+        icon = try container.decode(String.self, forKey: .icon)
+        description = try container.decode(String.self, forKey: .description)
+        requiresCapabilities = try container.decode([String].self, forKey: .requiresCapabilities)
+        origin = try container.decodeIfPresent(Origin.self, forKey: .origin)
+        requiresConnections = try container.decodeIfPresent([ConnectionSlot].self, forKey: .requiresConnections) ?? []
     }
 
     var grantedCapabilities: Set<AppletCapability> {

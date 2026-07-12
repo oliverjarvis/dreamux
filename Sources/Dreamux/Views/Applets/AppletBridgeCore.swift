@@ -57,10 +57,14 @@ enum AppletBridgeCore {
         "context", "kv.get", "kv.set", "kv.delete", "kv.list",
         "fs.read", "fs.write", "fs.list", "fs.delete",
         "http.fetch", "shell.exec", "notify",
+        "connections.status", "connections.request",
     ]
 
-    /// The capability a known method needs; nil = always allowed
-    /// ("context"). Callers must check `knownMethods` first — this returns
+    /// The capability a known method needs; nil = always allowed. The
+    /// capability-free methods are `context` and both `connections.*`
+    /// (status/request expose only non-secret binding state or open the bind
+    /// UI — no credential ever crosses them), which fall through to the `nil`
+    /// default below. Callers must check `knownMethods` first — this returns
     /// nil for unknown methods too, which `checkAllowed` never reaches.
     static func capability(forMethod method: String) -> AppletCapability? {
         switch method {

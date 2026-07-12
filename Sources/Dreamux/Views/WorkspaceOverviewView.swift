@@ -49,6 +49,13 @@ struct WorkspaceOverviewDependencies {
     /// — forwarded straight into the checklist's own course-correct sheet,
     /// the same way `WorkspaceSidebar` forwards it into `PlansSpecsSection`.
     let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
+    /// Live flow state, passed as a plain reference and re-wrapped as an
+    /// `@ObservedObject` on the view (a struct field can't be observed).
+    let flows: FlowStore
+    /// Zoom the Flows page to a workspace's run lane (the "Working now"
+    /// pill's click target). ContentView resolves the workspace's plan lane
+    /// — the session lane the subagent lives on is board-suppressed.
+    let onOpenRunFlow: (UUID) -> Void
 }
 
 /// The workspace's home dashboard — its pinned, non-dismissable first
@@ -65,6 +72,11 @@ struct WorkspaceOverviewDependencies {
 ///   here).
 struct WorkspaceOverviewView: View {
     @Bindable var session: WorkspaceSession
+    /// The project's live flow state — read reactively so the Overview's
+    /// "Working now" strip updates as subagents start and stop. Carried by
+    /// `WorkspaceOverviewDependencies` (a plain reference) and re-wrapped
+    /// here so `@Published flows` drives re-render.
+    @ObservedObject var flows: FlowStore
     let docStore: DocStore
     let planQueue: PlanQueueController
     /// Mode B's working-tree header resolves this workspace's worktree
@@ -105,6 +117,9 @@ struct WorkspaceOverviewView: View {
     let onViewTaskChanges: (PlanDoc, PlanTask) -> Void
     /// See `WorkspaceOverviewDependencies.onCourseCorrectionNudge`.
     let onCourseCorrectionNudge: (PlanDoc, String, CorrectionPriority) -> Void
+    /// Zoom the Flows page to this workspace's run lane — the pill's click
+    /// target. See `WorkspaceOverviewDependencies.onOpenRunFlow`.
+    let onOpenRunFlow: (UUID) -> Void
 
     /// Mode B's working-tree summary — loaded once on appear (no poller;
     /// unlike the header chip's 5s loop, this tab isn't always on
@@ -115,6 +130,19 @@ struct WorkspaceOverviewView: View {
     /// "View changes" button, keyed by the task's line (mirrors the
     /// rail's now-deleted `hoveredTaskLine`).
     @State private var hoveredTaskLine: Int?
+    /// Step row currently under the pointer within an expanded task — drives
+    /// the per-step hover wash, keyed by the step's document line.
+    @State private var hoveredStepLine: Int?
+    /// Task rows currently expanded to reveal their steps, keyed by the
+    /// task's line. The current task auto-expands once on open (see
+    /// `modeA`'s `.onAppear`); every other task starts collapsed so the
+    /// checklist reads as a scannable outline until you drill in.
+    @State private var expandedTaskLines: Set<Int> = []
+    /// Whether the one-time current-task auto-expand has run for this view
+    /// instance. A plain `isEmpty` guard would re-seed if the user collapsed
+    /// the auto-expanded task and expanded nothing else; this fires the seed
+    /// exactly once so a deliberate collapse always sticks.
+    @State private var didSeedExpansion = false
     /// The row a *Course correct…* was fired from, driving the sheet —
     /// this view's own copy of `PlansSpecsSection.CorrectionTarget` (the
     /// checklist's task/phase rows are its only remaining trigger for
@@ -183,63 +211,215 @@ struct WorkspaceOverviewView: View {
     // MARK: - Mode A
 
     private func modeA(_ plan: PlanDoc) -> some View {
-        // The workspace this Overview belongs to unarguably exists (we're
-        // rendering its tab), so the plan behind it is never `.ready`/
-        // `.specOnly` in practice — `featureExists` is trivially true here.
+        // The workspace exists (we're rendering its tab), so `featureExists`
+        // is trivially true here.
         let status = docStore.status(for: plan, featureExists: { _ in true })
+        let hero = RunHeroState.resolve(status: status, hasLiveAgent: hasLiveAgent(session.workspace))
+        let tasks = plan.tasks.filter { !$0.steps.isEmpty }
+        let live = OverviewLiveAgents.subagents(
+            in: flows.flows, workspaceID: session.workspace.id, tasks: plan.tasks)
         return ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                header(plan, status: status)
-                Divider()
-                specAndProgress(plan)
-                Divider()
-                checklist(plan)
-                Divider()
-                actionsRow(plan)
-                gateSection(plan)
+            VStack(alignment: .leading, spacing: 20) {
+                heroCard(plan, hero: hero)
+                if !live.isEmpty {
+                    workingNow(plan, subagents: live)
+                }
+                OverviewSectionLabel(title: "Tasks", trailing: "\(tasks.count) tasks")
+                checklist(plan, live: live)
             }
             .padding(24)
+            .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onAppear {
+            // Auto-expand the current task the first time this Overview
+            // appears — the one row you most want to see steps for — while
+            // leaving the rest collapsed. Fires exactly once (guarded on
+            // `didSeedExpansion`, not on emptiness) so a later collapse of
+            // that row is never undone by a re-appear.
+            guard !didSeedExpansion else { return }
+            didSeedExpansion = true
+            if let line = currentTaskLine(plan) {
+                expandedTaskLines.insert(line)
+            }
+        }
     }
 
-    // MARK: - Header
+    /// Line of the first task carrying an unchecked step — the run's
+    /// current task, and the one `modeA` auto-expands on open.
+    private func currentTaskLine(_ plan: PlanDoc) -> Int? {
+        plan.tasks
+            .filter { !$0.steps.isEmpty }
+            .first { $0.steps.contains { !$0.checked } }?
+            .line
+    }
 
-    private func header(_ plan: PlanDoc, status: PlanStatus) -> some View {
-        let startedAt = docStore.ledger.recordForPlan(docStore.relativePath(of: plan))?.startedAt
-        let flow = flowStatus(for: status)
-        return HStack(alignment: .top, spacing: 14) {
-            Image(systemName: FlowStatusGlyph.symbol(flow))
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(FlowStatusGlyph.color(flow))
-                .frame(width: 26)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(plan.title)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.primary)
-                HStack(spacing: 6) {
-                    Text(status.label)
-                    if let startedAt {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(startedAt, style: .relative)
-                    }
-                    Text("·").foregroundStyle(.tertiary)
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(session.workspace.name)
-                    if !session.workspace.linkedRepoIDs.isEmpty {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+    /// The "Working now" strip: a pill per live subagent. Horizontal scroll
+    /// is a safe fallback for the rare overflow (done agents are collapsed
+    /// upstream, so live ones are few). Hidden entirely when `subagents` is
+    /// empty (caller guards).
+    private func workingNow(_ plan: PlanDoc, subagents: [LiveSubagent]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            OverviewSectionLabel(title: "Working now")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(subagents) { sub in
+                        LiveSubagentPill(subagent: sub, detail: detailText(for: sub, plan: plan)) {
+                            onOpenRunFlow(session.workspace.id)
+                        }
                     }
                 }
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            }
+        }
+    }
+
+    /// Prefer the pinned task's clean title (so the pill and the badged row
+    /// agree); fall back to the subagent's live activity.
+    private func detailText(for sub: LiveSubagent, plan: PlanDoc) -> String? {
+        if let line = sub.taskLine, let task = plan.tasks.first(where: { $0.line == line }) {
+            return cleanTitle(task.title)
+        }
+        return sub.activity
+    }
+
+    // MARK: - Mode A hero
+
+    private func heroCard(_ plan: PlanDoc, hero: RunHeroState) -> some View {
+        let startedAt = docStore.ledger.recordForPlan(docStore.relativePath(of: plan))?.startedAt
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                OverviewStatusPill(text: hero.pillText, flow: hero.flow,
+                                   pulse: hero.phase == .running)
+                Spacer(minLength: 0)
+                if let startedAt {
+                    (Text("Started ") + Text(startedAt, style: .relative) + Text(" ago"))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.tertiary)
+                }
+                makeRunControls(session.workspace)
+            }
+            Text(plan.title)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 13)
+            heroMeta(plan)
+                .padding(.top, 9)
+            if plan.totalSteps > 0 {
+                heroProgress(plan, complete: hero.progressComplete)
+                    .padding(.top, 17)
+            }
+            if hero.phase == .merged {
+                mergedNote()
+                    .padding(.top, 16)
+            }
+            heroActions(plan, hero: hero)
+                .padding(.top, 16)
+        }
+        .overviewSurface(padding: 20)
+    }
+
+    private func heroMeta(_ plan: PlanDoc) -> some View {
+        let chips = docChips(for: plan)
+        return HStack(spacing: 9) {
+            Label(session.workspace.name, systemImage: "arrow.triangle.branch")
+                .labelStyle(.titleAndIcon)
+            if !session.workspace.linkedRepoIDs.isEmpty {
+                Text("·").foregroundStyle(.tertiary)
+                Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+            }
+            if !chips.isEmpty {
+                Text("·").foregroundStyle(.tertiary)
+                Image(systemName: "paperclip").font(.system(size: 11)).foregroundStyle(.tertiary)
+                ForEach(Array(chips.enumerated()), id: \.offset) { index, chip in
+                    if index > 0 { Text("·").foregroundStyle(.tertiary) }
+                    Button { onOpenDoc(chip.url) } label: {
+                        Text(chip.label).underline()
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             Spacer(minLength: 0)
         }
+        .font(.system(size: 13))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+    }
+
+    private func heroProgress(_ plan: PlanDoc, complete: Bool) -> some View {
+        let fraction = Double(plan.checkedSteps) / Double(max(1, plan.totalSteps))
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("\(plan.checkedSteps) / \(plan.totalSteps) steps")
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(complete ? Color.green : Color.secondary)
+                Spacer(minLength: 0)
+                Text("\(Int((fraction * 100).rounded()))%")
+                    .font(.system(size: 12.5).monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+            OverviewProgressBar(fraction: fraction, complete: complete)
+        }
+    }
+
+    private func mergedNote() -> some View {
+        // The base is this workspace's first *linked* repo's default branch
+        // (mirrors `resolveWorktreeGitStatus`' repo pick) — not just the
+        // store's first repo, which would name the wrong base for a
+        // workspace that links a non-first repo.
+        let base = (session.workspace.linkedRepoIDs.isEmpty
+                    ? repoStore.repositories.first
+                    : repoStore.repositories.first {
+                        session.workspace.linkedRepoIDs.contains($0.name)
+                    })?.defaultBranch ?? "main"
+        return HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.green)
+            Text("Merged — this run's changes are on \(base).")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func heroActions(_ plan: PlanDoc, hero: RunHeroState) -> some View {
+        HStack(spacing: 10) {
+            switch hero.primary {
+            case .run:
+                RunPlanButton { onRunPlan(plan) }
+            case .running:
+                RunningIndicator()
+            case .reviewAndMerge:
+                Button {
+                    gateActions.requestMerge(session.workspace.id)
+                } label: {
+                    Label(mergePrimaryLabel(plan), systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.borderedProminent)
+            case .noPrimary:
+                EmptyView()
+            }
+            BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
+            Button(action: openOrFocusTerminal) {
+                Label("Open terminal", systemImage: "terminal")
+            }
+            .buttonStyle(.soft)
+            Spacer(minLength: 0)
+        }
+        .controlSize(.regular)
+    }
+
+    /// "Merge & continue" when this plan is the queue's current gate (so the
+    /// queue advances), else "Review & merge". Both call the same
+    /// `gateActions.requestMerge`, which itself routes queue-gated vs. off-queue.
+    private func mergePrimaryLabel(_ plan: PlanDoc) -> String {
+        if planQueue.state == .atGate,
+           planQueue.currentPlanPath == docStore.relativePath(of: plan) {
+            return "Merge & continue"
+        }
+        return "Review & merge"
     }
 
     /// `PlanStatus` → `FlowStatus`, so the header can reuse
@@ -251,41 +431,6 @@ struct WorkspaceOverviewView: View {
         case .awaitingReview: return .waiting
         case .merged: return .done
         case .inProgress, .ready, .specOnly: return .queued
-        }
-    }
-
-    // MARK: - Spec + progress
-
-    private func specAndProgress(_ plan: PlanDoc) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            let chips = docChips(for: plan)
-            if !chips.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                    ForEach(Array(chips.enumerated()), id: \.offset) { index, chip in
-                        if index > 0 {
-                            Text("·").foregroundStyle(.tertiary)
-                        }
-                        Button { onOpenDoc(chip.url) } label: {
-                            Text(chip.label)
-                                .underline()
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 13, weight: .medium))
-            }
-            if plan.totalSteps > 0 {
-                Text("\(plan.checkedSteps) / \(plan.totalSteps) steps")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.secondary)
-                ProgressView(value: Double(plan.checkedSteps), total: Double(plan.totalSteps))
-                    .frame(maxWidth: .infinity)
-            }
         }
     }
 
@@ -310,27 +455,38 @@ struct WorkspaceOverviewView: View {
     // it isn't crammed into the sidebar).
 
     @ViewBuilder
-    private func checklist(_ plan: PlanDoc) -> some View {
+    private func checklist(_ plan: PlanDoc, live: [LiveSubagent]) -> some View {
         let tasks = plan.tasks.filter { !$0.steps.isEmpty }
-        if PlanPhases.shouldGroup(tasks) {
-            let groups = PlanPhases.groups(tasks)
-            let currentGroup = PlanPhases.currentGroupIndex(groups)
-            VStack(alignment: .leading, spacing: 18) {
+        // Global 1-based task numbers, keyed by line (unique per task in
+        // practice; `uniquingKeysWith` keeps the first rather than trapping
+        // if a malformed plan ever repeats a line).
+        let numbers = Dictionary(tasks.enumerated().map { ($1.line, $0 + 1) },
+                                 uniquingKeysWith: { first, _ in first })
+        VStack(alignment: .leading, spacing: PlanPhases.shouldGroup(tasks) ? 14 : 2) {
+            if PlanPhases.shouldGroup(tasks) {
+                let groups = PlanPhases.groups(tasks)
+                let currentGroup = PlanPhases.currentGroupIndex(groups)
                 ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
-                    phaseSection(group, plan: plan, isCurrentGroup: index == currentGroup)
+                    phaseSection(group, plan: plan, numbers: numbers,
+                                 isCurrentGroup: index == currentGroup, live: live)
+                }
+            } else {
+                let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
+                ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
+                    taskRow(task, number: index + 1, plan: plan,
+                            isCurrent: index == currentIndex, live: live)
                 }
             }
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                taskRows(tasks, plan: plan)
-            }
         }
+        .overviewSurface(padding: 8)
     }
 
     private func phaseSection(
-        _ group: PlanPhases.Group, plan: PlanDoc, isCurrentGroup: Bool
+        _ group: PlanPhases.Group, plan: PlanDoc, numbers: [Int: Int],
+        isCurrentGroup: Bool, live: [LiveSubagent]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let currentTaskIndex = group.tasks.firstIndex { $0.steps.contains { !$0.checked } }
+        return VStack(alignment: .leading, spacing: 3) {
             Button {
                 if let line = group.tasks.first?.phaseLine ?? group.tasks.first?.line {
                     onOpenDocAtLine(plan.fileURL, line)
@@ -340,16 +496,14 @@ struct WorkspaceOverviewView: View {
                     Text(group.phase ?? "Steps")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.primary)
-                    if isCurrentGroup {
-                        Text("← current")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
+                    if isCurrentGroup { currentTag() }
                     Spacer(minLength: 0)
                     Text("\(group.checkedSteps)/\(group.totalSteps)")
                         .font(.system(size: 13).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -361,123 +515,208 @@ struct WorkspaceOverviewView: View {
                         description: group.phase ?? "Steps")
                 }
             }
-            taskRows(group.tasks, plan: plan)
-        }
-    }
-
-    private func taskRows(_ tasks: [PlanTask], plan: PlanDoc) -> some View {
-        let currentIndex = tasks.firstIndex { $0.steps.contains { !$0.checked } }
-        return VStack(alignment: .leading, spacing: 2) {
-            ForEach(Array(tasks.enumerated()), id: \.offset) { index, task in
-                taskRow(task, plan: plan, isCurrent: index == currentIndex)
+            ForEach(Array(group.tasks.enumerated()), id: \.offset) { index, task in
+                taskRow(task, number: numbers[task.line] ?? (index + 1),
+                        plan: plan, isCurrent: index == currentTaskIndex, live: live)
             }
         }
     }
 
-    private func taskRow(_ task: PlanTask, plan: PlanDoc, isCurrent: Bool) -> some View {
+    private func taskRow(
+        _ task: PlanTask, number: Int, plan: PlanDoc, isCurrent: Bool, live: [LiveSubagent]
+    ) -> some View {
         let checked = task.steps.filter(\.checked).count
         let total = task.steps.count
         let allChecked = checked == total
-        let glyph = allChecked ? "checkmark" : (isCurrent ? "arrowtriangle.right.fill" : "circle")
-        let tint = isCurrent
-            ? AnyShapeStyle(Color.accentColor)
-            : AnyShapeStyle(allChecked ? .secondary : .tertiary)
-        return Button {
-            onOpenDocAtLine(plan.fileURL, task.line)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: glyph)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 18)
-                Text(task.title.isEmpty ? "Steps" : task.title)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1).truncationMode(.tail)
-                if isCurrent {
-                    Text("← current")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                // Hover button only when at least one step is checked — an
-                // untouched task can't have commits yet. Rendered whenever
-                // checked, faded by hover, so the count never shifts
-                // (mirrors the rail's now-deleted task row).
-                if checked > 0 {
-                    let show = hoveredTaskLine == task.line
-                    Button {
-                        onViewTaskChanges(plan, task)
-                    } label: {
-                        Image(systemName: "plus.forwardslash.minus")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
+        let isExpanded = expandedTaskLines.contains(task.line)
+        let pinned = live.first { $0.taskLine == task.line }
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                toggleExpanded(task.line)
+            } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 12)
+                    Text("\(number)")
+                        .font(.system(size: 12.5).monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 20, alignment: .trailing)
+                    checkGlyph(allChecked: allChecked, isCurrent: isCurrent)
+                    Text(cleanTitle(task.title))
+                        .font(.system(size: 15))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1).truncationMode(.tail)
+                    if isCurrent { currentTag() }
+                    if let pinned {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(FlowStatusGlyph.color(pinned.status))
+                                .frame(width: 6, height: 6)
+                            Text(pinned.name)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.06)))
+                        .help("\(pinned.name) is working this task")
                     }
-                    .buttonStyle(.plain)
-                    .help("View this task's changes")
-                    .opacity(show ? 1 : 0)
-                    .allowsHitTesting(show)
+                    Spacer(minLength: 0)
+                    if checked > 0 {
+                        let show = hoveredTaskLine == task.line
+                        Button {
+                            onViewTaskChanges(plan, task)
+                        } label: {
+                            Image(systemName: "plus.forwardslash.minus")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 20, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("View this task's changes")
+                        .opacity(show ? 1 : 0)
+                        .allowsHitTesting(show)
+                    }
+                    Text("\(checked)/\(total)")
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.primary.opacity(0.05)))
                 }
-                Text("\(checked)/\(total)")
-                    .font(.system(size: 13).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background {
-            if isCurrent {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.08))
+            .buttonStyle(.plain)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isCurrent
+                          ? Color.accentColor.opacity(0.08)
+                          : (hoveredTaskLine == task.line ? Color.primary.opacity(0.04) : Color.clear))
             }
-        }
-        .contextMenu {
-            Button("View changes") {
-                onViewTaskChanges(plan, task)
+            .contextMenu {
+                Button("Open in plan") { onOpenDocAtLine(plan.fileURL, task.line) }
+                Button("View changes") { onViewTaskChanges(plan, task) }
+                Button("Course correct…") {
+                    correcting = CorrectionTarget(
+                        plan: plan,
+                        anchor: .task(line: task.line),
+                        description: task.title.isEmpty ? "this task" : task.title)
+                }
             }
-            Button("Course correct…") {
-                correcting = CorrectionTarget(
-                    plan: plan,
-                    anchor: .task(line: task.line),
-                    description: task.title.isEmpty ? "this task" : task.title)
+            .onHover { inside in
+                if inside { hoveredTaskLine = task.line }
+                else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
             }
-        }
-        .onHover { inside in
-            if inside { hoveredTaskLine = task.line }
-            else if hoveredTaskLine == task.line { hoveredTaskLine = nil }
+            if isExpanded {
+                stepsList(task, plan: plan)
+            }
         }
     }
 
-    // MARK: - Actions
-
-    private func actionsRow(_ plan: PlanDoc) -> some View {
-        // Lime pill runs the *plan* (start/resume the agent); shown while the
-        // plan is incomplete AND no agent is live on it (a `.running` status
-        // alone just means it was started). `makeRunControls` is the
-        // separate run.toml services control.
-        let status = docStore.status(for: plan, featureExists: featureExists)
-        let incomplete = status == .ready || status == .inProgress || status == .running
-        let live = hasLiveAgent(session.workspace)
-        let canRun = incomplete && !live
-        return HStack(spacing: 12) {
-            if canRun {
-                RunPlanButton { onRunPlan(plan) }
-            } else if incomplete && live {
-                RunningIndicator()
+    /// The task's steps, revealed when its row is expanded. Each step is a
+    /// first-class row — generous vertical padding, a hover wash, and a click
+    /// that opens the plan at that checkbox's line (steps carry their own
+    /// `line` now). The title wraps rather than truncating, since a step line
+    /// can be a full sentence. Indented so the glyph column lines up under
+    /// the task's status glyph above it.
+    private func stepsList(_ task: PlanTask, plan: PlanDoc) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(task.steps.enumerated()), id: \.offset) { _, step in
+                Button {
+                    onOpenDocAtLine(plan.fileURL, step.line)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 11) {
+                        Image(systemName: step.checked ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(step.checked ? Color.green : Color.secondary)
+                            .frame(width: 18)
+                        Text(step.title)
+                            .font(.system(size: 14))
+                            .foregroundStyle(step.checked ? .secondary : .primary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(hoveredStepLine == step.line
+                              ? Color.primary.opacity(0.05) : Color.clear)
+                }
+                .onHover { inside in
+                    if inside { hoveredStepLine = step.line }
+                    else if hoveredStepLine == step.line { hoveredStepLine = nil }
+                }
+                .help("Open this step in the plan")
             }
-            makeRunControls(session.workspace)
-            Button(action: openOrFocusTerminal) {
-                Label("Open terminal", systemImage: "terminal")
-            }
-            .buttonStyle(.soft)
-            BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
-            Spacer(minLength: 0)
         }
-        .controlSize(.regular)
+        .padding(.leading, 31)
+        .padding(.trailing, 10)
+        .padding(.top, 4)
+        .padding(.bottom, 12)
+    }
+
+    /// Flip a task row between collapsed and expanded, animated so the
+    /// chevron rotation and the steps' reveal move together.
+    private func toggleExpanded(_ line: Int) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            if expandedTaskLines.contains(line) {
+                expandedTaskLines.remove(line)
+            } else {
+                expandedTaskLines.insert(line)
+            }
+        }
+    }
+
+    /// A leading "Task 12:" is redundant once a number badge carries the
+    /// index — strip it; keep any other title verbatim.
+    private func cleanTitle(_ title: String) -> String {
+        if let range = title.range(of: #"^Task\s+\d+:\s*"#, options: .regularExpression) {
+            let rest = String(title[range.upperBound...])
+            return rest.isEmpty ? "Steps" : rest
+        }
+        return title.isEmpty ? "Steps" : title
+    }
+
+    @ViewBuilder
+    private func checkGlyph(allChecked: Bool, isCurrent: Bool) -> some View {
+        if allChecked {
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.green)
+                .frame(width: 19, height: 19)
+                .background(Circle().fill(Color.green.opacity(0.16)))
+        } else if isCurrent {
+            Image(systemName: "arrowtriangle.right.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 19, height: 19)
+        } else {
+            Image(systemName: "circle")
+                .font(.system(size: 13))
+                .foregroundStyle(.tertiary)
+                .frame(width: 19, height: 19)
+        }
+    }
+
+    private func currentTag() -> some View {
+        Text("current")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(Color.accentColor.opacity(0.12)))
     }
 
     /// Reuse an already-open shell tab if this workspace has one; otherwise
@@ -494,31 +733,19 @@ struct WorkspaceOverviewView: View {
         }
     }
 
-    // MARK: - Gate
-
-    @ViewBuilder
-    private func gateSection(_ plan: PlanDoc) -> some View {
-        if planQueue.state == .atGate,
-           planQueue.currentPlanPath == docStore.relativePath(of: plan) {
-            GateActionCard(workspaceID: session.workspace.id, mergeActionable: true, actions: gateActions)
-        }
-    }
-
     // MARK: - Mode B (plain workspace: no plan behind it)
 
     private func modeB() -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 20) {
                 headerB()
-                Divider()
-                actionsRowB()
                 if session.workspace.isMain {
-                    Divider()
+                    OverviewSectionLabel(title: "Project Runs")
                     projectRunsSection()
                 }
-                Spacer(minLength: 0)
             }
             .padding(24)
+            .frame(maxWidth: 860, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -527,49 +754,46 @@ struct WorkspaceOverviewView: View {
         }
     }
 
-    /// Branch name, linked repos, and working-tree status — the same
-    /// data the header git chip shows for the *active* workspace
-    /// (`ContentView.resolveGitStatus`), resolved here for *this*
-    /// workspace specifically since the Overview can be any workspace's
-    /// tab, active or not.
     private func headerB() -> some View {
-        let flow: FlowStatus = headStatus.map {
-            ($0.insertions > 0 || $0.deletions > 0) ? .running : .done
-        } ?? .queued
-        return HStack(alignment: .top, spacing: 14) {
-            Image(systemName: FlowStatusGlyph.symbol(flow))
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(FlowStatusGlyph.color(flow))
-                .frame(width: 26)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(session.workspace.name)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.primary)
-                HStack(spacing: 6) {
-                    if let headStatus {
-                        Text(headStatus.shortSHA)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(.tertiary)
+        let pill = OverviewModeBStatus.pill(
+            insertions: headStatus?.insertions, deletions: headStatus?.deletions)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                if let pill {
+                    OverviewStatusPill(text: pill.text, flow: pill.flow)
+                }
+                Spacer(minLength: 0)
+                makeRunControls(session.workspace)
+            }
+            Text(session.workspace.name)
+                .font(.system(size: 22, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+                .padding(.top, 13)
+            HStack(spacing: 9) {
+                if let headStatus {
+                    Text(headStatus.shortSHA)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    if headStatus.insertions > 0 || headStatus.deletions > 0 {
                         Text("·").foregroundStyle(.tertiary)
-                        if headStatus.insertions > 0 || headStatus.deletions > 0 {
-                            Text("+\(headStatus.insertions)").foregroundStyle(.green)
-                            Text("−\(headStatus.deletions)").foregroundStyle(.red)
-                        } else {
-                            Text("Clean")
-                        }
-                    }
-                    if !session.workspace.linkedRepoIDs.isEmpty {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+                        Text("+\(headStatus.insertions)").foregroundStyle(.green)
+                        Text("−\(headStatus.deletions)").foregroundStyle(.red)
                     }
                 }
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                if !session.workspace.linkedRepoIDs.isEmpty {
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+                }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.top, 9)
+            actionsRowB()
+                .padding(.top, 16)
         }
+        .overviewSurface(padding: 20)
     }
 
     /// This workspace's worktree, resolved the same way the header chip
@@ -591,27 +815,23 @@ struct WorkspaceOverviewView: View {
     }
 
     private func actionsRowB() -> some View {
-        HStack(spacing: 12) {
-            makeRunControls(session.workspace)
+        HStack(spacing: 10) {
+            Button(action: onNewPlan) {
+                Label("Plan something here", systemImage: "sparkles")
+            }
+            .buttonStyle(.soft)
             Button(action: session.createTab) {
                 Label("Open terminal", systemImage: "terminal")
             }
             .buttonStyle(.soft)
             BranchChangesButton(workspaceID: session.workspace.id, actions: gateActions)
-            Button(action: onNewPlan) {
-                Label("Plan something here", systemImage: "sparkles")
-            }
-            .buttonStyle(.soft)
             Spacer(minLength: 0)
         }
         .controlSize(.regular)
     }
 
-    // MARK: - Main's mini-dashboard (project runs, Group 3)
+    // MARK: - Main's mini-dashboard (project runs)
 
-    /// Every active (non-merged) plan across the project as a compact
-    /// run row, most-urgent first — `main`'s home turf, so it doubles
-    /// as a project-wide status board.
     @ViewBuilder
     private func projectRunsSection() -> some View {
         let runs = ProjectRunsSummary.runs(
@@ -619,28 +839,24 @@ struct WorkspaceOverviewView: View {
             status: { docStore.status(for: $0, featureExists: featureExists) },
             featureName: featureName,
             relativePath: { docStore.relativePath(of: $0) })
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Project Runs")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .kerning(0.4)
-                .textCase(.uppercase)
-            if runs.isEmpty {
-                Text("No active runs. Kick one off from a plan in the sidebar.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(runs) { run in
-                        projectRunRow(run)
-                    }
+        if runs.isEmpty {
+            Text("No active runs. Kick one off from a plan in the sidebar.")
+                .font(.system(size: 13))
+                .foregroundStyle(.tertiary)
+                .overviewSurface(padding: 16)
+        } else {
+            VStack(spacing: 4) {
+                ForEach(runs) { run in
+                    projectRunRow(run)
                 }
             }
+            .overviewSurface(padding: 8)
         }
     }
 
     private func projectRunRow(_ run: ProjectRun) -> some View {
         let flow = flowStatus(for: run.status)
+        let complete = run.total > 0 && run.checked == run.total
         return Button { openRun(run) } label: {
             HStack(spacing: 12) {
                 Image(systemName: FlowStatusGlyph.symbol(flow))
@@ -662,9 +878,9 @@ struct WorkspaceOverviewView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     if run.total > 0 {
-                        ProgressView(value: Double(run.checked), total: Double(run.total))
-                            .controlSize(.mini)
-                            .frame(maxWidth: .infinity)
+                        OverviewProgressBar(
+                            fraction: Double(run.checked) / Double(max(1, run.total)),
+                            complete: complete)
                     }
                 }
                 Spacer(minLength: 0)

@@ -131,6 +131,14 @@ enum E2ECommands {
             return try removeApplet(request: request)
         case "appletsState":
             return try appletsState()
+        case "createConnection":
+            return try createConnection(request: request)
+        case "bindConnection":
+            return try bindConnection(request: request)
+        case "importConnection":
+            return try await importConnection(request: request)
+        case "connectionsState":
+            return connectionsState()
         case "chatFaceState":
             return try chatFaceState()
         case "quit":
@@ -928,6 +936,108 @@ enum E2ECommands {
             },
             "libraryApplets": library.applets.map { applet -> [String: Any] in
                 ["slug": applet.slug, "name": applet.manifest.name]
+            },
+        ]
+    }
+
+    // MARK: - Connections
+
+    /// Create a connection through the same store the Settings management
+    /// UI (T7) and the CLI importer (T5) write to —
+    /// `ConnectionStore.shared.add`. `kind` maps to the two `AuthKind`
+    /// shapes an e2e scenario needs: `"bearer"` → `.header("Authorization",
+    /// "Bearer {token}")` (HTTP, allowlisted by `hosts`), `"env"` →
+    /// `.env(vars: [envVar])` (shell only, `hosts` unused). The driver sets
+    /// `$DREAMUX_CONNECTIONS_SECRET_DIR` before launch so the token lands in
+    /// `FileSecretStore`, never the real Keychain — see
+    /// `SecretStoreFactory.makeDefault()`.
+    private static func createConnection(request: [String: Any]) throws -> [String: Any] {
+        let id = try string("id", in: request)
+        let token = try string("token", in: request)
+        let kind = try string("kind", in: request)
+        let hosts = (request["hosts"] as? [String]) ?? []
+        let authKind: AuthKind
+        switch kind {
+        case "bearer":
+            authKind = .header(headerName: "Authorization", valueTemplate: "Bearer {token}")
+        case "env":
+            guard let envVar = request["envVar"] as? String, !envVar.isEmpty else {
+                throw CommandError(message: "connection kind \"env\" requires a non-empty \"envVar\" parameter")
+            }
+            authKind = .env(vars: [envVar])
+        default:
+            throw CommandError(message: "unknown connection kind \"\(kind)\" (expected \"bearer\" or \"env\")")
+        }
+        do {
+            let connection = try ConnectionStore.shared.add(
+                label: id, kind: authKind, hosts: hosts, token: token,
+                source: .manual, preferredID: id)
+            return ["ok": true, "id": connection.id]
+        } catch {
+            throw CommandError(message: "createConnection failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Bind an applet's declared slot to a connection — the same write
+    /// `AppletSession.bind(slot:toConnectionID:)` (T8's seam, shared with
+    /// the host view's bind sheet) performs against that applet's live
+    /// `ConnectionBindingStore`. Resolves the applet by `slug` against the
+    /// active project (refreshed first, same staleness guard `openApplet`
+    /// uses), then reaches its `AppletSession` via
+    /// `ProjectSession.appletSession(for:)` — the SAME cached instance the
+    /// host view binds through once the applet is open, so a driver can
+    /// bind before or after `openApplet` and either order lands on the one
+    /// live resolver.
+    private static func bindConnection(request: [String: Any]) throws -> [String: Any] {
+        let slug = try string("slug", in: request)
+        let slot = try string("slot", in: request)
+        let connectionID = try string("connectionID", in: request)
+        let (_, session) = try activeSession()
+        session.applets.refresh()
+        guard let applet = session.applets.applets.first(where: { $0.slug == slug }) else {
+            throw CommandError(message: "no applet with slug \"\(slug)\" in this project")
+        }
+        do {
+            try session.appletSession(for: applet).bind(slot: slot, toConnectionID: connectionID)
+        } catch {
+            throw CommandError(message: "bindConnection failed: \(error.localizedDescription)")
+        }
+        return ["ok": true]
+    }
+
+    /// Import a token by running an arbitrary shell command and write it
+    /// straight into the store as an `.env`-kind connection — the SAME
+    /// generic path a slot's `importCommand` recipe (G1) drives from
+    /// `AddConnectionSheet.runCommandImport` (G2/G3), exercised here without
+    /// a UI driver: `CLICredentialImporter.runCommand` -> `ConnectionStore`.
+    /// Errors if the command produces no token (mirrors the sheet's
+    /// `commandImportFailed` path rather than saving an empty token).
+    private static func importConnection(request: [String: Any]) async throws -> [String: Any] {
+        let id = try string("id", in: request)
+        let envVar = try string("envVar", in: request)
+        let command = try string("command", in: request)
+        let hosts = (request["hosts"] as? [String]) ?? []
+        guard let token = await CLICredentialImporter.runCommand(command) else {
+            throw CommandError(message: "importConnection command produced no token")
+        }
+        do {
+            let connection = try ConnectionStore.shared.add(
+                label: "probe", kind: .env(vars: [envVar]), hosts: hosts, token: token,
+                source: .importedFromCLI(tool: "command"), preferredID: id)
+            return ["ok": true, "id": connection.id]
+        } catch {
+            throw CommandError(message: "importConnection failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Snapshot of the app-wide connection registry — metadata only, never
+    /// a token (tokens never leave `ConnectionStore`/`SecretStore`). Mostly
+    /// a debugging aid for a driver asserting `createConnection` landed.
+    private static func connectionsState() -> [String: Any] {
+        [
+            "ok": true,
+            "connections": ConnectionStore.shared.connections.map { connection -> [String: Any] in
+                ["id": connection.id, "hosts": connection.hosts]
             },
         ]
     }

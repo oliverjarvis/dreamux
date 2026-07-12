@@ -48,6 +48,20 @@ enum AppletScaffold {
         Rules: edit files in THIS folder only. Keep it buildless (plain ES modules; \
         preact + htm are vendored here). Update manifest.json's requiresCapabilities \
         to exactly the capabilities you call. The preview hot-reloads on every save.
+        If the app calls an authenticated API — most SaaS/dev services (GitHub, \
+        Cloudflare, Linear, Stripe, OpenAI, …) — do NOT hardcode a token, read one \
+        from the environment, or build your own token-entry field. Instead declare a \
+        Connection slot in manifest.json's requiresConnections with a FULL recipe, \
+        working out the details yourself from what you know about the service: its \
+        `authKind` (usually a Bearer header — `Authorization` / `Bearer {token}` — to \
+        the service's API host), its `hosts` (the exact API host, e.g. \
+        `api.cloudflare.com`), and an `importCommand` ONLY if the service has a CLI \
+        that prints a token (e.g. `gh auth token`; most services don't — then omit \
+        it and the user pastes a token). Call the API with \
+        `dreamux.http.fetch(url, { connection: "<slot id>" })`; the bridge attaches \
+        the credential and the user binds the slot on first open. The user shouldn't \
+        have to tell you any of the auth details — infer them. See APPLET.md's \
+        `dreamux.connections` section for the exact recipe shapes.
         The user wants: \(description)
         Build it now.
         """

@@ -29,9 +29,9 @@ final class ProjectSession {
     let planQueue: PlanQueueController
     let nudgeCenter: PlanNudgeCenter
     let flows: FlowStore
-    /// App Studio applets living under `<project>/apps/` (adopted + local-born).
+    /// Applet Studio applets living under `<project>/apps/` (adopted + local-born).
     let applets: ProjectAppletStore
-    /// The global App Studio applet library — the source for the Adopt path
+    /// The global Applet Studio applet library — the source for the Adopt path
     /// and the destination for Publish.
     let appLibrary: AppLibraryStore
 
@@ -713,6 +713,10 @@ final class ProjectSession {
     /// folder is removed so the hot-reload poller and any builder agent stop
     /// first (`AppletSession.stopAgent`).
     func closeAppletSession(id: UUID) {
+        // Resolve any in-flight `connections.request` await first, so the
+        // stored CheckedContinuation isn't deallocated unresumed (a runtime
+        // "leaked its continuation" warning). No-op when none is pending.
+        appletSessions[id]?.completeBind()
         appletSessions[id]?.stopAgent()
         appletSessions[id] = nil
     }

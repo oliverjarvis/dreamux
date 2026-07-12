@@ -155,8 +155,15 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
             let method = request.params["method"] as? String ?? "GET"
             let headers = request.params["headers"] as? [String: String] ?? [:]
             let bodyText = request.params["body"] as? String
+            let connectionSlot = (request.params["connection"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             Task { @MainActor [weak owner] in
                 guard let owner else { return }
+                // A dedicated, redirect-guarded session for a connection-
+                // authenticated fetch; invalidated (releasing its delegate)
+                // when this scope exits. Non-connection fetches leave this nil
+                // and use `URLSession.shared`, unchanged.
+                var dedicatedSession: URLSession?
+                defer { dedicatedSession?.finishTasksAndInvalidate() }
                 do {
                     var urlRequest = URLRequest(url: url)
                     urlRequest.httpMethod = method
@@ -166,7 +173,28 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
                     if let bodyText {
                         urlRequest.httpBody = Data(bodyText.utf8)
                     }
-                    let (data, response) = try await URLSession.shared.data(for: urlRequest)
+                    // A bound connection's credential is attached natively here
+                    // — AFTER the applet's own headers, so it wins on any shared
+                    // field — and ONLY through `ConnectionAuthenticator` (the
+                    // https-only / host-allowlist boundary). This sits inside
+                    // the do-block and BEFORE the URLSession call: any
+                    // resolve/authorize throw jumps to the catch below, so the
+                    // request is never sent and the token never leaves this line.
+                    if let connectionSlot {
+                        let resolved = try owner.connections.resolve(slot: connectionSlot)
+                        urlRequest = try ConnectionAuthenticator.authorize(
+                            urlRequest, url: url, kind: resolved.connection.kind,
+                            token: resolved.token, hosts: resolved.connection.hosts)
+                        // The initial host is allowlisted, but URLSession
+                        // auto-follows 3xx redirects — guard them so the
+                        // credential can't be carried off the allowlist.
+                        dedicatedSession = URLSession(
+                            configuration: .default,
+                            delegate: AppletRedirectHostGuard(hosts: resolved.connection.hosts),
+                            delegateQueue: nil)
+                    }
+                    let session = dedicatedSession ?? .shared
+                    let (data, response) = try await session.data(for: urlRequest)
                     let http = response as? HTTPURLResponse
                     var responseHeaders: [String: String] = [:]
                     for (field, value) in http?.allHeaderFields ?? [:] {
@@ -189,9 +217,27 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
             }
             let cwd = (request.params["cwd"] as? String).map(URL.init(fileURLWithPath:)) ?? owner.projectRoot
             let timeout = request.params["timeout"] as? Double ?? 60
+            let connectionSlot = (request.params["connection"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             Task { @MainActor [weak owner] in
                 guard let owner else { return }
-                let result = await AppletShell.exec(cmd: cmd, cwd: cwd, timeout: timeout)
+                // A `.env`-kind connection injects its token as process env
+                // vars (via `ConnectionAuthenticator.env`). Resolve/env failures
+                // abort BEFORE exec — nothing runs without the credential the
+                // applet asked for, and no token reaches a reply. No connection
+                // → empty env, unchanged behaviour.
+                let connectionEnv: [String: String]
+                if let connectionSlot {
+                    do {
+                        let resolved = try owner.connections.resolve(slot: connectionSlot)
+                        connectionEnv = try ConnectionAuthenticator.env(for: resolved.connection.kind, token: resolved.token)
+                    } catch {
+                        reply(id: request.id, owner: owner, error: error)
+                        return
+                    }
+                } else {
+                    connectionEnv = [:]
+                }
+                let result = await AppletShell.exec(cmd: cmd, cwd: cwd, timeout: timeout, env: connectionEnv)
                 reply(id: request.id, owner: owner, result: [
                     "stdout": result.stdout,
                     "stderr": result.stderr,
@@ -207,6 +253,36 @@ final class AppletBridge: NSObject, WKScriptMessageHandler {
             let body = request.params["body"] as? String ?? ""
             NotificationManager.shared.notify(title: title, body: body)
             reply(id: request.id, owner: owner, result: NSNull())
+
+        case "connections.status":
+            // Non-secret snapshot only — never a token. Capability-free.
+            guard let slot = request.params["slot"] as? String, !slot.isEmpty else {
+                reply(id: request.id, owner: owner, error: AppletBridgeError.badParams("slot"))
+                return
+            }
+            let status = owner.connections.status(slot: slot)
+            reply(id: request.id, owner: owner, result: [
+                "bound": status.bound,
+                "label": status.label.map { $0 as Any } ?? NSNull(),
+                "hosts": status.hosts,
+            ])
+
+        case "connections.request":
+            // Opens the host-view bind sheet and awaits its dismissal, then
+            // replies with the resulting (still non-secret) status.
+            guard let slot = request.params["slot"] as? String, !slot.isEmpty else {
+                reply(id: request.id, owner: owner, error: AppletBridgeError.badParams("slot"))
+                return
+            }
+            Task { @MainActor [weak owner] in
+                guard let owner else { return }
+                let status = await owner.requestBind(slot: slot)
+                reply(id: request.id, owner: owner, result: [
+                    "bound": status.bound,
+                    "label": status.label.map { $0 as Any } ?? NSNull(),
+                    "hosts": status.hosts,
+                ])
+            }
 
         default:
             // Unreachable in practice: `checkAllowed` above already threw
