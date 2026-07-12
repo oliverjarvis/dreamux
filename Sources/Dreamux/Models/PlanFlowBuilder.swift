@@ -9,6 +9,31 @@ struct PlanPhaseSummary: Equatable {
     let totalSteps: Int
 }
 
+/// One checkbox-bearing task, projected for lane/node consumers that need
+/// per-task detail (not just phase rollups).
+struct PlanTaskSummary: Equatable {
+    let line: Int
+    let title: String
+    let phase: String?
+    let checkedSteps: Int
+    let totalSteps: Int
+    let isCurrent: Bool
+
+    /// Project a plan's checkbox-bearing tasks into lane summaries. The
+    /// current task is the first with an unchecked step (PlanCurrentStep's
+    /// rule); an all-checked plan has none.
+    static func summaries(from tasks: [PlanTask]) -> [PlanTaskSummary] {
+        let real = tasks.filter { !$0.steps.isEmpty }
+        let currentLine = real.first { $0.steps.contains { !$0.checked } }?.line
+        return real.map { t in
+            PlanTaskSummary(
+                line: t.line, title: PlanTaskTitle.clean(t.title), phase: t.phase,
+                checkedSteps: t.steps.filter(\.checked).count, totalSteps: t.steps.count,
+                isCurrent: t.line == currentLine)
+        }
+    }
+}
+
 /// Everything the builder needs to know about one plan. Assembled by
 /// thin glue from DocStore + PlanQueueController + PlanRunLedger +
 /// WorkspaceStore; pure value so tests construct it directly.
@@ -22,6 +47,31 @@ struct PlanLaneInput: Equatable {
     let queueState: PlanQueueState?
     let workspaceID: UUID?
     let startedAt: Date?
+    let tasks: [PlanTaskSummary]
+
+    init(
+        planPath: String,
+        title: String,
+        status: PlanStatus,
+        phases: [PlanPhaseSummary],
+        queueOrdinal: Int?,
+        isCurrentQueuePlan: Bool,
+        queueState: PlanQueueState?,
+        workspaceID: UUID?,
+        startedAt: Date?,
+        tasks: [PlanTaskSummary] = []
+    ) {
+        self.planPath = planPath
+        self.title = title
+        self.status = status
+        self.phases = phases
+        self.queueOrdinal = queueOrdinal
+        self.isCurrentQueuePlan = isCurrentQueuePlan
+        self.queueState = queueState
+        self.workspaceID = workspaceID
+        self.startedAt = startedAt
+        self.tasks = tasks
+    }
 }
 
 /// Plan state → plan-kind Flow lanes. Pure; no store access.

@@ -48,7 +48,8 @@ enum PlanLaneAssembler {
                 isCurrentQueuePlan: queue.currentPlanPath == path,
                 queueState: queue.state,
                 workspaceID: workspace?.id,
-                startedAt: record?.startedAt
+                startedAt: record?.startedAt,
+                tasks: PlanTaskSummary.summaries(from: plan.tasks)
             )
         }
     }
