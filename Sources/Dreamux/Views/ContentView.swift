@@ -45,6 +45,10 @@ struct ContentView: View {
     /// `NewPlanSheet` `WorkspaceSidebar`'s `+` opens, independent local
     /// state like `showCreateProject`/`ProjectsRail.showCreate`.
     @State private var showNewPlan = false
+    /// ⌘K command palette visibility (also opened by the rail's search bar).
+    @State private var showPalette = false
+    /// Rebuilt fresh on every palette open so results reflect live stores.
+    @State private var paletteModel: PaletteModel?
     /// Run-the-plan sheet fired from a workspace's Overview (Mode A's lime
     /// pill) — the window-level twin of `WorkspaceSidebar`'s own
     /// `runningPlan`, so the Overview can start/resume a plan the same way
@@ -103,7 +107,11 @@ struct ContentView: View {
 
     private var currentProject: Project? { projects.project(id: currentProjectID) }
 
-    var body: some View {
+    /// The window's whole layout tree plus every sheet/alert modifier that
+    /// doesn't need to chain with the palette's own state below — split
+    /// out of `body` because the combined chain (this stack + the palette
+    /// overlay wiring) makes the type checker time out on one expression.
+    private var mainStack: some View {
         // Cursor-style chrome: ONE thin toolbar spans the whole window
         // (traffic lights inline, both sidebar toggles beside them) and
         // every column — projects rail, work items, content, inspector —
@@ -293,6 +301,9 @@ struct ContentView: View {
         } message: { error in
             Text(error)
         }
+    }
+
+    var body: some View {
         // The file explorer is toggled from the View menu (⌥⌘E, see
         // `FileExplorerCommands`) rather than a toolbar-item shortcut: a
         // `.keyboardShortcut` on a toolbar item isn't dispatched when the
@@ -300,6 +311,7 @@ struct ContentView: View {
         // bell). Publishing the binding here lets the menu command reach
         // this window's state via `@FocusedBinding`, the same way
         // `ProjectCommands` reaches the active store.
+        mainStack
         .focusedSceneValue(\.fileTreeVisible, $showFileTree)
         .focusedSceneValue(\.createProjectPresented, $showCreateProject)
         .focusedSceneValue(\.newPlanPresented, $showNewPlan)
@@ -369,6 +381,25 @@ struct ContentView: View {
         }
         .onChange(of: e2eBridge?.pendingFlowsZoomLaneID) { _, _ in
             consumePendingFlowsZoomIfAny()
+        }
+        .focusedSceneValue(\.palettePresented, $showPalette)
+        .onChange(of: showPalette) { _, visible in
+            if visible {
+                // The e2e path (Task 6) pre-builds a model with a query; only
+                // build one here when this open came from ⌘K or the rail.
+                if paletteModel == nil {
+                    let model = PaletteModel(sources: paletteSources())
+                    model.refresh()
+                    paletteModel = model
+                }
+            } else {
+                paletteModel = nil
+            }
+        }
+        .overlay {
+            if showPalette, let paletteModel {
+                CommandPaletteView(model: paletteModel, onDismiss: { showPalette = false })
+            }
         }
     }
 
@@ -1080,6 +1111,120 @@ struct ContentView: View {
         store.session(for: workspace).openFileTab(at: url, revealingLine: line)
     }
 
+    // MARK: - Command palette sources
+
+    private func paletteSources() -> [PaletteSource] {
+        [
+            PaletteSource(kind: .projects, cap: 5, showsOnEmptyQuery: true) {
+                projects.projects.map { project in
+                    PaletteCandidate(
+                        id: "project-\(project.id)",
+                        title: project.name,
+                        subtitle: project.id == currentProjectID ? "Current project" : "Switch project",
+                        icon: "folder"
+                    ) {
+                        if project.id != currentProjectID { onSwitchProject(project.id) }
+                    }
+                }
+            },
+            PaletteSource(kind: .workspaces, cap: 5, showsOnEmptyQuery: false) {
+                let workspaceItems = store.workspaces.map { workspace in
+                    PaletteCandidate(
+                        id: "workspace-\(workspace.id)",
+                        title: workspace.name,
+                        subtitle: "Workspace",
+                        icon: workspace.isMain ? "house" : "square.stack.3d.up"
+                    ) {
+                        sidebarMode = .workspace
+                        store.activate(workspace.id)
+                        store.session(for: workspace).focusOverview()
+                    }
+                }
+                let docItems = docStore.docs.filter { $0.kind != .doc }.map { doc in
+                    PaletteCandidate(
+                        id: "doc-\(doc.fileURL.path)",
+                        title: doc.title,
+                        subtitle: doc.kind == .plan ? "Plan" : "Spec",
+                        icon: "doc.text"
+                    ) {
+                        openFile(doc.fileURL)
+                    }
+                }
+                return workspaceItems + docItems
+            },
+            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) {
+                paletteCommandCandidates()
+            },
+            PaletteSource(kind: .files, cap: 8, showsOnEmptyQuery: false) {
+                paletteFileCandidates()
+            },
+        ]
+    }
+
+    private func paletteCommandCandidates() -> [PaletteCandidate] {
+        var commands: [PaletteCandidate] = [
+            PaletteCandidate(id: "command-new-project", title: "New Project…",
+                             subtitle: nil, icon: "plus") { showCreateProject = true },
+            PaletteCandidate(id: "command-new-plan", title: "New Plan…",
+                             subtitle: nil, icon: "list.bullet.clipboard") { showNewPlan = true },
+            PaletteCandidate(id: "command-new-workspace", title: "New Scratch Workspace",
+                             subtitle: nil, icon: "plus.square") { _ = store.addWorkspace() },
+            PaletteCandidate(id: "command-new-tab", title: "New Tab",
+                             subtitle: nil, icon: "plus.rectangle") { store.activeSession?.createTab() },
+            PaletteCandidate(id: "command-toggle-file-explorer", title: "Toggle File Explorer",
+                             subtitle: nil, icon: "sidebar.right") { showFileTree.toggle() },
+            PaletteCandidate(id: "command-go-signals", title: "Go to Signals",
+                             subtitle: nil, icon: "dot.radiowaves.left.and.right") { sidebarMode = .signals },
+            PaletteCandidate(id: "command-go-flows", title: "Go to Flows",
+                             subtitle: nil, icon: "point.3.connected.trianglepath.dotted") { sidebarMode = .flows },
+            PaletteCandidate(id: "command-go-library", title: "Go to Library",
+                             subtitle: nil, icon: "books.vertical") { sidebarMode = .library },
+        ]
+        commands += docStore.plans.map { plan in
+            PaletteCandidate(
+                id: "command-run-plan-\(plan.fileURL.path)",
+                title: "Run Plan: \(plan.title)",
+                subtitle: nil,
+                icon: "play"
+            ) {
+                overviewRunningPlan = plan
+            }
+        }
+        return commands
+    }
+
+    /// Filename candidates from the active workspace's worktree roots —
+    /// breadth-first so shallow files surface first, capped so a giant repo
+    /// can't stall the palette, heavy build dirs skipped outright.
+    private func paletteFileCandidates() -> [PaletteCandidate] {
+        let skipped: Set<String> = ["node_modules", ".build", "dist", ".next", "vendor"]
+        let roots = fileTree.roots(for: store.activeWorkspace,
+                                   repositories: repoStore.repositories)
+        var queue: [(node: FileNode, rootPath: String)] = roots.map { ($0, $0.url.path) }
+        var candidates: [PaletteCandidate] = []
+        var directoriesWalked = 0
+        while !queue.isEmpty, candidates.count < 2000, directoriesWalked < 400 {
+            let (node, rootPath) = queue.removeFirst()
+            if node.isDirectory {
+                guard !skipped.contains(node.name) else { continue }
+                directoriesWalked += 1
+                queue.append(contentsOf: fileTree.children(of: node).map { ($0, rootPath) })
+            } else {
+                let relative = String(node.url.path.dropFirst(rootPath.count)
+                    .drop(while: { $0 == "/" }))
+                candidates.append(PaletteCandidate(
+                    id: "file-\(node.url.path)",
+                    title: node.name,
+                    subtitle: relative,
+                    icon: "doc"
+                ) {
+                    openFile(node.url)
+                })
+            }
+        }
+        return candidates
+    }
+
     /// Route a diff request into the active workspace's pane, flipping
     /// to the terminal/tab view so the new tab is visible (same move
     /// as openFile).
@@ -1266,6 +1411,10 @@ private struct NewPlanPresentedKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
+private struct PalettePresentedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
 extension FocusedValues {
     var createProjectPresented: Binding<Bool>? {
         get { self[CreateProjectPresentedKey.self] }
@@ -1275,6 +1424,11 @@ extension FocusedValues {
     var newPlanPresented: Binding<Bool>? {
         get { self[NewPlanPresentedKey.self] }
         set { self[NewPlanPresentedKey.self] = newValue }
+    }
+
+    var palettePresented: Binding<Bool>? {
+        get { self[PalettePresentedKey.self] }
+        set { self[PalettePresentedKey.self] = newValue }
     }
 }
 

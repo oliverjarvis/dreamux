@@ -75,6 +75,7 @@ struct DreamuxApp: App {
         .commands {
             ProjectCommands()
             FileExplorerCommands()
+            PaletteCommands()
             PrintCommandRemoval()
             IntegrationCommands()
             NotificationCommands()
@@ -196,6 +197,25 @@ private struct FileExplorerCommands: Commands {
 private struct PrintCommandRemoval: Commands {
     var body: some Commands {
         CommandGroup(replacing: .printItem) {}
+    }
+}
+
+/// View-menu toggle for the ⌘K command palette. Same `.commands` +
+/// `@FocusedBinding` bridge as `FileExplorerCommands` — the shortcut
+/// must fire while a terminal is first responder. No palette over
+/// modals: a presented sheet keeps ⌘K inert.
+private struct PaletteCommands: Commands {
+    @FocusedBinding(\.palettePresented) private var palettePresented: Bool?
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Button("Command Palette…") {
+                if NSApp.keyWindow?.attachedSheet != nil { return }
+                palettePresented?.toggle()
+            }
+            .keyboardShortcut("k", modifiers: [.command])
+            .disabled(palettePresented == nil)
+        }
     }
 }
 
