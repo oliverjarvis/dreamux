@@ -126,6 +126,9 @@ struct SettingsView: View {
                 .tag(item)
             }
             .navigationSplitViewColumnWidth(190)
+            // A fixed 3-item sidebar in a fixed-size window — the system's
+            // auto-inserted collapse toggle only lets users lose the list.
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             Form {
                 switch category ?? .appearance {
