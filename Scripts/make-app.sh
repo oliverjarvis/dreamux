@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 # Build Dreamux via SwiftPM and assemble a runnable .app bundle.
 #
-# Usage: ./Scripts/make-app.sh [debug|release]
+# Usage: ./Scripts/make-app.sh [debug|release] [tag]
+#
+# With a tag (e.g. `dogfood`) the built bundle gets a unique
+# CFBundleIdentifier `com.dreamux.Dreamux.<tag>` and display name
+# "Dreamux (<tag>)" stamped into its COPIED Info.plist (the source
+# plist is never touched), and lands at Dreamux-<tag>.app so it runs
+# side-by-side with an untagged build. Untagged runs are byte-identical
+# to before.
 set -euo pipefail
 
 CONFIG="${1:-debug}"
+TAG="${2:-}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$ROOT/Dreamux.app"
+if [[ -n "$TAG" ]]; then
+    APP="$ROOT/Dreamux-$TAG.app"
+else
+    APP="$ROOT/Dreamux.app"
+fi
 PLIST="$ROOT/Sources/Dreamux/Resources/Info.plist"
 ICON="$ROOT/Sources/Dreamux/Resources/AppIcon.icns"
 
@@ -25,6 +37,15 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Dreamux"
 cp "$PLIST" "$APP/Contents/Info.plist"
+
+# Tagged build: stamp a unique identity into the COPIED plist only —
+# the source Info.plist is never mutated. The distinct bundle id is what
+# forks signals.db / emit socket / App Support / window-restoration state.
+if [[ -n "$TAG" ]]; then
+    plutil -replace CFBundleIdentifier  -string "com.dreamux.Dreamux.$TAG" "$APP/Contents/Info.plist"
+    plutil -replace CFBundleDisplayName -string "Dreamux ($TAG)"           "$APP/Contents/Info.plist"
+    plutil -replace CFBundleName        -string "Dreamux ($TAG)"           "$APP/Contents/Info.plist"
+fi
 
 # App icon: CFBundleIconFile in Info.plist points at "AppIcon", so the
 # compiled .icns must land at Contents/Resources/AppIcon.icns.

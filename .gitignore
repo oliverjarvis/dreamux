@@ -2,6 +2,7 @@
 .swiftpm/
 DerivedData/
 Dreamux.app/
+Dreamux-*.app/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 .DS_Store
