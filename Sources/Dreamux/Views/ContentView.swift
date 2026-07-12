@@ -471,6 +471,16 @@ struct ContentView: View {
             FlowsOverviewView(
                 flows: session.flows,
                 planLaneInputs: planLaneInputs,
+                graftSubagents: { lane in
+                    // A graft closure keyed by lane id ("plan-<planPath>"). For each
+                    // plan with a live workspace, pull its subagents (slice 1) and
+                    // the current task line, then graft them onto the lane (Task 3).
+                    guard let plan = docStore.plans.first(where: { "plan-\(docStore.relativePath(of: $0))" == lane.id }),
+                          let ws = lane.workspaceID else { return lane }
+                    let subs = OverviewLiveAgents.subagents(in: session.flows.flows, workspaceID: ws, tasks: plan.tasks)
+                    let current = plan.tasks.first { $0.steps.contains { !$0.checked } }?.line
+                    return RunLaneGraft.graft(lane, subagents: subs, currentTaskLine: current)
+                },
                 projectGraph: {
                     ProjectGraphBuilder.build(
                         plans: docStore.plans,

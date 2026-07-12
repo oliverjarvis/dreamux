@@ -7,6 +7,11 @@ import SwiftUI
 struct FlowsOverviewView: View {
     @ObservedObject var flows: FlowStore
     let planLaneInputs: () -> [PlanLaneInput]
+    /// Grafts a plan lane's live subagents (Task 3's `RunLaneGraft`) onto its
+    /// task nodes before the lane reaches `FlowsBoard.compose` — a closure
+    /// (not a stored value) so it always sees live `FlowStore`/`DocStore`
+    /// state, same pattern as `planLaneInputs`/`projectGraph`.
+    let graftSubagents: (Flow) -> Flow
     /// The project's plan-dependency DAG for the overview's "This project"
     /// panel — a closure (not a stored value) so it's rebuilt each render
     /// pass from live `DocStore` state, same pattern as `planLaneInputs`.
@@ -33,7 +38,7 @@ struct FlowsOverviewView: View {
     var body: some View {
         let inputs = planLaneInputs()
         let board = FlowsBoard.compose(
-            planLanes: PlanFlowBuilder.lanes(from: inputs),
+            planLanes: PlanFlowBuilder.lanes(from: inputs).map(graftSubagents),
             sessionLanes: flows.flows
         )
         // Which plan lanes may offer "merge & continue" (Task 2's
