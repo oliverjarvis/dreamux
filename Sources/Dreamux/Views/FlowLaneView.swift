@@ -65,7 +65,8 @@ struct FlowLaneView: View {
                 GateActionCard(
                     workspaceID: workspaceID,
                     mergeActionable: gateMergeActionable,
-                    actions: actions)
+                    actions: actions,
+                    prState: lane.prState)
             }
         }
         .padding(.vertical, 8)
@@ -87,6 +88,9 @@ struct FlowLaneView: View {
             Text(lane.flow.title)
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
+            if let pr = lane.prState {
+                PRStatusBadge(state: pr)
+            }
             Spacer(minLength: 8)
             if let startedAt = lane.flow.startedAt, lane.effectiveStatus == .running || lane.effectiveStatus == .waiting {
                 Text(startedAt, style: .relative)
