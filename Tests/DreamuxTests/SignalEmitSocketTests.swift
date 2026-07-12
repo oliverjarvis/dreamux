@@ -228,3 +228,23 @@ final class SignalEmitSocketTests: XCTestCase {
         return []
     }
 }
+
+extension SignalEmitSocketTests {
+    /// `defaultSocketPath()` is now a thin call-through to the shared
+    /// helper: same source of truth that SignalBus binds and
+    /// PTYShellSession exports, so bind and export can't drift.
+    func testDefaultSocketPathRoutesThroughBundleIdentity() {
+        XCTAssertEqual(
+            SignalEmitSocketServer.defaultSocketPath(),
+            BundleIdentity.emitSocketPath()
+        )
+    }
+
+    /// Untagged default is byte-identical to today.
+    func testDefaultSocketPathUntaggedPin() {
+        XCTAssertEqual(
+            BundleIdentity.emitSocketPath(env: [:], bundleID: BundleIdentity.baseBundleID),
+            "/tmp/dreamux-emit-com.dreamux.Dreamux.sock"
+        )
+    }
+}
