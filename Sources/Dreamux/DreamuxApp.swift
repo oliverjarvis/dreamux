@@ -280,6 +280,7 @@ private struct ProjectCommands: Commands {
     @FocusedBinding(\.createProjectPresented) private var createProjectPresented: Bool?
     @FocusedBinding(\.newPlanPresented) private var newPlanPresented: Bool?
     @FocusedBinding(\.newAppletPresented) private var newAppletPresented: Bool?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -300,6 +301,15 @@ private struct ProjectCommands: Commands {
             }
             .keyboardShortcut("l", modifiers: [.command])
             .disabled(newAppletPresented == nil)
+
+            // No focused value on purpose: parking an intent + opening the window
+            // works from EVERY window (App Studio and Settings included), so the
+            // item is never disabled.
+            Button("New Global Applet…") {
+                AppStudioIntents.shared.pendingNewApplet = true
+                openWindow(id: "app-studio")
+            }
+            .keyboardShortcut("l", modifiers: [.command, .shift])
 
             Divider()
 

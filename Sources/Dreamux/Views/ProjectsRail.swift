@@ -60,24 +60,38 @@ struct ProjectsRail: View {
             Button {
                 showCreate = true
             } label: {
-                Label("New Project", systemImage: "plus")
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Label("New Project", systemImage: "plus")
+                    Spacer(minLength: 0)
+                    Text("⌘N")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Create a new project")
+            .help("Create a new project (⌘N)")
 
             // The global applet library gets its own titled section rather
             // than trailing the project list as a bare row — it isn't a
-            // project, so a header reads it as a distinct destination.
-            Section("Studio") {
+            // project, so a header reads it as a distinct destination. The
+            // library keeps its own titled section; its row now creates
+            // rather than merely opens — launching is covered by ⇧⌘L, the
+            // palette, and the collapsed rail's tile.
+            Section("Applet Studio") {
                 Button {
+                    AppStudioIntents.shared.pendingNewApplet = true
                     openWindow(id: "app-studio")
                 } label: {
-                    Label("Applet Studio", systemImage: "shippingbox")
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Label("Add global applet", systemImage: "plus")
+                        Spacer(minLength: 0)
+                        Text("⇧⌘L")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Open the Applet Studio library")
+                .help("Create an applet in the Applet Studio library (⇧⌘L)")
             }
         }
         .listStyle(.sidebar)
