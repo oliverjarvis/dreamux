@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+/// One `setPalette` request. Equatable so views can `.onChange` on it.
+struct E2EPaletteRequest: Equatable {
+    let visible: Bool
+    let query: String
+}
+
 /// Pending UI actions the automation server hands to the view layer,
 /// one bridge per project window. Views consume (and clear) each value
 /// via `.onAppear`/`.onChange`, following the exact precedent of
@@ -11,13 +17,6 @@ import Observation
 /// `pendingIsolation` itself intentionally stays on `RunnerManager`
 /// (the Run pane already consumes it); the `isolateRunner` command
 /// writes there directly rather than duplicating the channel.
-
-/// One `setPalette` request. Equatable so views can `.onChange` on it.
-struct E2EPaletteRequest: Equatable {
-    let visible: Bool
-    let query: String
-}
-
 @MainActor
 @Observable
 final class E2EBridge {

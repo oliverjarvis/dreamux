@@ -203,14 +203,17 @@ private struct PrintCommandRemoval: Commands {
 /// View-menu toggle for the ⌘K command palette. Same `.commands` +
 /// `@FocusedBinding` bridge as `FileExplorerCommands` — the shortcut
 /// must fire while a terminal is first responder. No palette over
-/// modals: a presented sheet keeps ⌘K inert.
+/// modals: while a sheet is presented, AppKit makes the sheet ITSELF
+/// the key window (not the presenting window), and a sheet's own
+/// `attachedSheet` is nil — so the guard below checks `isSheet` on
+/// the key window too, not just `attachedSheet`.
 private struct PaletteCommands: Commands {
     @FocusedBinding(\.palettePresented) private var palettePresented: Bool?
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
             Button("Command Palette…") {
-                if NSApp.keyWindow?.attachedSheet != nil { return }
+                if let key = NSApp.keyWindow, key.isSheet || key.attachedSheet != nil { return }
                 palettePresented?.toggle()
             }
             .keyboardShortcut("k", modifiers: [.command])

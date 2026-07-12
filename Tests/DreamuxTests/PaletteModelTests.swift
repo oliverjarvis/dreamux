@@ -115,4 +115,40 @@ final class PaletteModelTests: XCTestCase {
         XCTAssertFalse(m.executeSelected())
         XCTAssertTrue(performed.isEmpty)
     }
+
+    func testSelectSetsSelection() {
+        let m = model(projects: [candidate("p1", "alpha"), candidate("p2", "beta")])
+        m.refresh()
+        XCTAssertEqual(m.selectedRowID, "p1")
+        m.select("p2")
+        XCTAssertEqual(m.selectedRowID, "p2")
+        XCTAssertEqual(m.selectedRow?.id, "p2")
+    }
+
+    func testCapKeepsHighestScoringAfterSort() {
+        // "s-u-p-x-plan-archive" matches "plan" only as a scattered
+        // subsequence (p at index 4 after a boundary hyphen, then l/a/n
+        // picked up later) — FuzzyMatcher scores it 13. "plan-a" through
+        // "plan-e" all match "plan" as a full prefix run at index 0 with
+        // every character consecutive, which FuzzyMatcher scores far
+        // higher (23 each). PaletteModel.rebuild sorts every source's
+        // candidates by score before applying the source's cap (5 for
+        // .projects), so even though the weak scatter candidate is
+        // declared first — and would survive a cap-before-sort — it must
+        // be the one dropped, not any of the five stronger, later-
+        // declared "plan-*" matches.
+        let many = [
+            candidate("scatter", "s-u-p-x-plan-archive"),
+            candidate("p1", "plan-a"),
+            candidate("p2", "plan-b"),
+            candidate("p3", "plan-c"),
+            candidate("p4", "plan-d"),
+            candidate("p5", "plan-e"),
+        ]
+        let m = model(projects: many)
+        m.refresh()
+        m.query = "plan"
+        XCTAssertEqual(m.sections[0].rows.count, 5)
+        XCTAssertFalse(m.sections[0].rows.map(\.id).contains("scatter"))
+    }
 }
