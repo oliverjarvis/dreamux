@@ -30,7 +30,16 @@ struct AppStudioView: View {
                 .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 760, minHeight: 480)
-        .onAppear { library.refresh() }
+        .onAppear {
+            library.refresh()
+            // A parked ⇧⌘L / rail-row intent from before this window existed.
+            if AppStudioIntents.shared.consumePendingNewApplet() { showNewApp = true }
+        }
+        // The window may ALREADY be open when the intent is parked — onAppear
+        // won't re-fire, so also watch the flag.
+        .onChange(of: AppStudioIntents.shared.pendingNewApplet) { _, pending in
+            if pending, AppStudioIntents.shared.consumePendingNewApplet() { showNewApp = true }
+        }
         .sheet(isPresented: $showNewApp) {
             NewAppSheet(
                 library: [],
