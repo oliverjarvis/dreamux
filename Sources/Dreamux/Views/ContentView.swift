@@ -179,6 +179,7 @@ struct ContentView: View {
                                 plan: plan, summary: summary, priority: priority)
                         },
                         autoRunFailure: { session.autoRunFailures[$0] },
+                        onOpenProjectGraph: { sidebarMode = .flows; flowsZoomLaneID = nil },
                         applets: session.applets,
                         appLibrary: session.appLibrary,
                         appletSessionProvider: { session.appletSession(for: $0) },
@@ -470,6 +471,16 @@ struct ContentView: View {
             FlowsOverviewView(
                 flows: session.flows,
                 planLaneInputs: planLaneInputs,
+                projectGraph: {
+                    ProjectGraphBuilder.build(
+                        plans: docStore.plans,
+                        relativePath: { docStore.relativePath(of: $0) },
+                        resolveBlocker: { ref in
+                            let target = docStore.resolvedURL(forReference: ref)
+                            return docStore.plans.first { $0.fileURL.standardizedFileURL == target }
+                        },
+                        statusOf: { docStore.status(for: $0, featureExists: { name in store.featureNames.contains(name) }) })
+                },
                 zoomedLaneID: $flowsZoomLaneID,
                 onJumpToTerminal: { workspaceID in
                     // Same activation shape as WorkspaceSidebar.selectWorkspace:

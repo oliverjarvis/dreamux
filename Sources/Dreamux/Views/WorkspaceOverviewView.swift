@@ -426,12 +426,7 @@ struct WorkspaceOverviewView: View {
     /// `FlowStatusGlyph` (Global Constraint: shared status glyph/color
     /// vocabulary) instead of inventing its own tint rules.
     private func flowStatus(for status: PlanStatus) -> FlowStatus {
-        switch status {
-        case .running: return .running
-        case .awaitingReview: return .waiting
-        case .merged: return .done
-        case .inProgress, .ready, .specOnly: return .queued
-        }
+        status.flowStatus
     }
 
     /// The plan's initiative doc chips (spec/roadmap) — same labeling as
