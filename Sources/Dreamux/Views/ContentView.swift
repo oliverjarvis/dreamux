@@ -45,6 +45,13 @@ struct ContentView: View {
     /// `NewPlanSheet` `WorkspaceSidebar`'s `+` opens, independent local
     /// state like `showCreateProject`/`ProjectsRail.showCreate`.
     @State private var showNewPlan = false
+    /// New-applet sheet fired from ⌘L / the palette — window-level twin of
+    /// `WorkspaceSidebar.showNewApp`, same second-trigger pattern as
+    /// `showNewPlan`.
+    @State private var showNewApplet = false
+    /// Failure surface for the ⌘L create/adopt path — ContentView's copy of
+    /// `WorkspaceSidebar.addError`.
+    @State private var appletActionError: String?
     /// ⌘K command palette visibility (also opened by the rail's search bar).
     @State private var showPalette = false
     /// Rebuilt fresh on every palette open so results reflect live stores.
@@ -291,6 +298,37 @@ struct ContentView: View {
                 onSwitchProject(project.id)
             }
         }
+        // Refresh the library BEFORE the sheet builds so its Adopt list is
+        // current (the sidebar's row does the same refresh inline).
+        .onChange(of: showNewApplet) { _, presented in
+            if presented { session.appLibrary.refresh() }
+        }
+        .sheet(isPresented: $showNewApplet) {
+            NewAppSheet(
+                library: session.appLibrary.applets,
+                onCreate: { name, description in
+                    showNewApplet = false
+                    createProjectApplet(name: name, description: description)
+                },
+                onAdopt: { applet in
+                    showNewApplet = false
+                    adoptProjectApplet(applet)
+                },
+                onCancel: { showNewApplet = false }
+            )
+        }
+        .alert(
+            "Couldn't add applet",
+            isPresented: Binding(
+                get: { appletActionError != nil },
+                set: { if !$0 { appletActionError = nil } }
+            ),
+            presenting: appletActionError
+        ) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { error in
+            Text(error)
+        }
         .alert(
             "Couldn't apply change",
             isPresented: Binding(
@@ -317,6 +355,7 @@ struct ContentView: View {
         .focusedSceneValue(\.fileTreeVisible, $showFileTree)
         .focusedSceneValue(\.createProjectPresented, $showCreateProject)
         .focusedSceneValue(\.newPlanPresented, $showNewPlan)
+        .focusedSceneValue(\.newAppletPresented, $showNewApplet)
         .onAppear {
             // e2e only (no-op otherwise): sync the bridge with this
             // window's starting mode. (Store registration and the plan
@@ -1146,6 +1185,31 @@ struct ContentView: View {
         store.session(for: workspace).openFileTab(at: url, revealingLine: line)
     }
 
+    /// Mirrors `WorkspaceSidebar.handleCreateApp` for the ⌘L / palette path:
+    /// scaffold a local-born applet, spawn its builder agent, open its host.
+    private func createProjectApplet(name: String, description: String) {
+        do {
+            let applet = try session.applets.createLocal(
+                name: name, description: description, icon: "shippingbox")
+            session.appletSession(for: applet).beginEditing(
+                kickoff: AppletScaffold.kickoffPrompt(
+                    appletName: name, description: description))
+            sidebarMode = .app(applet.id)
+        } catch {
+            appletActionError = error.localizedDescription
+        }
+    }
+
+    /// Mirrors `WorkspaceSidebar.handleAdoptApp` (no agent on adopt).
+    private func adoptProjectApplet(_ library: Applet) {
+        do {
+            let adopted = try session.applets.adopt(library)
+            sidebarMode = .app(adopted.id)
+        } catch {
+            appletActionError = error.localizedDescription
+        }
+    }
+
     // MARK: - Command palette sources
 
     private func paletteSources() -> [PaletteSource] {
@@ -1475,6 +1539,10 @@ private struct PalettePresentedKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
+private struct NewAppletPresentedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
 extension FocusedValues {
     var createProjectPresented: Binding<Bool>? {
         get { self[CreateProjectPresentedKey.self] }
@@ -1489,6 +1557,11 @@ extension FocusedValues {
     var palettePresented: Binding<Bool>? {
         get { self[PalettePresentedKey.self] }
         set { self[PalettePresentedKey.self] = newValue }
+    }
+
+    var newAppletPresented: Binding<Bool>? {
+        get { self[NewAppletPresentedKey.self] }
+        set { self[NewAppletPresentedKey.self] = newValue }
     }
 }
 

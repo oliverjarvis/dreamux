@@ -279,6 +279,7 @@ private struct ProjectCommands: Commands {
     @FocusedValue(\.activeStore) private var store: WorkspaceStore?
     @FocusedBinding(\.createProjectPresented) private var createProjectPresented: Bool?
     @FocusedBinding(\.newPlanPresented) private var newPlanPresented: Bool?
+    @FocusedBinding(\.newAppletPresented) private var newAppletPresented: Bool?
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -293,6 +294,12 @@ private struct ProjectCommands: Commands {
             }
             .keyboardShortcut("p", modifiers: [.command])
             .disabled(newPlanPresented == nil)
+
+            Button("New Applet…") {
+                newAppletPresented = true
+            }
+            .keyboardShortcut("l", modifiers: [.command])
+            .disabled(newAppletPresented == nil)
 
             Divider()
 
