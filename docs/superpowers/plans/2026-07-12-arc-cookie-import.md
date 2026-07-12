@@ -946,9 +946,8 @@ private struct FakeCookieSource: BrowserCookieSource {
 @MainActor
 final class CookieImportServiceTests: XCTestCase {
     private func freshDefaults() -> UserDefaults {
-        let d = UserDefaults(suiteName: "test-\(UUID().uuidString)")!
-        d.removePersistentDomain(forName: d.dictionaryRepresentation().isEmpty ? "" : "")
-        return d
+        // A unique suite name gives a clean, isolated defaults domain per test.
+        UserDefaults(suiteName: "test-\(UUID().uuidString)")!
     }
 
     func testMakeHTTPCookieDomainVsHostOnly() {
