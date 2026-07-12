@@ -165,4 +165,20 @@ final class FlowsBoardTests: XCTestCase {
         XCTAssertEqual(planLane.flow.detail, "test suite crashed")
         XCTAssertEqual(board.needsYouCount, 1)
     }
+
+    func testComposeCarriesPRStateByWorkspace() {
+        let wsID = UUID()
+        let plan = lane(id: "plan-p", kind: .plan, status: .running, workspaceID: wsID)
+        let board = FlowsBoard.compose(
+            planLanes: [plan], sessionLanes: [],
+            prStatesByWorkspace: [wsID: PRLaneState(lifecycle: .approved, url: "u")])
+        let out = board.sections.flatMap(\.lanes).first { $0.id == "plan-p" }
+        XCTAssertEqual(out?.prState, PRLaneState(lifecycle: .approved, url: "u"))
+    }
+
+    func testComposeLeavesPRStateNilWhenWorkspaceUntracked() {
+        let plan = lane(id: "plan-p", kind: .plan, status: .running, workspaceID: UUID())
+        let board = FlowsBoard.compose(planLanes: [plan], sessionLanes: [])
+        XCTAssertNil(board.sections.flatMap(\.lanes).first?.prState)
+    }
 }
