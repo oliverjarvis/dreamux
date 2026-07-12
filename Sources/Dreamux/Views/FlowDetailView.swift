@@ -30,6 +30,11 @@ struct FlowDetailView: View {
     /// margin with room to spare.
     private static let loopRadius: CGFloat = 18
     private static let loopArcSteps = 24
+    /// Phase-band padding around the union of its grouped task nodes, and
+    /// its corner radius — a faint decorative wash, not a hit-testable
+    /// control (see `phaseBands`/`phaseBandsLayer`).
+    private static let bandPadding: CGFloat = 14
+    private static let bandCornerRadius: CGFloat = 12
 
     private static let elapsedFormatter: DateComponentsFormatter = {
         let formatter = DateComponentsFormatter()
@@ -50,6 +55,65 @@ struct FlowDetailView: View {
 
     private var selfLoopEdges: [FlowEdge] {
         lane.flow.edges.filter { $0.from == $0.to }
+    }
+
+    /// One maximal run of laid-out nodes sharing a phase (`FlowNode.group`).
+    private struct PhaseBand {
+        let title: String
+        let rect: CGRect
+    }
+
+    /// Groups `lane.flow.nodes` (task-DAG order — the same order the
+    /// builder appended them, which is also their rank order) into maximal
+    /// runs of a shared non-nil `group`, and unions each run's laid-out
+    /// rect. A `group == nil` node (src/gate/drain/spawned `.agent`) — or a
+    /// missing layout position — breaks the current run without starting a
+    /// new one. Purely a read of `positions`/`nodeSize`; never touches
+    /// layout itself.
+    private func phaseBands(in layout: FlowLayout) -> [PhaseBand] {
+        var bands: [PhaseBand] = []
+        var runGroup: String?
+
+        for node in lane.flow.nodes {
+            guard let group = node.group, let center = layout.positions[node.id] else {
+                runGroup = nil
+                continue
+            }
+            let rect = CGRect(
+                x: center.x - FlowLayoutEngine.nodeSize.width / 2,
+                y: center.y - FlowLayoutEngine.nodeSize.height / 2,
+                width: FlowLayoutEngine.nodeSize.width,
+                height: FlowLayoutEngine.nodeSize.height
+            )
+            if group == runGroup, !bands.isEmpty {
+                bands[bands.count - 1] = PhaseBand(title: group, rect: bands[bands.count - 1].rect.union(rect))
+            } else {
+                runGroup = group
+                bands.append(PhaseBand(title: group, rect: rect))
+            }
+        }
+        return bands.map { PhaseBand(title: $0.title, rect: $0.rect.insetBy(dx: -Self.bandPadding, dy: -Self.bandPadding)) }
+    }
+
+    /// Faint decorative wash behind the grouped task nodes — drawn first so
+    /// it sits under both the edge `Canvas` and the node `ForEach`, with no
+    /// hit testing and no effect on layout.
+    private func phaseBandsLayer(layout: FlowLayout) -> some View {
+        ForEach(Array(phaseBands(in: layout).enumerated()), id: \.offset) { _, band in
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: Self.bandCornerRadius, style: .continuous)
+                    .fill(Color.primary.opacity(0.03))
+                Text(band.title.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .kerning(0.4)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+            }
+            .frame(width: band.rect.width, height: band.rect.height)
+            .position(x: band.rect.midX, y: band.rect.midY)
+            .allowsHitTesting(false)
+        }
     }
 
     var body: some View {
@@ -138,6 +202,8 @@ struct FlowDetailView: View {
         let layout = layout
         return ScrollView([.horizontal, .vertical]) {
             ZStack(alignment: .topLeading) {
+                phaseBandsLayer(layout: layout)
+
                 Canvas { context, _ in
                     for edge in lane.flow.edges {
                         guard let from = layout.positions[edge.from] else { continue }
