@@ -14,6 +14,10 @@ struct WorkspaceSidebar: View {
     /// Only to focus a runner's logs from the run-control popover
     /// (`showLogs`) — sets `pendingSourceFocus` and flips to Signals.
     let signals: SignalStore
+    /// `ProjectSession.prStatus` — the merge sheet's publish path tracks
+    /// a feature here the instant its PR opens, so the Flows lane picks
+    /// up the badge without waiting for the next launch's seed pass.
+    let prStatus: PRStatusStore
     @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
     @Bindable var docStore: DocStore
@@ -32,6 +36,11 @@ struct WorkspaceSidebar: View {
     /// workspace id here (it doesn't own the confirm alert); consumed below
     /// exactly like `gateMergeWorkspaceID`, driving the `pendingClose` alert.
     @Binding var gateCloseWorkspaceID: UUID?
+    /// Set alongside `gateMergeWorkspaceID` when the gate card's "Create
+    /// PR" button (not "Merge locally"/"Merge & continue") fired the
+    /// sheet — read and cleared in the `gateMergeWorkspaceID` handler
+    /// below to drive `emphasizePublish`.
+    @Binding var emphasizePublishWorkspaceID: UUID?
     let onOpenDoc: (URL) -> Void
     /// Open a doc jumped to a 1-based line (phase/task rows).
     let onOpenDocAtLine: (URL, Int) -> Void
@@ -69,6 +78,10 @@ struct WorkspaceSidebar: View {
     @State private var isWorking = false
     @State private var pendingClose: Workspace?
     @State private var pendingMerge: Workspace?
+    /// Whether the pending merge sheet should open with the publish
+    /// button emphasized — set from `emphasizePublishWorkspaceID` when a
+    /// gate card's "Create PR" opened the sheet; otherwise false.
+    @State private var emphasizePublish = false
     @State private var switchNotice: SwitchNotice?
     @State private var runningPlan: PlanDoc?
     @State private var showNewPlan = false
@@ -109,22 +122,8 @@ struct WorkspaceSidebar: View {
                 onCancel: { showAddRepo = false }
             )
         }
-        .sheet(item: $pendingMerge, onDismiss: {}) { workspace in
-            MergeFeatureSheet(
-                workspace: workspace,
-                repos: repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) },
-                project: repoStore.project,
-                onOpenConflictTab: { url, title in
-                    openConflictTab(workspace: workspace, url: url, title: title)
-                },
-                onRepoCleanedUp: { repo in
-                    stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
-                },
-                onAllCleanedUp: {
-                    finalizeFeatureCleanup(workspace)
-                },
-                onDismiss: { pendingMerge = nil }
-            )
+        .sheet(item: $pendingMerge, onDismiss: { emphasizePublish = false }) { workspace in
+            mergeSheet(for: workspace)
         }
         .sheet(item: $customizing) { workspace in
             CustomizeWorkspaceSheet(
@@ -216,6 +215,8 @@ struct WorkspaceSidebar: View {
             guard let id, let workspace = store.workspaces.first(where: { $0.id == id })
             else { return }
             gateMergeWorkspaceID = nil
+            emphasizePublish = emphasizePublishWorkspaceID == id
+            emphasizePublishWorkspaceID = nil
             pendingMerge = workspace
         }
         .onChange(of: gateCloseWorkspaceID) { _, id in
@@ -302,7 +303,8 @@ struct WorkspaceSidebar: View {
                 onOpenMain: { openMainWorkspace() },
                 mainBranchDisplayName: repoStore.repositories.first?.defaultBranch ?? "main",
                 mainRepoNames: repoStore.repositories.map(\.name),
-                mainWorkspace: { store.workspaces.first(where: \.isMain) }
+                mainWorkspace: { store.workspaces.first(where: \.isMain) },
+                prState: { name in prState(forFeature: name) }
             )
 
             contextSection
@@ -1033,6 +1035,48 @@ struct WorkspaceSidebar: View {
     /// inactive, making the merge-sheet consumption above a no-op.
     private var e2eBridge: E2EBridge? {
         E2ERegistry.shared.bridge(forProject: repoStore.project.id)
+    }
+
+    /// Broken out of the `.sheet(item:)` trailing closure — with
+    /// `emphasizePublish` added to the initializer call, the inline
+    /// closure form pushed `body`'s modifier chain over the
+    /// type-checker's complexity budget ("unable to type-check this
+    /// expression in reasonable time").
+    private func mergeSheet(for workspace: Workspace) -> some View {
+        MergeFeatureSheet(
+            workspace: workspace,
+            repos: repoStore.repositories.filter { workspace.linkedRepoIDs.contains($0.name) },
+            project: repoStore.project,
+            onOpenConflictTab: { url, title in
+                openConflictTab(workspace: workspace, url: url, title: title)
+            },
+            onRepoCleanedUp: { repo in
+                stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
+            },
+            onAllCleanedUp: {
+                finalizeFeatureCleanup(workspace)
+            },
+            onPublished: { repo, _ in
+                // The PR's URL itself isn't needed here — the next
+                // `PRStatusPoller` pass (~10s) fetches lifecycle + url
+                // together via `gh pr view` and populates the store.
+                prStatus.track(
+                    feature: workspace.name,
+                    worktreeURL: repo.rootURL.appendingPathComponent(workspace.name))
+            },
+            onDismiss: { pendingMerge = nil },
+            emphasizePublish: emphasizePublish
+        )
+    }
+
+    /// GitHub PR lifecycle for a tracked feature name — the read side of
+    /// `prStatus` (the write side is `mergeSheet(for:)`'s `onPublished`
+    /// above). Reuses the one `prStatus` channel Task 8 threaded in rather
+    /// than opening a second one; passed down into `PlansSpecsSection` so
+    /// its `mainRow`/`planRow` can badge a tracked PR the same way the
+    /// Flows lane does (`ContentView.prStatesByWorkspace`).
+    private func prState(forFeature name: String) -> PRLaneState? {
+        prStatus.state(for: name).map { PRLaneState(lifecycle: $0.lifecycle, url: $0.url) }
     }
 
     /// The automation server's `openMergeSheet` command parks the

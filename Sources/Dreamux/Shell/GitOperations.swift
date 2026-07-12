@@ -315,6 +315,17 @@ enum GitOperations {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Offline probe: does `origin/<branch>` exist locally? Used to seed
+    /// PR tracking (`ProjectSession`'s `PRStatusStore`) at startup
+    /// without a network round-trip — a stale local ref is fine here,
+    /// the poller's own `gh` fetch is what confirms a live PR.
+    static func hasRemoteBranch(_ branch: String, in repoRootURL: URL) async -> Bool {
+        (try? await runGit(
+            ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)"],
+            in: repoRootURL
+        )) != nil
+    }
+
     /// Push a branch to `origin`, creating/updating the remote branch
     /// and setting upstream. Auth prompts are disabled by `runGit`'s
     /// non-interactive env, so a missing credential fails fast with a

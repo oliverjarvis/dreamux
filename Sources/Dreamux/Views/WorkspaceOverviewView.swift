@@ -56,6 +56,13 @@ struct WorkspaceOverviewDependencies {
     /// pill's click target). ContentView resolves the workspace's plan lane
     /// — the session lane the subagent lives on is board-suppressed.
     let onOpenRunFlow: (UUID) -> Void
+    /// GitHub PR lifecycle for a tracked feature name — backed by
+    /// `session.prStatus.state(for:)` (Task 8), mapped to `PRLaneState`
+    /// (`ContentView`'s own `prState(forFeature:)`, the same shape
+    /// `prStatesByWorkspace` re-keys for the Flows board). `nil` when the
+    /// feature isn't tracked or has no known PR. Used by main's
+    /// mini-dashboard row (`projectRunRow`), keyed on `ProjectRun.featureName`.
+    let prState: (String) -> PRLaneState?
 }
 
 /// The workspace's home dashboard — its pinned, non-dismissable first
@@ -120,6 +127,8 @@ struct WorkspaceOverviewView: View {
     /// Zoom the Flows page to this workspace's run lane — the pill's click
     /// target. See `WorkspaceOverviewDependencies.onOpenRunFlow`.
     let onOpenRunFlow: (UUID) -> Void
+    /// See `WorkspaceOverviewDependencies.prState`.
+    let prState: (String) -> PRLaneState?
 
     /// Mode B's working-tree summary — loaded once on appear (no poller;
     /// unlike the header chip's 5s loop, this tab isn't always on
@@ -846,6 +855,7 @@ struct WorkspaceOverviewView: View {
     private func projectRunRow(_ run: ProjectRun) -> some View {
         let flow = flowStatus(for: run.status)
         let complete = run.total > 0 && run.checked == run.total
+        let pr = run.featureName.flatMap(prState)
         return Button { openRun(run) } label: {
             HStack(spacing: 12) {
                 Image(systemName: FlowStatusGlyph.symbol(flow))
@@ -853,10 +863,15 @@ struct WorkspaceOverviewView: View {
                     .foregroundStyle(FlowStatusGlyph.color(flow))
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(run.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1).truncationMode(.tail)
+                    HStack(spacing: 6) {
+                        Text(run.title)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1).truncationMode(.tail)
+                        if let pr {
+                            PRStatusBadge(state: pr)
+                        }
+                    }
                     HStack(spacing: 6) {
                         Text(run.status.label)
                         if run.total > 0 {

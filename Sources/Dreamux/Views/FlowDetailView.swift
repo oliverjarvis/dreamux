@@ -389,7 +389,8 @@ struct FlowDetailView: View {
                 GateActionCard(
                     workspaceID: workspaceID,
                     mergeActionable: gateMergeActionable,
-                    actions: actions)
+                    actions: actions,
+                    prState: lane.prState)
             }
 
             Divider()

@@ -80,6 +80,12 @@ struct PlansSpecsSection: View {
     /// first activation creates it. Resolves the row's target for
     /// `makeRunControls`.
     let mainWorkspace: () -> Workspace?
+    /// GitHub PR lifecycle for a tracked feature name (`WorkspaceSidebar
+    /// .prState(forFeature:)`, itself backed by `session.prStatus` —
+    /// Task 8). `nil` when untracked or no PR known. Badges `mainRow`
+    /// (keyed on the live main workspace's branch, if provisioned) and
+    /// `planRow` (keyed on `featureName(plan)`) with `PRStatusBadge`.
+    let prState: (String) -> PRLaneState?
 
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
@@ -275,6 +281,8 @@ struct PlansSpecsSection: View {
     /// the reserved main workspace (worktrees materialize on demand).
     @ViewBuilder
     private var mainRow: some View {
+        let workspace = mainWorkspace()
+        let pr = workspace.flatMap { prState($0.name) }
         Button {
             onOpenMain()
         } label: {
@@ -284,9 +292,14 @@ struct PlansSpecsSection: View {
                     .foregroundStyle(mainWorktreeIssue == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(mainBranchDisplayName)
-                        .font(.system(size: 15, weight: mainWorkspaceActive ? .semibold : .medium))
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(mainBranchDisplayName)
+                            .font(.system(size: 15, weight: mainWorkspaceActive ? .semibold : .medium))
+                            .foregroundStyle(.primary)
+                        if let pr {
+                            PRStatusBadge(state: pr)
+                        }
+                    }
                     if mainRepoNames.count > 1 {
                         Text(mainRepoNames.joined(separator: " · "))
                             .font(.system(size: 12))
@@ -295,7 +308,7 @@ struct PlansSpecsSection: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if let workspace = mainWorkspace() {
+                if let workspace {
                     makeRunControls(workspace)
                         .opacity(mainRowHovered || runnersLive(for: workspace) ? 1 : 0)
                 }
@@ -616,6 +629,7 @@ struct PlansSpecsSection: View {
         let isRunning = incomplete && hasLiveAgent
         let hasActions = workspace != nil || canRun
         let isHovered = hoveredDocURL == plan.fileURL
+        let pr = name.flatMap(prState)
 
         return VStack(alignment: .leading, spacing: 7) {
             // Title + meta + progress + current step — the whole block
@@ -638,6 +652,9 @@ struct PlansSpecsSection: View {
                                 .font(.system(size: 15, weight: .medium))
                                 .lineLimit(1).truncationMode(.tail)
                             liveFlowDot(for: workspace)
+                            if let pr {
+                                PRStatusBadge(state: pr)
+                            }
                             if showUnread {
                                 Circle().fill(Color.red).frame(width: 5, height: 5)
                             }

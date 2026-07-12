@@ -24,6 +24,10 @@ struct FlowsBoard: Equatable {
         let effectiveStatus: FlowStatus
         /// Short trailing chip text: "idle", "waiting on you", nil.
         let sessionChip: String?
+        /// GitHub PR lifecycle for this lane's workspace, if tracked — a
+        /// derived, per-render annotation from `prStatesByWorkspace`, never
+        /// part of the CLI-agnostic `Flow`/`FlowStatus` model.
+        var prState: PRLaneState? = nil
         var id: String { flow.id }
     }
 
@@ -43,7 +47,10 @@ struct FlowsBoard: Equatable {
     /// user's mental model; the session is its engine). When multiple
     /// ad-hoc sessions exist on the same plan workspace, the highest-priority
     /// one (by status and freshness) becomes the engine; all others stay visible.
-    static func compose(planLanes: [Flow], sessionLanes: [Flow]) -> FlowsBoard {
+    static func compose(
+        planLanes: [Flow], sessionLanes: [Flow],
+        prStatesByWorkspace: [UUID: PRLaneState] = [:]
+    ) -> FlowsBoard {
         let planWorkspaces = Set(planLanes.compactMap(\.workspaceID))
 
         // Group ad-hoc sessions by workspace for those that match plan workspaces
@@ -89,7 +96,8 @@ struct FlowsBoard: Equatable {
             lanes.append(Lane(
                 flow: session,
                 effectiveStatus: session.status,
-                sessionChip: chip(for: session.status, kind: session.kind)
+                sessionChip: chip(for: session.status, kind: session.kind),
+                prState: session.workspaceID.flatMap { prStatesByWorkspace[$0] }
             ))
         }
 
@@ -98,7 +106,8 @@ struct FlowsBoard: Equatable {
                 lanes.append(Lane(
                     flow: session,
                     effectiveStatus: session.status,
-                    sessionChip: chip(for: session.status, kind: session.kind)
+                    sessionChip: chip(for: session.status, kind: session.kind),
+                    prState: session.workspaceID.flatMap { prStatesByWorkspace[$0] }
                 ))
             }
         }
@@ -118,7 +127,10 @@ struct FlowsBoard: Equatable {
                 }
                 chipText = chip(for: live.status, kind: .adhoc)
             }
-            lanes.append(Lane(flow: flow, effectiveStatus: effective, sessionChip: chipText))
+            lanes.append(Lane(
+                flow: flow, effectiveStatus: effective, sessionChip: chipText,
+                prState: flow.workspaceID.flatMap { prStatesByWorkspace[$0] }
+            ))
         }
 
         let sections = SectionKind.allCases.compactMap { kind -> Section? in
