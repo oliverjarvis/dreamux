@@ -93,6 +93,14 @@ struct PlansSpecsSection: View {
     @State private var mainRowHovered = false
     /// Hover state for the borderless "＋ New workspace" row.
     @State private var newWorkspaceHovered = false
+    /// The blocked plan whose card is currently flashed after a jump-to-
+    /// blocker click — see `jumpToBlocker`.
+    @State private var flashedPlanURL: URL?
+    /// The sidebar's own `ScrollView` proxy, captured from the
+    /// `ScrollViewReader` wrapping `rows` — drives `jumpToBlocker`'s
+    /// `scrollTo`.
+    @State private var scrollProxy: ScrollViewProxy?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The plan + anchor + header a course correction is being filed
     /// against. Built at the clicked row — only the plan row (`.currentPhase`)
@@ -285,35 +293,42 @@ struct PlansSpecsSection: View {
             .sorted { initiativeRank($0, statuses) < initiativeRank($1, statuses) }
         let needsPlan = docStore.initiatives.filter(\.needsPlan)
 
-        VStack(spacing: 2) {
-            ForEach(active) { initiative in
-                ForEach(initiative.plans) { plan in
-                    let status = statuses[plan.fileURL] ?? .ready
-                    if status != .merged {
-                        planRow(plan, status: status)
-                            .id(plan.fileURL)
+        // `ScrollViewReader` wraps the smallest ancestor holding every
+        // `.id(plan.fileURL)` row — the sidebar's own `ScrollView` (an
+        // ancestor of this section) is what actually scrolls; this proxy
+        // just targets it. Captured into `scrollProxy` for `jumpToBlocker`.
+        ScrollViewReader { proxy in
+            VStack(spacing: 2) {
+                ForEach(active) { initiative in
+                    ForEach(initiative.plans) { plan in
+                        let status = statuses[plan.fileURL] ?? .ready
+                        if status != .merged {
+                            planRow(plan, status: status)
+                                .id(plan.fileURL)
+                        }
+                    }
+                }
+                ForEach(needsPlan) { initiative in
+                    if let spec = initiative.spec {
+                        VStack(alignment: .leading, spacing: 2) {
+                            specOnlyRow(spec)
+                            // Carry the initiative's absorbed docs (a roadmap or
+                            // notes that paired with the spec) onto the row —
+                            // otherwise they'd be silently hidden.
+                            let chips = supportingChips(for: initiative)
+                            if !chips.isEmpty { chipLine(chips) }
+                        }
+                    }
+                }
+                // Merged plans are intentionally NOT listed here — a done run is
+                // archived to the Flows page, not kept in the Workspaces rail.
+                if !docStore.looseDocs.isEmpty {
+                    disclosure("Docs (\(docStore.looseDocs.count))", isExpanded: $docsExpanded) {
+                        ForEach(docStore.looseDocs) { doc in plainDocRow(doc) }
                     }
                 }
             }
-            ForEach(needsPlan) { initiative in
-                if let spec = initiative.spec {
-                    VStack(alignment: .leading, spacing: 2) {
-                        specOnlyRow(spec)
-                        // Carry the initiative's absorbed docs (a roadmap or
-                        // notes that paired with the spec) onto the row —
-                        // otherwise they'd be silently hidden.
-                        let chips = supportingChips(for: initiative)
-                        if !chips.isEmpty { chipLine(chips) }
-                    }
-                }
-            }
-            // Merged plans are intentionally NOT listed here — a done run is
-            // archived to the Flows page, not kept in the Workspaces rail.
-            if !docStore.looseDocs.isEmpty {
-                disclosure("Docs (\(docStore.looseDocs.count))", isExpanded: $docsExpanded) {
-                    ForEach(docStore.looseDocs) { doc in plainDocRow(doc) }
-                }
-            }
+            .onAppear { scrollProxy = proxy }
         }
     }
 
@@ -530,13 +545,16 @@ struct PlansSpecsSection: View {
         // feature existing, not the in-flight gate the → affordance uses.
         let showUnread = name.map { featureExists($0) && hasUnread($0) } ?? false
         let workspace = name.flatMap(workspaceForFeature)
-        // A `**Runs:** after <blocker>` plan carries the blocker's title in
-        // its caption (resolved via DocStore; `<filename> (missing)` when the
-        // path doesn't resolve — never a silent drop).
-        let afterCaption = IntakeEnactment.afterCaption(runsAfter: plan.runsAfter) { reference in
-            let target = docStore.resolvedURL(forReference: reference)
-            return docStore.docs.first { $0.fileURL.standardizedFileURL == target }?.title
-        }
+        // A `**Runs:** after <blocker>` plan is *waiting* iff the blocker
+        // resolves to a known, non-merged plan — `PlanBlocking` is the single
+        // source of truth the dim treatment and the after-link both key off.
+        let blocker = PlanBlocking.blocker(
+            for: plan, status: status,
+            resolveBlocker: { ref in
+                let target = docStore.resolvedURL(forReference: ref)
+                return docStore.plans.first { $0.fileURL.standardizedFileURL == target }
+            },
+            statusOf: { docStore.status(for: $0, featureExists: featureExists) })
         // "Run the plan" is offered whenever the plan is incomplete AND no
         // agent is actually working it. Liveness is the app's own durable
         // signal — the tracked plan-agent terminal tab (`hasLivePlanAgent`) —
@@ -580,7 +598,7 @@ struct PlansSpecsSection: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        planMetaLine(plan, afterCaption: afterCaption)
+                        planMetaLine(plan, blocker: blocker)
                         if plan.totalSteps > 0 {
                             planProgressBar(checked: plan.checkedSteps,
                                             total: plan.totalSteps)
@@ -608,8 +626,13 @@ struct PlansSpecsSection: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(blocker != nil ? 0.78 : 1)
         .background {
-            if isHovered {
+            if flashedPlanURL == plan.fileURL {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.22))
+                    .padding(.horizontal, 4)
+            } else if isHovered {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(0.04))
                     .padding(.horizontal, 4)
@@ -621,21 +644,53 @@ struct PlansSpecsSection: View {
         }
     }
 
+    /// Scrolls the sidebar to a blocker plan's row and flashes it briefly —
+    /// the target of the `after ↳ ⟨blocker⟩` link. Reduce Motion drops both
+    /// the scroll animation and the flash's fade-out.
+    private func jumpToBlocker(_ url: URL) {
+        if reduceMotion {
+            scrollProxy?.scrollTo(url, anchor: .center)
+        } else {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                scrollProxy?.scrollTo(url, anchor: .center)
+            }
+        }
+        flashedPlanURL = url
+        Task {
+            try? await Task.sleep(for: .seconds(1.1))
+            if flashedPlanURL == url {
+                if reduceMotion {
+                    flashedPlanURL = nil
+                } else {
+                    withAnimation(.easeInOut(duration: 0.3)) { flashedPlanURL = nil }
+                }
+            }
+        }
+    }
+
     /// Exceptional annotations only — blocked/after/auto-run-failed. The
     /// status word moved to the leading glyph and the step count to the
     /// progress bar, so this line renders nothing for an ordinary plan.
+    /// The blocked caption is itself a link — clicking jumps to (scrolls to
+    /// + flashes) the blocker's card via `jumpToBlocker`.
     @ViewBuilder
     private func planMetaLine(
-        _ plan: PlanDoc, afterCaption: String?
+        _ plan: PlanDoc, blocker: PlanBlocking.Blocker?
     ) -> some View {
         let failure = autoRunFailure(docStore.relativePath(of: plan))
-        if afterCaption != nil || failure != nil {
+        if blocker != nil || failure != nil {
             HStack(spacing: 6) {
-                if let afterCaption {
-                    Text(afterCaption)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1).truncationMode(.tail)
+                if let blocker {
+                    Button {
+                        jumpToBlocker(blocker.fileURL)
+                    } label: {
+                        Text("after ↳ \(blocker.title)")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.accentColor)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Waiting on “\(blocker.title)” — jump to it")
                 }
                 if let failure {
                     // An unattended launch failed (name collision, no repos,
