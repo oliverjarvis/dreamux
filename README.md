@@ -6,6 +6,40 @@
 
 <p align="center"><em>design. dream. build.</em></p>
 
+## Install
+
+Dreamux is a native macOS app you build from source — there's no App Store
+listing or notarized download yet (both are on the roadmap). Installing is two
+steps: build the `.app`, then drop it in an Applications folder.
+
+**Requirements:** macOS 14+ and a Swift toolchain (Xcode, or the Command Line
+Tools via `xcode-select --install`).
+
+```sh
+# 1. Build a release Dreamux.app (produces ./Dreamux.app)
+./Scripts/make-app.sh release
+
+# 2a. Install for everyone (system Applications — needs admin):
+sudo ditto Dreamux.app /Applications/Dreamux.app
+
+# 2b. …or just for you — no sudo, still shows in Launchpad + Spotlight:
+ditto Dreamux.app ~/Applications/Dreamux.app
+```
+
+Then launch it from Spotlight (⌘-Space → "Dreamux"), Launchpad, or Finder — and
+drag it to the Dock to keep it handy. Because you built it yourself the app
+isn't quarantined, so Gatekeeper opens it without complaint; if a later build
+ever prompts, right-click it → **Open** once.
+
+**Updating** (there's no auto-updater yet): `git pull` on `main`, then re-run
+the two steps above.
+
+> **Side-by-side dev builds.** `./Scripts/dev-dogfood.sh` builds and launches a
+> *tagged* Dreamux (`./Scripts/make-app.sh release <tag>`) with its own bundle
+> id — an isolated data dir, emit socket, and window state — so it runs next to
+> your everyday app without collisions. Handy for developing Dreamux inside
+> Dreamux.
+
 ## CLI
 
 The Dreamux binary doubles as a small command-line tool for controlling the
@@ -20,9 +54,8 @@ curl -fsSL https://raw.githubusercontent.com/oliverjarvis/dreamux/main/install.s
 ```
 
 This links the `dreamux` command onto your PATH (`/usr/local/bin` or
-`~/.local/bin`). It requires Dreamux.app to be installed first — drop it in
-`/Applications`, or build it with `./Scripts/make-app.sh`. Prefer to do it by
-hand:
+`~/.local/bin`). It requires Dreamux.app to be installed first — see
+[Install](#install) above. Prefer to wire the command up by hand:
 
 ```sh
 ln -sf "/Applications/Dreamux.app/Contents/MacOS/Dreamux" /usr/local/bin/dreamux
