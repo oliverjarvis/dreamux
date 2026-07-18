@@ -221,6 +221,12 @@ private struct WebTabView: View {
     @State private var address: String = ""
     @FocusState private var addressFocused: Bool
 
+    @State private var importService = CookieImportService()
+    @State private var arcSource: BrowserCookieSource?
+    @State private var showArcBanner = false
+    @State private var importStatus: String?
+    @State private var isImporting = false
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -244,6 +250,19 @@ private struct WebTabView: View {
                         addressFocused = false
                     }
 
+                if arcSource != nil {
+                    Button {
+                        runArcImport()
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .disabled(isImporting)
+                    .help("Import logins from Arc")
+                }
+
                 Button {
                     session.openExternally()
                 } label: {
@@ -258,11 +277,29 @@ private struct WebTabView: View {
             .padding(.vertical, 6)
             .background(.bar)
 
+            if showArcBanner {
+                arcBanner
+            }
+            if let importStatus {
+                Text(importStatus)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.bar)
+            }
+
             Divider()
 
             WebViewRepresentable(webView: session.webView)
         }
-        .onAppear { address = session.currentURL.absoluteString }
+        .onAppear {
+            address = session.currentURL.absoluteString
+            let source = importService.availableArcSource()
+            arcSource = source
+            showArcBanner = source != nil && !importService.hasOfferedArc
+        }
         .onChange(of: session.currentURL) { _, newURL in
             // Track the live page, but don't fight the user mid-edit.
             if !addressFocused { address = newURL.absoluteString }
@@ -281,6 +318,56 @@ private struct WebTabView: View {
         .buttonStyle(.plain)
         .foregroundStyle(enabled ? .secondary : .tertiary)
         .disabled(!enabled)
+    }
+
+    /// One-time, dismissible offer to import logins from a detected Arc
+    /// install. Reads as native chrome — same `.bar` background as the
+    /// address bar above it — rather than a distinct alert-styled banner.
+    private var arcBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.down.circle")
+                .foregroundStyle(.secondary)
+            Text("Import your logins from Arc? macOS will ask permission to read Arc's saved key.")
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+            Spacer(minLength: 8)
+            if isImporting {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Import") { runArcImport() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                Button("Not now") {
+                    importService.hasOfferedArc = true
+                    showArcBanner = false
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func runArcImport() {
+        guard let source = arcSource, !isImporting else { return }
+        isImporting = true
+        importStatus = nil
+        Task {
+            let summary = await importService.importCookies(from: source)
+            isImporting = false
+            showArcBanner = false
+            if let error = summary.error {
+                importStatus = error.errorDescription
+            } else {
+                var msg = "Imported \(summary.imported) login\(summary.imported == 1 ? "" : "s") from Arc"
+                if summary.skipped > 0 { msg += " · \(summary.skipped) skipped" }
+                importStatus = msg
+                session.reload()   // pick up the freshly injected cookies
+            }
+        }
     }
 }
 

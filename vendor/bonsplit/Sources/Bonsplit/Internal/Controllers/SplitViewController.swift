@@ -33,9 +33,11 @@ final class SplitViewController {
         if let rootNode {
             self.rootNode = rootNode
         } else {
-            // Initialize with a single pane containing a welcome tab
-            let welcomeTab = TabItem(title: "Welcome", icon: "star")
-            let initialPane = PaneState(tabs: [welcomeTab])
+            // Start with a single EMPTY pane — the host decides what tabs
+            // exist (Dreamux boots Overview + shell itself). The old
+            // seeded "Welcome" tab was a contentless stray every fresh
+            // workspace had to close by hand.
+            let initialPane = PaneState(tabs: [])
             self.rootNode = .pane(initialPane)
             self.focusedPaneId = initialPane.id
         }

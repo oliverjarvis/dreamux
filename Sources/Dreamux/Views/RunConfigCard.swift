@@ -1,97 +1,85 @@
 import SwiftUI
-import GhosttyTerminal
+import AppKit
 
-/// Page that replaces the terminal pane when the user picks the "Run"
-/// tile in the sidebar. Hosts a single embedded shell where Claude
-/// (invoked by the "Detect" / "Modify" buttons) writes a per-project
-/// `run.toml` describing how to start and stop each repo's runnable
-/// surface.
-struct RunSetupView: View {
+/// The services popover's Configure tab — run configuration merged into
+/// the header's run cluster (2026-07-18; formerly a full Run page, then
+/// an Overview card). Detect / Isolate / Diagnose delegate to
+/// `RunConfigActions`, which types prompts into the workspace's
+/// dedicated "run config" terminal tab so the agent keeps its context
+/// across clicks.
+struct RunConfigCard: View {
     let project: Project
+    @Bindable var session: WorkspaceSession
     @Bindable var repoStore: RepoStore
     @Bindable var runConfig: RunConfigStore
     @Bindable var runners: RunnerManager
-    /// Project-wide signal stream. We read tail lines from it per
-    /// runner to power Diagnose-with-Claude when a runner fast-fails.
+    /// Project-wide signal stream — tail lines per runner power
+    /// Diagnose-with-Claude when a runner fast-fails.
     @Bindable var signals: SignalStore
-    /// When set, the page is scoped to a specific feature's worktree —
-    /// runners list is filtered to that feature's repos, and Start
-    /// implicitly targets the workspace's branch folder. When nil the
-    /// page shows the project-wide view (still reachable via the
-    /// running strip's reveal action for runners without a workspace).
-    let scope: Workspace?
 
-    /// Lazily-created shell session. We hold one for the lifetime of
-    /// the Run page so each click of Detect/Modify drops its prompt
-    /// into the same shell — preserving the agent's prior context.
-    @State private var terminal: TabSession?
     @State private var showRawTOML: Bool = false
 
+    /// The workspace this card configures runners for. Always present —
+    /// the card lives on a workspace's Overview.
+    private var scope: Workspace { session.workspace }
+
     var body: some View {
-        HStack(spacing: 0) {
-            controlsColumn
-                .frame(width: 320)
-                .frame(maxHeight: .infinity)
-                .background(.regularMaterial)
-
-            Divider()
-
-            terminalArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(alignment: .leading, spacing: 16) {
+            header
+            detectAction
+            runnersSection
+            tomlSection
         }
+        .padding(14)
         .onAppear {
             runConfig.reload()
             runners.reload(from: runConfig.rawTOML)
-            consumePendingIsolationIfAny()
-            consumePendingDetectIfAny()
-        }
-        .onChange(of: runners.pendingIsolation) { _, _ in
-            consumePendingIsolationIfAny()
-        }
-        .onChange(of: e2eBridge?.pendingDetect) { _, _ in
-            consumePendingDetectIfAny()
         }
     }
 
-    /// Bridge for this project window — `nil` when the e2e harness is
-    /// inactive, so the detect consumption below never fires.
-    private var e2eBridge: E2EBridge? {
-        E2ERegistry.shared.bridge(forProject: project.id)
-    }
+    // MARK: - Sections
 
-    /// The automation server's `detectRunConfig` command can't click
-    /// our Detect button, so it raises this flag on the bridge and we
-    /// run the same action here — mirroring `pendingIsolation`.
-    private func consumePendingDetectIfAny() {
-        guard let bridge = e2eBridge, bridge.pendingDetect else { return }
-        bridge.pendingDetect = false
-        runDetect()
-    }
-
-    /// If the user picked "Isolate with Claude" from the sidebar's
-    /// shared-port conflict alert, kick off the isolate prompt for
-    /// the runner the alert flagged as soon as the Run pane is up.
-    private func consumePendingIsolationIfAny() {
-        guard let target = runners.pendingIsolation else { return }
-        runners.pendingIsolation = nil
-        if let runner = runners.runners.first(where: { $0.name == target.name }) {
-            runIsolate(runner)
-        }
-    }
-
-    // MARK: - Left column (controls + TOML preview)
-
-    private var controlsColumn: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                header
-                detectAction
-                Divider()
-                runnersSection
-                Divider()
-                tomlSection
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text("Run")
+                    .font(.system(size: 15, weight: .semibold))
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                Text(scope.name)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(scope.tint)
             }
-            .padding(20)
+            Text("Start, stop, and configure runners for this workspace's worktree.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var detectAction: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: runDetect) {
+                Label(
+                    runners.runners.isEmpty ? "Detect Run Config" : "Re-detect Run Config",
+                    systemImage: "magnifyingglass"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(repoStore.repositories.isEmpty)
+
+            if repoStore.repositories.isEmpty {
+                Text("Add a repository before running detection.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else if runners.runners.isEmpty {
+                Text("Claude will inspect each repo and write .dreamux/run.toml in a run config tab.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -119,7 +107,7 @@ struct RunSetupView: View {
             }
 
             if scopedRunners.isEmpty {
-                Text(emptyRunnersMessage)
+                Text("No runners loaded. Once Claude writes run.toml, refresh to populate this list.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -147,113 +135,6 @@ struct RunSetupView: View {
                         onDiagnose: { runDiagnose(runner) }
                     )
                 }
-            }
-        }
-    }
-
-    /// Branch the pane treats this runner as anchored to. When scoped
-    /// to a workspace that links this runner's repo, that's the
-    /// workspace's name; otherwise it's the runner's most-recently-set
-    /// active branch (override or default from run.toml).
-    private func displayBranch(for runner: ParsedRunner) -> String {
-        if let scope,
-           let repo = runners.repoName(for: runner),
-           scope.linkedRepoIDs.contains(repo) {
-            return scope.name
-        }
-        return runners.currentBranch(for: runner) ?? "(default)"
-    }
-
-    /// Runners visible in this Run pane. We try to scope to the
-    /// workspace's linked repos first, but fall back to showing every
-    /// runner in run.toml when the workspace either declares no linked
-    /// repos or none of its links match a runner. Hiding everything
-    /// when there's clearly config on disk was confusing.
-    private var scopedRunners: [ParsedRunner] {
-        guard let scope, !scope.linkedRepoIDs.isEmpty else { return runners.runners }
-        let filtered = runners.runners.filter { runner in
-            guard let repo = runners.repoName(for: runner) else { return false }
-            return scope.linkedRepoIDs.contains(repo)
-        }
-        return filtered.isEmpty ? runners.runners : filtered
-    }
-
-    /// When the user clicks Start in a scoped pane AND this runner's
-    /// repo is actually linked to the workspace, delegate to
-    /// `RunnerManager.startPinned` — pin the runner to that workspace's
-    /// worktree and apply the shared fixed-port switch semantics
-    /// (restart displaces any other-branch instance; concurrent-safe
-    /// runners just start). Otherwise fall back to a plain start on the
-    /// runner's existing branch — better to launch from `main` than to
-    /// fail because the workspace's worktree doesn't exist.
-    private func startRunner(_ runner: ParsedRunner) {
-        if let scope,
-           let repo = runners.repoName(for: runner),
-           scope.linkedRepoIDs.contains(repo) {
-            Task { @MainActor in await runners.startPinned(runner, to: scope.name) }
-            return
-        }
-        if runners.canRunConcurrently(runner) {
-            runners.start(runner)
-        } else {
-            Task { @MainActor in await runners.restart(runner) }
-        }
-    }
-
-    private var emptyRunnersMessage: String {
-        "No runners loaded. Once Claude writes run.toml, refresh to populate this list."
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text("Run")
-                    .font(.title3.weight(.semibold))
-                if let scope {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text(scope.name)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(scope.tint)
-                }
-            }
-            Text(headerSubtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var headerSubtitle: String {
-        if scope != nil {
-            return "Start, stop, and configure runners for this feature's worktree."
-        }
-        return "Have Claude figure out how to start and stop each repo, then save it as .dreamux/run.toml."
-    }
-
-    private var detectAction: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button(action: runDetect) {
-                Label(
-                    runners.runners.isEmpty ? "Detect Run Config" : "Re-detect Run Config",
-                    systemImage: "magnifyingglass"
-                )
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(repoStore.repositories.isEmpty)
-
-            if repoStore.repositories.isEmpty {
-                Text("Add a repository before running detection.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            } else if runners.runners.isEmpty {
-                Text("Claude will inspect each repo and write .dreamux/run.toml.")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -320,163 +201,64 @@ struct RunSetupView: View {
         }
     }
 
-    // MARK: - Right pane (terminal)
+    // MARK: - Scoping helpers
 
-    @ViewBuilder
-    private var terminalArea: some View {
-        if let terminal {
-            HostedTerminalView(session: terminal)
-                .onAppear { terminal.startIfNeeded() }
+    /// Branch the card treats this runner as anchored to: the workspace's
+    /// name when its repo is linked, else the runner's active branch.
+    private func displayBranch(for runner: ParsedRunner) -> String {
+        RunConfigActions.displayBranch(for: runner, runners: runners, scope: scope)
+    }
+
+    /// Runners visible in this card. Scope to the workspace's linked
+    /// repos first, but fall back to every runner in run.toml when the
+    /// workspace declares no links or none match — hiding everything
+    /// when there's clearly config on disk was confusing.
+    private var scopedRunners: [ParsedRunner] {
+        guard !scope.linkedRepoIDs.isEmpty else { return runners.runners }
+        let filtered = runners.runners.filter { runner in
+            guard let repo = runners.repoName(for: runner) else { return false }
+            return scope.linkedRepoIDs.contains(repo)
+        }
+        return filtered.isEmpty ? runners.runners : filtered
+    }
+
+    /// Start with worktree pinning when the runner's repo is linked to
+    /// this workspace (shared fixed-port switch semantics); plain start
+    /// otherwise — better to launch from `main` than fail because this
+    /// workspace's worktree doesn't exist.
+    private func startRunner(_ runner: ParsedRunner) {
+        if let repo = runners.repoName(for: runner),
+           scope.linkedRepoIDs.contains(repo) {
+            Task { @MainActor in await runners.startPinned(runner, to: scope.name) }
+            return
+        }
+        if runners.canRunConcurrently(runner) {
+            runners.start(runner)
         } else {
-            VStack(spacing: 12) {
-                Image(systemName: "terminal")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.tertiary)
-                Text("Claude will run here.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Text("Click Detect Run Config to start.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Task { @MainActor in await runners.restart(runner) }
         }
     }
 
-    // MARK: - Actions
-
-    private func ensureTerminal() -> TabSession {
-        if let terminal { return terminal }
-        let session = TabSession(cwd: project.rootPath.path)
-        session.startIfNeeded()
-        terminal = session
-        return session
-    }
+    // MARK: - Claude actions (see RunConfigActions)
 
     private func runDetect() {
-        sendClaude(detectPrompt())
+        RunConfigActions.detect(project: project, session: session)
     }
 
     private func runIsolate(_ runner: ParsedRunner) {
-        sendClaude(isolatePrompt(for: runner))
+        RunConfigActions.isolate(runner, project: project, session: session)
     }
 
-    /// Hand a fast-failed runner over to Claude. We bundle the start
-    /// command, cwd, exit code/duration, and the recent log tail into
-    /// one prompt so Claude can decide whether to install missing deps,
-    /// fix the start command in run.toml, or surface a real bug.
     private func runDiagnose(_ runner: ParsedRunner) {
-        sendClaude(diagnosePrompt(for: runner))
+        RunConfigActions.diagnose(
+            runner, project: project, session: session,
+            runners: runners, signals: signals, scope: scope)
     }
 
-    private func sendClaude(_ prompt: String) {
-        ClaudePromptDriver.send(prompt, into: ensureTerminal())
-    }
-
-    /// Last ~10 log lines from this runner instance, joined by newlines.
-    /// Tries the branch-tagged source name first ("webapp:asdf") since
-    /// concurrent instances use suffixed source tags, then falls back
-    /// to the bare runner name (single-instance case).
     private func failureTail(for runner: ParsedRunner, branch: String) -> String {
-        let tagged = "\(runner.name):\(branch)"
-        var entries = signals.recentEntries(forSource: tagged, limit: 10)
-        if entries.isEmpty {
-            entries = signals.recentEntries(forSource: runner.name, limit: 10)
-        }
-        return entries.map(\.message).joined(separator: "\n")
+        RunConfigActions.failureTail(for: runner, branch: branch, signals: signals)
     }
 
-    private func detectPrompt() -> String {
-        return """
-        You're helping configure the Dreamux Run page for this project. \
-        Inspect every repo under ./repos/* (look at README, package.json, Cargo.toml, Makefile, docker-compose.yml, etc.) \
-        and decide how to start and stop each one. \
-        Write the result to .dreamux/run.toml. Create the directory if needed. \
-        Use this exact shape (one [[runners]] entry per repo that can be started):
-
-        [[runners]]
-        name = "<repo-name>"
-        cwd = "repos/<repo-name>/<default-branch-folder>"
-        start = "<shell command to start>"
-        stop = "<shell command to stop, e.g. pkill -f ...>"
-        port = <integer or omit if not a network service>
-        port_env = "<env var, ONLY if the app already reads its port from one>"
-        open = "<what to open once it's serving, e.g. http://localhost:{port}/ — omit for headless services>"
-
-        port_env matters: Dreamux runs the same app from multiple git worktrees at once \
-        by giving each instance its own port through that env var. If the app already \
-        honours an env var for its port (e.g. PORT for many Node/Rails apps, or a documented \
-        custom one), set port_env to that name — do NOT modify any code. If the port is \
-        hardcoded, omit port_env and leave the code alone; the user can opt into rewriting \
-        it per-runner from the Run page later. \
-        open is fired after the port starts answering; write {port} (literally) where the \
-        port belongs and Dreamux substitutes each instance's actual port. A URL opens in \
-        the browser; a shell command also works (e.g. to launch a native app). \
-        Be concise: don't add commentary, just write the file. \
-        When done, print 'run.toml ready' so I know to refresh.
-        """
-    }
-
-    private func isolatePrompt(for runner: ParsedRunner) -> String {
-        return """
-        In this project's .dreamux/run.toml, the runner named "\(runner.name)" currently binds a fixed port \
-        so only one worktree can run at a time. Change the repo's code under \
-        repos/\(runner.name)/ so the port is read from an environment variable (e.g. \
-        \(envVarSuggestion(for: runner.name))), defaulting to the existing port when unset. \
-        Note: each branch folder under repos/\(runner.name)/ is an independent git checkout (worktree) — \
-        apply the same change in every branch folder there (skip .bare), not just the default branch, \
-        otherwise already-provisioned worktrees keep running hardcoded-port code and still collide. \
-        Keep the diff minimal in each checkout — just the change needed to read the env var. Don't restructure files. \
-        Then update the matching [[runners]] entry in .dreamux/run.toml to add: \
-        port_env = "<the env var you chose>". \
-        When done, print 'isolated \(runner.name)' so I know to refresh.
-        """
-    }
-
-    private func diagnosePrompt(for runner: ParsedRunner) -> String {
-        let branch = displayBranch(for: runner)
-        let key = RunnerInstanceKey(runnerName: runner.name, branch: branch)
-        let status = runners.status(for: runner, on: branch) ?? .idle
-        let exitClause: String
-        if case .exited(let code) = status {
-            let durationText: String
-            if let d = runners.lastRunDuration[key] {
-                durationText = String(format: " after %.1fs", d)
-            } else {
-                durationText = ""
-            }
-            exitClause = "exited with code \(code)\(durationText)"
-        } else {
-            exitClause = "failed to start"
-        }
-
-        let cwd = runner.cwd ?? "(none)"
-        let tail = failureTail(for: runner, branch: branch)
-        let tailBlock = tail.isEmpty
-            ? "(no recent output captured)"
-            : tail
-
-        return """
-        The runner "\(runner.name)" \(exitClause). \
-        Figure out why and fix it — install missing deps, correct the start command in .dreamux/run.toml, \
-        whatever is needed. Keep the diff minimal. \
-        When you've made a change, print 'diagnosed \(runner.name)' so I can retry.
-
-        cwd: \(cwd)
-        start command: \(runner.start)
-
-        Recent output:
-        \(tailBlock)
-        """
-    }
-
-    private func envVarSuggestion(for runnerName: String) -> String {
-        let upper = runnerName
-            .uppercased()
-            .replacingOccurrences(of: "-", with: "_")
-            .replacingOccurrences(of: " ", with: "_")
-        return "\(upper)_PORT"
-    }
 }
 
 // MARK: - Runner row
@@ -603,7 +385,7 @@ private struct RunnerRow: View {
                 .controlSize(.small)
                 .buttonStyle(.borderedProminent)
                 .tint(.orange)
-                .help("Send the failure and recent output to Claude in the Run terminal")
+                .help("Send the failure and recent output to Claude in the run config tab")
             }
             if let lastLine = failureTail
                 .split(whereSeparator: { $0.isNewline })
@@ -715,4 +497,3 @@ private struct RunnerRow: View {
         return parts.isEmpty ? runner.start : parts.joined(separator: " · ")
     }
 }
-

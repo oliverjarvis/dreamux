@@ -2,7 +2,7 @@
 """Fake `claude` CLI for Dreamux e2e tests.
 
 The app's Run pane shells out to `claude '<prompt>'` for three flows
-(see Sources/Dreamux/Views/RunSetupView.swift). This shim impersonates
+(see Sources/Dreamux/Views/RunConfigCard.swift). This shim impersonates
 the real CLI deterministically — no network, no LLM — by recognizing
 each prompt and performing the minimal file edits the real agent would:
 
@@ -100,7 +100,7 @@ def do_detect():
 
 
 def env_var_for(runner_name):
-    """Mirror RunSetupView.envVarSuggestion: FIXEDPORT_SERVER_PORT for
+    """Mirror RunConfigCard.envVarSuggestion: FIXEDPORT_SERVER_PORT for
     "fixedport-server"."""
     return runner_name.upper().replace("-", "_").replace(" ", "_") + "_PORT"
 

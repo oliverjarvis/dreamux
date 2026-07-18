@@ -10,7 +10,7 @@ nested `.git` directories; tests `git init` their copies themselves.
 
 An executable python3 script that impersonates the real `claude` CLI
 for e2e runs (put `Tests/Fixtures/bin` first on `PATH`). It recognizes
-the three prompts the Run pane sends (RunSetupView.swift) and performs
+the three prompts the Run pane sends (RunConfigCard.swift) and performs
 the minimal deterministic edits the real agent would:
 
 - **detect** (prompt contains `Inspect every repo`): for each repo

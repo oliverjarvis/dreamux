@@ -25,13 +25,15 @@ struct AppsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             header
             if layout.appsExpanded {
-                ForEach(applets.applets) { applet in
-                    appletRow(applet)
+                SidebarSectionChildren {
+                    ForEach(applets.applets) { applet in
+                        appletRow(applet)
+                    }
+                    ForEach(applets.invalidFolders, id: \.self) { name in
+                        invalidRow(name)
+                    }
+                    newAppRow
                 }
-                ForEach(applets.invalidFolders, id: \.self) { name in
-                    invalidRow(name)
-                }
-                newAppRow
             }
         }
         // The apps/ folder is the source of truth; a full watcher is deferred,
@@ -54,28 +56,12 @@ struct AppsSection: View {
 
     // MARK: - Pieces
 
-    /// Chevron + "APPLETS" — identical construction to
-    /// `PlansSpecsSection.header`, toggling the persisted `layout.appsExpanded`.
+    /// "APPLETS" header — the shared section-header row, toggling the
+    /// persisted `layout.appsExpanded`.
     private var header: some View {
-        Button {
-            withAnimation(.snappy(duration: 0.18)) { layout.appsExpanded.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(layout.appsExpanded ? 90 : 0))
-                Text("Applets")
-                    .font(.system(size: 13, weight: .semibold))
-                    .kerning(0.4)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, 2)
+        SidebarSectionHeader(
+            title: "Applets", icon: PhosphorIcon.appWindowFill,
+            isExpanded: $layout.appsExpanded)
     }
 
     /// One openable applet row — its manifest icon in a fixed 28pt column, a
@@ -90,7 +76,7 @@ struct AppsSection: View {
                 Image(systemName: applet.manifest.icon)
                     .font(.system(size: 15))
                     .foregroundStyle(selected ? Color.accentColor : Color.primary)
-                    .frame(width: 28)
+                    .frame(width: 22)
                 Text(applet.manifest.name)
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(.primary)
@@ -129,7 +115,7 @@ struct AppsSection: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 15))
                 .foregroundStyle(.orange)
-                .frame(width: 28)
+                .frame(width: 22)
             Text(name)
                 .font(.system(size: 15))
                 .foregroundStyle(.secondary)
@@ -141,16 +127,20 @@ struct AppsSection: View {
         .help("apps/\(name)/manifest.json is missing or invalid")
     }
 
-    /// Borderless "＋ New applet" foot row — the `newWorkspaceRow` shape: a
-    /// plain plus (no circle, no box), highlighting only on hover.
+    /// Borderless "＋ New applet" foot row — the `newWorkspaceRow` shape: the
+    /// Phosphor plus-square glyph, highlighting only on hover.
     private var newAppRow: some View {
         Button(action: onNewApp) {
             HStack(spacing: 11) {
-                Image(systemName: "plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                PhosphorIcon.plusFill
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
+                    .frame(width: 22, height: 22)
                 Text("New applet")
                     .font(.system(size: 15))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
                 Text("⌘L")
                     .font(.system(size: 12, weight: .medium))

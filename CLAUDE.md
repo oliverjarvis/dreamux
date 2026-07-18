@@ -18,8 +18,11 @@ Concrete scale that reads well here:
 
 - **Row labels / file names:** 14–15pt. Never `.caption2` (11pt) for a real,
   clickable row.
-- **Section headers** (CONTEXT, FLOWS, REPOSITORIES): 13pt semibold, light
-  uppercase kerning (~0.4).
+- **Section headers** (Applets, Workspaces, Context, Repositories): styled
+  identically to clickable rows — 15pt primary title-case label, Phosphor
+  fill icon in the shared 22pt column, disclosure caret at the far trailing
+  edge (since 2026-07-18). Sections read by position, icon, and caret, not
+  by a smaller/dimmer type style.
 - **Nested sub-group headers** (Plans, Specs under Context): 14pt medium,
   **primary** color — a sub-level is still a first-class row, not a faint
   whisper. Do not shrink sub-items to signal nesting.
@@ -88,15 +91,18 @@ Every clickable row uses the same wash: `Color.primary.opacity(0.04)` on
 hover, `0.08` when selected, on a `RoundedRectangle(cornerRadius: 8)`. The
 base `main` row is **not** exempt — a row that doesn't light up on hover
 like its neighbours reads as dead. Sections are delineated by their
-uppercase header (13pt semibold, kern ~0.4) and generous spacing **alone**
-— never a `Divider()` under a header. A rule beneath one section's title
-makes it read as a different *kind* of element than its peers.
+icon+caret header row, the vertical hierarchy line under an expanded
+header's icon column, and spacing — never a `Divider()` under a header. A
+rule beneath one section's title makes it read as a different *kind* of
+element than its peers. (The one deliberate horizontal hairline sits
+between the pinned tiles and the sections below them.)
 
 ### Add-actions are labelled rows at the foot of the list, not header icons
 
 "New workspace" / "Add repository" live as a **borderless row at the bottom
-of their list** — a plain `plus` (no circle, no box), 15pt label, hover-only
-background — not a `+` icon crammed into the section header. And drop
+of their list** — the Phosphor plus-square glyph (fill weight, like all
+sidebar icons since 2026-07-18), 15pt label, hover-only background — not a
+`+` icon crammed into the section header. And drop
 controls a watcher makes redundant: with `docStore.startWatching()`
 auto-rescanning on file changes, there is no manual "refresh" button.
 

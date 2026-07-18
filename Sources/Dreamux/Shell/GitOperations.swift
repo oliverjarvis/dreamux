@@ -481,6 +481,52 @@ enum GitOperations {
         return !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// One `git status --porcelain` entry classified for the file tree's
+    /// per-row badges.
+    enum FileChangeKind: Sendable {
+        case modified
+        case added
+        case untracked
+        case deleted
+        case renamed
+        case conflicted
+    }
+
+    /// Repo-relative path → change kind from `git status --porcelain`,
+    /// powering the file tree's git badges. Renames report the NEW path
+    /// (the one that exists on disk); quoted paths (spaces, unicode) are
+    /// unquoted minimally.
+    static func fileStatuses(in worktreeURL: URL) async -> [String: FileChangeKind] {
+        guard let output = try? await runGit(["status", "--porcelain"], in: worktreeURL)
+        else { return [:] }
+        var result: [String: FileChangeKind] = [:]
+        for line in output.split(separator: "\n") {
+            guard line.count >= 4 else { continue }
+            let x = line[line.startIndex]
+            let y = line[line.index(after: line.startIndex)]
+            var path = String(line.dropFirst(3))
+            if let arrow = path.range(of: " -> ") {
+                path = String(path[arrow.upperBound...])
+            }
+            if path.hasPrefix("\""), path.hasSuffix("\""), path.count >= 2 {
+                path = String(path.dropFirst().dropLast())
+                    .replacingOccurrences(of: "\\\"", with: "\"")
+                    .replacingOccurrences(of: "\\\\", with: "\\")
+            }
+            let kind: FileChangeKind
+            switch (x, y) {
+            case ("?", "?"): kind = .untracked
+            case ("U", _), (_, "U"), ("A", "A"), ("D", "D"): kind = .conflicted
+            case ("R", _), ("C", _): kind = .renamed
+            case ("D", _), (_, "D"): kind = .deleted
+            case ("A", _): kind = .added
+            default: kind = .modified
+            }
+            result[path] = kind
+        }
+        return result
+    }
+
     /// Stage every modified/untracked path and create a commit with
     /// the given message. Honours `.gitignore` the same way `git add -A`
     /// does — gitignored files stay out. Throws if either step fails so

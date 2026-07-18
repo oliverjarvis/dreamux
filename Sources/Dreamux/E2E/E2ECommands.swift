@@ -53,6 +53,8 @@ enum E2ECommands {
             return ["ok": true]
         case "state":
             return stateReply()
+        case "hitTest":
+            return try hitTest(request: request)
         case "screenshot":
             return try screenshot(request: request)
         case "addLocalRepo":
@@ -305,7 +307,6 @@ enum E2ECommands {
     private static func sidebarModeName(_ mode: SidebarMode) -> String {
         switch mode {
         case .workspace: return "workspace"
-        case .run: return "run"
         case .signals: return "signals"
         case .flows: return "flows"
         case .library: return "library"
@@ -320,6 +321,34 @@ enum E2ECommands {
     /// permission. GPU-backed surfaces (the embedded terminals) may
     /// come out blank; the screenshots document UI chrome, not
     /// terminal contents.
+    /// Diagnostic: report the AppKit view that would receive a mouse
+    /// event at content-view coordinates (x, y — top-left origin, in
+    /// points), plus its superview chain. Answers "who is eating this
+    /// click" when a SwiftUI region is mysteriously inert.
+    private static func hitTest(request: [String: Any]) throws -> [String: Any] {
+        guard let x = request["x"] as? Double, let y = request["y"] as? Double else {
+            throw CommandError(message: "hitTest needs numeric \"x\" and \"y\"")
+        }
+        let window = try resolveWindow()
+        guard let content = window.contentView, let frameView = content.superview else {
+            throw CommandError(message: "window has no content view")
+        }
+        // Convert top-left-origin content coords to the frame view's space.
+        let pointInContent = NSPoint(
+            x: x,
+            y: content.isFlipped ? y : content.bounds.height - y)
+        let pointInFrame = content.convert(pointInContent, to: frameView)
+        var chain: [String] = []
+        var hit = frameView.hitTest(pointInFrame)
+        let hitDescription = hit.map { "\(type(of: $0))" } ?? "nil"
+        while let view = hit {
+            chain.append("\(type(of: view)) frame=\(NSStringFromRect(view.frame))")
+            hit = view.superview
+            if chain.count > 25 { break }
+        }
+        return ["ok": true, "hit": hitDescription, "chain": chain]
+    }
+
     private static func screenshot(request: [String: Any]) throws -> [String: Any] {
         let path = try string("path", in: request)
         guard path.hasPrefix("/") else {
@@ -519,6 +548,9 @@ enum E2ECommands {
             }
             handles.bridge.pendingSidebarMode = .app(id)
         case "run":
+            // The full-page Run pane is gone (2026-07-18): "run" now
+            // routes to the workspace whose Overview hosts the Run card,
+            // kept as a mode name so existing drivers don't break.
             let workspace: Workspace?
             if let name = request["workspace"] as? String {
                 workspace = try self.workspace(named: name)
@@ -526,10 +558,12 @@ enum E2ECommands {
                 workspace = store.activeWorkspace ?? store.workspaces.first
             }
             guard let workspace else {
-                throw CommandError(message: "no workspace to scope the Run pane to")
+                throw CommandError(message: "no workspace to scope the Run card to")
             }
             store.activate(workspace.id)
-            handles.bridge.pendingSidebarMode = .run(workspaceID: workspace.id)
+            handles.bridge.pendingSidebarMode = .workspace
+            let (runners, _, _) = try runStores()
+            runners.pendingConfigureWorkspaceID = workspace.id
         default:
             throw CommandError(message: "mode must be \"workspace\", \"run\", \"signals\", \"flows\", \"library\", or \"app\"")
         }
@@ -1149,28 +1183,31 @@ enum E2ECommands {
         }
         // Mirror the conflict alert's "Isolate with Claude" button:
         // park the runner on the manager's existing pendingIsolation
-        // channel, then surface the Run pane (scoped to the worktree
-        // the runner targets when a matching workspace exists).
-        runners.pendingIsolation = runner
+        // channel, then surface the Overview whose Run card consumes it
+        // (scoped to the worktree the runner targets when a matching
+        // workspace exists).
+        // Activate the matching worktree first so the always-mounted
+        // handoff consumer (ContentView) isolates against the right
+        // workspace's run-config tab.
         let target = store.workspaces.first { $0.name == runners.currentBranch(for: runner) }
             ?? store.activeWorkspace
             ?? store.workspaces.first
         if let target {
             store.activate(target.id)
-            handles.bridge.pendingSidebarMode = .run(workspaceID: target.id)
-        } else {
-            // No workspaces at all — an unmatched ID gives RunSetupView
-            // a nil scope, i.e. the project-wide Run pane.
-            handles.bridge.pendingSidebarMode = .run(workspaceID: UUID())
+            handles.bridge.pendingSidebarMode = .workspace
         }
+        runners.pendingIsolation = runner
         return ["ok": true]
     }
 
     private static func detectRunConfig() throws -> [String: Any] {
         let (handles, store, _) = try projectStores()
-        handles.bridge.pendingDetect = true
         let target = store.activeWorkspace ?? store.workspaces.first
-        handles.bridge.pendingSidebarMode = .run(workspaceID: target?.id ?? UUID())
+        if let target {
+            store.activate(target.id)
+            handles.bridge.pendingSidebarMode = .workspace
+        }
+        handles.bridge.pendingDetect = true
         return ["ok": true]
     }
 

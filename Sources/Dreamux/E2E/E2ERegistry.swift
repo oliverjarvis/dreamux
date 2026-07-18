@@ -43,7 +43,7 @@ final class E2EBridge {
 
     /// When true, the Run pane kicks off its Detect flow (sending the
     /// detect prompt to the `claude` CLI in its embedded terminal) the
-    /// moment it's on screen. Consumed by `RunSetupView`.
+    /// moment it's on screen. Consumed by `RunConfigCard`.
     var pendingDetect = false
 
     /// Palette open/close request parked by the `setPalette` command and

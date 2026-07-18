@@ -88,8 +88,10 @@ private struct SectionTile: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(section.tint.opacity(isActive ? 0 : 0.28), lineWidth: 1)
                     )
-                Image(systemName: section.symbol)
-                    .font(.system(size: 18, weight: .semibold))
+                section.icon
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
                     .foregroundStyle(isActive ? Color.white : section.tint)
             }
             .frame(width: 44, height: 44)

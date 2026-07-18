@@ -25,7 +25,7 @@ executable directly, or via `open --env`):
 | `DREAMUX_PROJECTS_ROOT` | Replaces `~/Documents/Dreamux` as the directory projects are discovered in / created under. Created on demand. Point it at a per-run sandbox so the user's real projects are never touched. |
 | `DREAMUX_STATE_DIR` | Replaces `~/Library/Application Support/Dreamux` as the home of `projects.json`. Point it at a per-run sandbox. |
 | `DREAMUX_APPS_ROOT` | Replaces `~/Documents/Dreamux/Apps` as the global App Studio applet library root (`AppLibraryStore`'s backing folder — see `adoptApplet`/`appletsState`). Point it at a per-run sandbox so `adoptApplet`/publish scenarios never touch the user's real library. Created on demand. |
-| `DREAMUX_CLAUDE_BIN` | Absolute path to the `claude` binary the Run pane's Detect / Isolate / Diagnose buttons paste into their embedded terminal (it is shell-quoted for you). Point it at `Tests/Fixtures/bin/claude` for deterministic agent behavior regardless of the user's PATH/zshrc. When unset, the bare word `claude` is used. |
+| `DREAMUX_CLAUDE_BIN` | Absolute path to the `claude` binary the Overview Run card's Detect / Isolate / Diagnose buttons paste into the workspace's "run config" terminal tab (it is shell-quoted for you). Point it at `Tests/Fixtures/bin/claude` for deterministic agent behavior regardless of the user's PATH/zshrc. When unset, the bare word `claude` is used. |
 | `DREAMUX_GH_BIN` | Absolute path to the `gh` binary used by the merge sheet's "Create PR" path (`publishFeature`, `featurePRStatus`, and the sheet's own PR pre-check/polling). Point it at `Tests/Fixtures/bin/gh` — a fake that works against a **local bare repo as origin**, storing PR records inside the remote under `fake-prs/<branch>.json` and deriving MERGED from ref ancestry — so PR scenarios run with no network and no GitHub account. When unset, `gh` from PATH is used. |
 
 A typical harness launch:
@@ -179,8 +179,11 @@ Field notes:
   only when applicable.
 - `runToml` is omitted when the file doesn't exist
   (`runTomlExists: false`).
-- `sidebarMode` is `"workspace" | "run" | "signals" | "flows" | "library" | "app"`
-  — the pane the project window currently shows.
+- `sidebarMode` is `"workspace" | "signals" | "flows" | "library" | "app"`
+  — the pane the project window currently shows. (`"run"` is gone as a
+  *state*: run config lives on the workspace Overview's Run card since
+  2026-07-18. `setSidebarMode` still accepts `"run"` as an input and
+  routes it to the scoped workspace's Overview.)
 - `openedTargets` — every `open` target the runner manager fired this
   session, in order (a runner's `open` value with `{port}` resolved to
   the instance's effective port). URL targets open as in-app browser
@@ -316,7 +319,9 @@ inventory page, and `app` an open App Studio applet (requires a UUID
 `createApplet`/`openApplet`/`adoptApplet`; prefer `openApplet` with a
 `slug`, which resolves the id for you). The optional `"workspace"`
 parameter (a feature name) selects which workspace to activate (for
-`workspace` mode) or to scope the Run pane to (for `run` mode; defaults
+`workspace` mode) or whose Overview Run card to surface (for `run`
+mode — the full-page Run pane is gone; `run` activates the workspace,
+switches to `workspace` mode, and focuses its Overview tab; defaults
 to the active workspace, then the first one — fails if there are
 none). `flows`, `library`, and `app` ignore `workspace` — none of the
 three are per-workspace.
@@ -396,7 +401,7 @@ information as a transient notice with an isolate shortcut).
 ← {"ok":true,"started":true,"runners":["fixedport-server"],
    "displaced":[{"runner":"fixedport-server","fromBranch":"feature-y"}]}
 
-# no runners configured at all (the UI would open the Run pane)
+# no runners configured at all (the UI would surface the Run card)
 ← {"ok":true,"started":false,"reason":"no runners configured"}
 ```
 
@@ -433,13 +438,13 @@ picture.
 ### `isolateRunner`
 
 The conflict alert's **Isolate with Claude** path: parks the named
-runner on `RunnerManager.pendingIsolation` and switches the sidebar to
-Run mode (scoped to the workspace matching the runner's current
-branch when one exists). The Run pane consumes the pending isolation
-on appearance and sends the isolate prompt to the `claude` CLI
-(`DREAMUX_CLAUDE_BIN`) in its embedded terminal. The reply does
-**not** wait for the agent — poll the repo/`run.toml` on disk (or
-`reloadRunConfig` + `state`) for the isolation to land.
+runner on `RunnerManager.pendingIsolation` and surfaces the Overview
+of the workspace matching the runner's current branch (when one
+exists). That Overview's Run card consumes the pending isolation on
+appearance and sends the isolate prompt to the `claude` CLI
+(`DREAMUX_CLAUDE_BIN`) in the workspace's "run config" terminal tab.
+The reply does **not** wait for the agent — poll the repo/`run.toml`
+on disk (or `reloadRunConfig` + `state`) for the isolation to land.
 
 ```
 → {"cmd":"isolateRunner","name":"fixedport-server"}
@@ -448,11 +453,11 @@ on appearance and sends the isolate prompt to the `claude` CLI
 
 ### `detectRunConfig`
 
-Click the Run pane's **Detect Run Config** button: switches the
-sidebar to Run mode and has the pane send the detect prompt to the
-`claude` CLI in its embedded terminal. Like `isolateRunner`, the reply
-does not wait for the agent — poll for `.dreamux/run.toml`, then
-call `reloadRunConfig`.
+Click the Run card's **Detect Run Config** button: surfaces the active
+workspace's Overview and has the card send the detect prompt to the
+`claude` CLI in the workspace's "run config" terminal tab. Like
+`isolateRunner`, the reply does not wait for the agent — poll for
+`.dreamux/run.toml`, then call `reloadRunConfig`.
 
 ```
 → {"cmd":"detectRunConfig"}
@@ -462,7 +467,7 @@ call `reloadRunConfig`.
 ### `reloadRunConfig`
 
 Re-read `<project>/.dreamux/run.toml` from disk and re-parse the
-runner list (the Run pane's refresh button).
+runner list (the Run card's refresh button).
 
 ```
 → {"cmd":"reloadRunConfig"}

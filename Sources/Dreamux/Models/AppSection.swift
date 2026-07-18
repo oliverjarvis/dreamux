@@ -16,9 +16,11 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    var symbol: String {
+    /// Phosphor fill-weight icon — same sizing/tinting contract as
+    /// `SidebarTile.icon`.
+    var icon: Image {
         switch self {
-        case .features: return "square.grid.2x2.fill"
+        case .features: return PhosphorIcon.squaresFourFill
         }
     }
 

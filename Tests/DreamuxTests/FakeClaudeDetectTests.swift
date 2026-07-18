@@ -31,7 +31,7 @@ final class FakeClaudeDetectTests: XCTestCase {
             )
         }
 
-        // The shim keys off this phrase (see RunSetupView.detectPrompt);
+        // The shim keys off this phrase (see RunConfigCard.detectPrompt);
         // the rest of the real prompt is irrelevant to it.
         let result = try await runProcess(
             RepoFixtures.fakeClaude,

@@ -280,6 +280,8 @@ final class WorkspaceSession {
         titleObservers.removeValue(forKey: tabId)
         if planningTabID == tabId { planningTabID = nil }
         if agentTabID == tabId { agentTabID = nil }
+        if runConfigTabID == tabId { runConfigTabID = nil }
+        if composerTabID == tabId { composerTabID = nil }
     }
 
     private func handleDidSplitPane(newPane: PaneID) {
@@ -431,6 +433,43 @@ final class WorkspaceSession {
         let tab = openAgentTab(at: path, title: "planning", icon: "lightbulb")
         planningTabID = lastCreatedTabID
         return tab
+    }
+
+    /// Tab id of this workspace's run-config agent terminal — the tab the
+    /// Overview Run card's Detect / Isolate / Diagnose type their prompts
+    /// into. One per session so repeated clicks land in the same live
+    /// agent (preserving its context); cleared when the tab closes.
+    private var runConfigTabID: TabID?
+
+    /// Re-select the live run-config terminal, or open a fresh one cwd'd
+    /// at `path`. Mirrors `reuseOrOpenPlanningTab`.
+    func reuseOrOpenRunConfigTab(at path: String) -> TabSession? {
+        if let id = runConfigTabID, let existing = tabSessions[id] {
+            controller.selectTab(id)
+            return existing
+        }
+        let tab = openAgentTab(at: path, title: "run config", icon: "wand.and.stars")
+        runConfigTabID = lastCreatedTabID
+        return tab
+    }
+
+    /// Tab id of this workspace's composer-driven claude terminal — the
+    /// tab the window's bottom prompt composer sends into. One per
+    /// session; cleared when the tab closes.
+    private var composerTabID: TabID?
+
+    /// Re-select the live composer claude terminal, or open a fresh one
+    /// cwd'd at `path`. `reused` tells the caller whether a claude REPL
+    /// is presumed live in it (type into it) or the tab is fresh (launch
+    /// claude seeded with the prompt).
+    func reuseOrOpenComposerTab(at path: String) -> (tab: TabSession, reused: Bool)? {
+        if let id = composerTabID, let existing = tabSessions[id] {
+            controller.selectTab(id)
+            return (existing, true)
+        }
+        guard let tab = openAgentTab(at: path, title: "claude", icon: "sparkles") else { return nil }
+        composerTabID = lastCreatedTabID
+        return (tab, false)
     }
 
     /// URL claimed by the next created tab — the web analog of

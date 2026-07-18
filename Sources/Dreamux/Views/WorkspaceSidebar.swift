@@ -66,8 +66,12 @@ struct WorkspaceSidebar: View {
     /// Tear down an applet's live session before its folder is removed —
     /// `ProjectSession.closeAppletSession(id:)`.
     let closeAppletSession: (UUID) -> Void
+    /// Builds the services popover's Configure tab for a workspace —
+    /// injected from ContentView, which owns the run-config stores.
+    let configContent: (Workspace) -> AnyView
 
     @State private var hoveredTile: SidebarTile?
+    @State private var hoveredFileGroup: String?
     /// Hovered doc/config file row in the Plans/Specs/Project Files lists.
     @State private var hoveredOrchestrationURL: URL?
     /// Hover state for the borderless "Add repository" row.
@@ -230,7 +234,10 @@ struct WorkspaceSidebar: View {
     // MARK: - Content
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        // 6pt + the 8pt vertical padding inside each header row ≈ the
+        // original 18pt-plus-2pt-headers rhythm — the padding moved into
+        // the rows when headers gained the tile-style hover pill.
+        VStack(alignment: .leading, spacing: 6) {
             // Pinned destinations — roomy, readable rows, not a cramped
             // list.
             VStack(spacing: 3) {
@@ -253,6 +260,15 @@ struct WorkspaceSidebar: View {
                 onRemove: { handleRemoveApp($0) },
                 onPublish: { handlePublishApp($0) }
             )
+
+            contextSection
+
+            // Hairline between the navigation group above (tiles, Applets,
+            // Context) and the work sections below — the one deliberate
+            // rule in the sidebar.
+            Color.primary.opacity(0.08)
+                .frame(height: 1)
+                .padding(.horizontal, 10)
 
             // The live work surface leads (running plans, queue, gates);
             // the reference file lists collapse below it.
@@ -307,8 +323,6 @@ struct WorkspaceSidebar: View {
                 prState: { name in prState(forFeature: name) }
             )
 
-            contextSection
-
             switchNoticeIfAny
 
             // The Ad hoc section is retired for now (user call, 2026-07-04)
@@ -322,24 +336,30 @@ struct WorkspaceSidebar: View {
                 // Borderless (no card): the rows carry their own hover
                 // highlight, matching the file lists above.
                 repositoriesHeader
-                repoRows
-                addRepositoryRow
+                SidebarSectionChildren {
+                    repoRows
+                    addRepositoryRow
+                }
             }
         }
     }
 
-    /// Borderless "＋ Add repository" row under the repo list — a plain
-    /// plus (no circle, no box), highlighting only on hover.
+    /// Borderless "＋ Add repository" row under the repo list — the
+    /// Phosphor plus-square glyph, highlighting only on hover.
     private var addRepositoryRow: some View {
         Button {
             showAddRepo = true
         } label: {
             HStack(spacing: 11) {
-                Image(systemName: "plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                PhosphorIcon.plusFill
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
+                    .frame(width: 22, height: 22)
                 Text("Add repository")
                     .font(.system(size: 15))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.secondary)
@@ -379,23 +399,25 @@ struct WorkspaceSidebar: View {
     /// one header keeps the sidebar from sprouting a header per doc kind.
     private var contextSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            collapsibleHeader(title: "Context", count: nil, isExpanded: $layout.contextExpanded)
+            SidebarSectionHeader(
+                title: "Context", icon: PhosphorIcon.filesFill,
+                isExpanded: $layout.contextExpanded)
             if layout.contextExpanded {
-                VStack(alignment: .leading, spacing: 3) {
+                SidebarSectionChildren(spacing: 3) {
                     nestedFileGroup(title: "Plans", isExpanded: $layout.planFilesExpanded,
                                     docs: planDocs, emptyHint: "No plans yet.")
                     nestedFileGroup(title: "Specs", isExpanded: $layout.specFilesExpanded,
                                     docs: specDocs, emptyHint: "No specs yet.")
                     configFileRows
                 }
-                .padding(.leading, 6)
             }
         }
     }
 
-    /// A light, indented sub-group inside Context (Plans / Specs) — a
-    /// smaller, lower-contrast header than the top-level section labels so
-    /// the nesting reads without shouting.
+    /// A light, indented sub-group inside Context (Plans / Specs) — the
+    /// section-header construction one notch down: Phosphor folder glyph
+    /// (open/closed) in the leading column, caret at the far trailing
+    /// edge, same hover wash.
     @ViewBuilder
     private func nestedFileGroup(
         title: String, isExpanded: Binding<Bool>, docs: [PlanDoc], emptyHint: String
@@ -404,12 +426,14 @@ struct WorkspaceSidebar: View {
             Button {
                 withAnimation(.snappy(duration: 0.18)) { isExpanded.wrappedValue.toggle() }
             } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
+                HStack(spacing: 11) {
+                    (isExpanded.wrappedValue
+                        ? PhosphorIcon.folderOpenFill : PhosphorIcon.folderFill)
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: 15, height: 15)
                         .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
-                        .frame(width: 14)
+                        .frame(width: 22)
                     Text(title)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.primary)
@@ -419,12 +443,29 @@ struct WorkspaceSidebar: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
+                    PhosphorIcon.caretRightFill
+                        .renderingMode(.template)
+                        .scaledToFit()
+                        .frame(width: 10, height: 10)
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
                 }
-                .padding(.leading, 4)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .background {
+                if hoveredFileGroup == title {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.primary.opacity(0.04))
+                        .padding(.horizontal, 4)
+                }
+            }
+            .onHover { hovering in
+                if hovering { hoveredFileGroup = title }
+                else if hoveredFileGroup == title { hoveredFileGroup = nil }
+            }
 
             if isExpanded.wrappedValue {
                 if docs.isEmpty {
@@ -445,53 +486,23 @@ struct WorkspaceSidebar: View {
         let files = projectConfigFiles
         let hasClaude = files.contains { $0.lastPathComponent == "CLAUDE.md" }
         // Config files are siblings of the Plans/Specs groups, so their glyph
-        // aligns with the group chevrons (inset 4, 14-wide column) rather
+        // aligns with the group folder column (inset 10, 22-wide) rather
         // than indenting like a file nested inside a group.
         ForEach(files, id: \.self) { url in
             fileRow(url: url, symbol: configSymbol(for: url.lastPathComponent),
-                    leadingInset: 4, iconWidth: 14)
+                    leadingInset: 10, iconWidth: 22)
         }
         // CLAUDE.md is the one people reach for most — offer to create it
         // inline when it's missing.
         if !hasClaude { createClaudeRow }
     }
 
-    /// A shared uppercase top-level section header with a chevron and
-    /// optional count.
-    private func collapsibleHeader(
-        title: String, count: Int?, isExpanded: Binding<Bool>
-    ) -> some View {
-        Button {
-            withAnimation(.snappy(duration: 0.18)) { isExpanded.wrappedValue.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .kerning(0.4)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                if let count, count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 12).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, 2)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     private func listHint(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 12))
             .foregroundStyle(.tertiary)
-            .padding(.horizontal, 14)
+            .padding(.leading, 20)
+            .padding(.trailing, 10)
             .padding(.vertical, 4)
     }
 
@@ -507,7 +518,7 @@ struct WorkspaceSidebar: View {
     /// config files sit at the group level, their glyph aligned with the
     /// group chevrons.
     private func fileRow(
-        url: URL, symbol: String, leadingInset: CGFloat = 14, iconWidth: CGFloat = 18
+        url: URL, symbol: String, leadingInset: CGFloat = 20, iconWidth: CGFloat = 18
     ) -> some View {
         Button { onOpenDoc(url) } label: {
             HStack(spacing: 9) {
@@ -577,17 +588,20 @@ struct WorkspaceSidebar: View {
     private var createClaudeRow: some View {
         Button(action: createAndOpenClaudeMd) {
             HStack(spacing: 9) {
-                Image(systemName: "plus")
-                    .font(.system(size: 13, weight: .semibold))
+                PhosphorIcon.plusFill
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 13, height: 13)
                     .foregroundStyle(.secondary)
-                    .frame(width: 14)
+                    .frame(width: 22)
                 Text("New CLAUDE.md")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 4)
-            .padding(.trailing, 10)
+            .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
@@ -622,13 +636,17 @@ struct WorkspaceSidebar: View {
             handleTileTap(tile)
         } label: {
             HStack(spacing: 11) {
-                Image(systemName: tile.symbol)
-                    .font(.system(size: 16, weight: .medium))
+                tile.icon
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
                     .foregroundStyle(selected ? Color.accentColor : Color.primary)
                     .frame(width: 22)
                 Text(tile.label)
                     .font(.system(size: 15))
                     .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 if tile == .flows {
                     let agg = flowsBoardAggregates
                     if agg.needsYou > 0 {
@@ -831,11 +849,11 @@ struct WorkspaceSidebar: View {
             runners: runners,
             start: { startRunnersForWorkspace(workspace) },
             stop: { stopAllRunning(on: workspace) },
-            openRunPane: { configure(workspace) },
             showLogs: { runnerName in
                 signals.pendingSourceFocus = runnerName
                 sidebarMode = .signals
-            }
+            },
+            configContent: { configContent(workspace) }
         )
     }
 
@@ -857,9 +875,13 @@ struct WorkspaceSidebar: View {
         store.activate(workspace.id)
     }
 
+    /// Route to run configuration: activate the workspace and ask the
+    /// context header's run cluster to open its popover on the Configure
+    /// tab (run config merged into the services popover, 2026-07-18).
     private func configure(_ workspace: Workspace) {
         store.activate(workspace.id)
-        sidebarMode = .run(workspaceID: workspace.id)
+        sidebarMode = .workspace
+        runners.pendingConfigureWorkspaceID = workspace.id
     }
 
     private func repoSubtitle(for workspace: Workspace) -> String? {
@@ -923,13 +945,7 @@ struct WorkspaceSidebar: View {
     /// it made "why can't I run a plan?" undiagnosable. Adding lives in
     /// the full-width `addRepositoryRow` at the bottom of the card.
     private var repositoriesHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text("Repositories")
-                .font(.system(size: 13, weight: .semibold))
-                .kerning(0.4)
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+        SidebarSectionHeader(title: "Repositories", icon: PhosphorIcon.packageFill) {
             if isWorking {
                 Image(systemName: "hourglass")
                     .font(.system(size: 12, weight: .semibold))
@@ -937,7 +953,6 @@ struct WorkspaceSidebar: View {
                     .help("Working…")
             }
         }
-        .padding(.vertical, 2)
     }
 
     @ViewBuilder
@@ -966,15 +981,13 @@ struct WorkspaceSidebar: View {
 
     // MARK: - Selection helpers
 
-    /// A workspace row is "active" when the user is either viewing its
-    /// terminal pane or its scoped Run page — both should highlight the
-    /// row so the user always sees which feature the right-hand pane is
-    /// bound to.
+    /// A workspace row is "active" when the user is viewing its terminal
+    /// pane — highlighted so the user always sees which feature the
+    /// right-hand pane is bound to.
     private func isWorkspaceActive(_ workspace: Workspace) -> Bool {
         if workspace.id != store.activeID { return false }
         switch sidebarMode {
         case .workspace: return true
-        case .run(let id): return id == workspace.id
         case .signals: return false
         case .flows: return false
         case .library: return false
@@ -1256,8 +1269,7 @@ struct WorkspaceSidebar: View {
     private func startRunnersForWorkspace(_ workspace: Workspace) {
         switch runners.startPlan(for: workspace) {
         case .openRunPane:
-            store.activate(workspace.id)
-            sidebarMode = .run(workspaceID: workspace.id)
+            configure(workspace)
         case .start(let toStart, let displacing):
             runners.executeStart(toStart)
             if let first = displacing.first {
@@ -1323,8 +1335,9 @@ struct WorkspaceSidebar: View {
             }
             Button {
                 runners.pendingIsolation = notice.runner
-                store.activate(notice.workspaceID)
-                sidebarMode = .run(workspaceID: notice.workspaceID)
+                if let workspace = store.workspaces.first(where: { $0.id == notice.workspaceID }) {
+                    configure(workspace)
+                }
                 withAnimation(.snappy(duration: 0.18)) { switchNotice = nil }
             } label: {
                 Label("Run both — give each worktree its own port", systemImage: "wand.and.stars")

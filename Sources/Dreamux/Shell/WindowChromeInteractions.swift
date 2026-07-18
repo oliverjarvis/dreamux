@@ -160,6 +160,19 @@ enum WindowChromeInteractions {
             }
             current = candidate.superview
         }
+        // AppKit's edge resize bands overlap the top strip: a mouse-down
+        // within a few points of the window's top or left edge is a
+        // resize grab (top edge, or the top-left corner diagonal), and
+        // consuming it to `performDrag` breaks resizing — the window
+        // moves instead. Leave those points to the frame's resize
+        // machinery.
+        if window.styleMask.contains(.resizable) {
+            let resizeBand: CGFloat = 6
+            if locationInWindow.y > window.frame.height - resizeBand
+                || locationInWindow.x < resizeBand {
+                return .content
+            }
+        }
         if locationInWindow.x <= railStripXBound,
            locationInWindow.y > window.frame.height - topStripHeight {
             return .chrome

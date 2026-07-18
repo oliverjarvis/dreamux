@@ -10,12 +10,15 @@ enum SidebarTile: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var symbol: String {
+    /// Phosphor fill-weight icon. Already resizable — size with `.frame`,
+    /// tint via `.renderingMode(.template)` + `foregroundStyle` at the
+    /// call site.
+    var icon: Image {
         switch self {
-        case .signals: return "waveform.path.ecg"
-        case .browser: return "globe"
-        case .flows: return "point.3.connected.trianglepath.dotted"
-        case .library: return "puzzlepiece.extension"
+        case .signals: return PhosphorIcon.airTrafficControlFill
+        case .browser: return PhosphorIcon.globeFill
+        case .flows: return PhosphorIcon.graphFill
+        case .library: return PhosphorIcon.puzzlePieceFill
         }
     }
 

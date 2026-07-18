@@ -30,7 +30,7 @@ final class ParsedRunnerTests: XCTestCase {
     // MARK: - Happy paths
 
     /// The exact two-runner shape the detect prompt instructs Claude to
-    /// write (RunSetupView.detectPrompt). If this stops round-tripping,
+    /// write (RunConfigCard.detectPrompt). If this stops round-tripping,
     /// Detect is broken for everyone.
     func testCanonicalDetectOutput() throws {
         let runners = try parse("canonical-detect.toml")
