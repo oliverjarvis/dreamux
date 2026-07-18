@@ -54,6 +54,13 @@ struct ContentView: View {
     @State private var appletActionError: String?
     /// ⌘K command palette visibility (also opened by the rail's search bar).
     @State private var showPalette = false
+
+    // MARK: Bottom prompt composer
+    /// Collapsed state persists across launches — reopened via the chip.
+    @AppStorage("promptComposerHidden") private var composerHidden = false
+    @State private var composerText = ""
+    /// Explicit composer target; nil is Auto (active workspace, else main).
+    @State private var composerTargetID: UUID?
     /// Rebuilt fresh on every palette open so results reflect live stores.
     @State private var paletteModel: PaletteModel?
     /// Run-the-plan sheet fired from a workspace's Overview (Mode A's lime
@@ -153,6 +160,7 @@ struct ContentView: View {
             // restores its own pane sizes and OVERFLOWS whatever width
             // SwiftUI proposes (it ate the card's trailing gutter and
             // rounded corners; proven with a red-backdrop probe).
+            VStack(spacing: 0) {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     // The project identity heads its own column: the rail
@@ -183,7 +191,8 @@ struct ContentView: View {
                         applets: session.applets,
                         appLibrary: session.appLibrary,
                         appletSessionProvider: { session.appletSession(for: $0) },
-                        closeAppletSession: { session.closeAppletSession(id: $0) }
+                        closeAppletSession: { session.closeAppletSession(id: $0) },
+                        configContent: { workspace in AnyView(configCard(for: workspace)) }
                     )
                 }
                 .frame(width: workItemsWidth)
@@ -227,6 +236,11 @@ struct ContentView: View {
                     .animation(.snappy(duration: 0.22), value: showFileTree)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            // The prompt composer spans the card's full width at its
+            // bottom — reachable from every page of the project.
+            composerInset
             }
             // ONE card holding the work-items column AND the content/tabs
             // together (connected, no gutter between them) — full height
@@ -444,27 +458,105 @@ struct ContentView: View {
                 e2eBridge?.paletteModel = nil
             }
         }
-        .overlay {
-            if showPalette, let paletteModel {
-                CommandPaletteView(model: paletteModel, onDismiss: { showPalette = false })
+        .overlay { paletteOverlay }
+    }
+
+    @ViewBuilder
+    private var paletteOverlay: some View {
+        if showPalette, let paletteModel {
+            CommandPaletteView(model: paletteModel, onDismiss: { showPalette = false })
+        }
+    }
+
+    /// The window-bottom prompt bar (or its collapsed reopen chip) —
+    /// extracted from the body chain so the type checker stays fast.
+    @ViewBuilder
+    private var composerInset: some View {
+        Group {
+            if composerHidden {
+                PromptComposerReopenChip {
+                    withAnimation(Self.composerSpring) { composerHidden = false }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                PromptComposer(
+                    text: $composerText,
+                    targetID: $composerTargetID,
+                    workspaces: store.workspaces,
+                    onSend: { sendComposerPrompt() },
+                    onHide: {
+                        withAnimation(Self.composerSpring) { composerHidden = true }
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+        }
+        // One springy collapse/expand: the bar slides toward the card's
+        // bottom edge while the pane above relaxes into the space. The
+        // toggles run in a `withAnimation(composerSpring)` transaction so
+        // the surrounding layout animates with the transition.
+        .animation(Self.composerSpring, value: composerHidden)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .padding(.top, 6)
+    }
+
+    private static let composerSpring: Animation = .snappy(duration: 0.28, extraBounce: 0.12)
+
+    /// Send the composer's prompt to its target workspace's claude tab.
+    /// Auto (no explicit target) resolves to the active workspace when
+    /// one is showing, else `main`, else the first workspace. A fresh
+    /// tab launches claude seeded with the prompt; an existing one gets
+    /// the text typed into its live REPL.
+    private func sendComposerPrompt() {
+        let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let explicit = composerTargetID.flatMap { id in
+            store.workspaces.first { $0.id == id }
+        }
+        let auto = (sidebarMode == .workspace ? store.activeWorkspace : nil)
+            ?? store.workspaces.first(where: \.isMain)
+            ?? store.workspaces.first
+        guard let workspace = explicit ?? auto else { return }
+        composerText = ""
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        let session = store.session(for: workspace)
+        let cwd = workspace.workingDirectory ?? repoStore.project.rootPath.path
+        guard let (tab, reused) = session.reuseOrOpenComposerTab(at: cwd)
+        else { return }
+        tab.startIfNeeded()
+        if reused {
+            ClaudePromptDriver.type(text, into: tab)
+        } else {
+            ClaudePromptDriver.send(text, into: tab)
         }
     }
 
     @ViewBuilder
     private var mainPane: some View {
+        mainPaneContent
+            // Always-mounted consumer for run-config handoffs (e2e
+            // detect, the isolate alert) — they must work whether or not
+            // the services popover is open.
+            .background(RunConfigHandoffConsumer(
+                bridge: e2eBridge,
+                runners: runners,
+                onDetect: {
+                    guard let ws = store.activeWorkspace ?? store.workspaces.first else { return }
+                    RunConfigActions.detect(project: repoStore.project, session: store.session(for: ws))
+                },
+                onIsolate: { runner in
+                    guard let ws = store.activeWorkspace ?? store.workspaces.first else { return }
+                    RunConfigActions.isolate(runner, project: repoStore.project, session: store.session(for: ws))
+                }))
+    }
+
+    @ViewBuilder
+    private var mainPaneContent: some View {
         switch sidebarMode {
         case .workspace:
             WorkspaceTerminalContainer(store: store, overview: overviewDependencies)
-        case .run(let workspaceID):
-            RunSetupView(
-                project: repoStore.project,
-                repoStore: repoStore,
-                runConfig: runConfig,
-                runners: runners,
-                signals: signals,
-                scope: store.workspaces.first(where: { $0.id == workspaceID })
-            )
         case .signals:
             SignalsView(signals: signals, runners: runners, projectDir: repoStore.project.rootPath.path)
         case .flows:
@@ -739,7 +831,7 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         // Shared band height with contextHeaderRow, so the bottom
         // hairline runs continuously across both columns.
-        .frame(height: 44)
+        .frame(height: 52)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
     }
@@ -751,8 +843,10 @@ struct ContentView: View {
     private var contextHeaderRow: some View {
         HStack(spacing: 8) {
             Text(activeContextTitle ?? " ")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
+                // Same type as projectHeaderRow's title — the two strips
+                // form one band and their titles should read as peers.
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
                 .lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 0)
             // Run cluster: play/stop for the active workspace's
@@ -764,13 +858,12 @@ struct ContentView: View {
                     runners: runners,
                     start: { startHeaderRunners(for: workspace) },
                     stop: { stopHeaderRunners(for: workspace) },
-                    openRunPane: {
-                        sidebarMode = .run(workspaceID: workspace.id)
-                    },
                     showLogs: { runnerName in
                         signals.pendingSourceFocus = runnerName
                         sidebarMode = .signals
-                    })
+                    },
+                    configContent: { AnyView(configCard(for: workspace)) },
+                    consumesConfigureRequests: true)
             }
             // Git chip: the active workspace's worktree branch, HEAD
             // short-SHA, and working-tree diff totals. Clicking opens
@@ -858,7 +951,7 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         // Same height as projectHeaderRow — the two header strips form
         // one continuous band across the card.
-        .frame(height: 44)
+        .frame(height: 52)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Divider() }
     }
@@ -897,10 +990,19 @@ struct ContentView: View {
     private func startHeaderRunners(for workspace: Workspace) {
         switch runners.startPlan(for: workspace) {
         case .openRunPane:
-            sidebarMode = .run(workspaceID: workspace.id)
+            focusRunCard(for: workspace)
         case .start(let toStart, _):
             runners.executeStart(toStart)
         }
+    }
+
+    /// Route to run configuration: activate the workspace and ask the
+    /// context header's run cluster to open its popover on the Configure
+    /// tab (run config merged into the services popover, 2026-07-18).
+    private func focusRunCard(for workspace: Workspace) {
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        runners.pendingConfigureWorkspaceID = workspace.id
     }
 
     /// Header stop: every live instance on this workspace's worktree —
@@ -1088,15 +1190,24 @@ struct ContentView: View {
             runners: runners,
             start: { startHeaderRunners(for: workspace) },
             stop: { stopHeaderRunners(for: workspace) },
-            openRunPane: {
-                store.activate(workspace.id)
-                sidebarMode = .run(workspaceID: workspace.id)
-            },
             showLogs: { runnerName in
                 signals.pendingSourceFocus = runnerName
                 sidebarMode = .signals
-            }
+            },
+            configContent: { AnyView(configCard(for: workspace)) }
         )
+    }
+
+    /// The services popover's Configure tab for a workspace — built here
+    /// because this view owns the stores.
+    private func configCard(for workspace: Workspace) -> some View {
+        RunConfigCard(
+            project: repoStore.project,
+            session: store.session(for: workspace),
+            repoStore: repoStore,
+            runConfig: runConfig,
+            runners: runners,
+            signals: signals)
     }
 
     /// Mode B's "Plan something here" kickoff — the same shared
@@ -1430,9 +1541,37 @@ struct ContentView: View {
 /// shows the project-wide log stream; `.flows` shows the Flows overview
 /// board; `.library` shows the Skills & MCPs inventory page; `.app` hosts a
 /// project applet's preview (and, in Edit mode, its builder agent).
+/// Always-mounted consumer for run-config handoffs — the e2e
+/// `detectRunConfig` flag and the isolate alert's pending runner — so
+/// they fire regardless of any popover being open.
+private struct RunConfigHandoffConsumer: View {
+    let bridge: E2EBridge?
+    @Bindable var runners: RunnerManager
+    let onDetect: () -> Void
+    let onIsolate: (ParsedRunner) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear(perform: consume)
+            .onChange(of: bridge?.pendingDetect) { _, _ in consume() }
+            .onChange(of: runners.pendingIsolation) { _, _ in consume() }
+    }
+
+    private func consume() {
+        if let bridge, bridge.pendingDetect {
+            bridge.pendingDetect = false
+            onDetect()
+        }
+        if let runner = runners.pendingIsolation {
+            runners.pendingIsolation = nil
+            onIsolate(runner)
+        }
+    }
+}
+
 enum SidebarMode: Hashable {
     case workspace
-    case run(workspaceID: UUID)
     case signals
     case flows
     case library

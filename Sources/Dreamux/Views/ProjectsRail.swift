@@ -22,6 +22,15 @@ struct ProjectsRail: View {
     /// entry point to the same overlay).
     let onOpenPalette: () -> Void
 
+    /// Wordmark banner shown above the search bar. Loaded once — a loose
+    /// bundle resource, not an asset catalog, so `Image(_:bundle:)` can't
+    /// find it by name.
+    private static let wordmark = Bundle.module.image(forResource: "DreamuxWordmark")
+
+    /// Sampled from DreamuxWordmark.png's background (sRGB #F4BDC3) so the
+    /// banner box reads as one continuous surface behind the smaller image.
+    private static let wordmarkPink = Color(.sRGB, red: 0.9604, green: 0.7419, blue: 0.7686)
+
     @Environment(\.openWindow) private var openWindow
     @State private var showCreate = false
     @State private var pendingDelete: Project?
@@ -61,7 +70,14 @@ struct ProjectsRail: View {
                 showCreate = true
             } label: {
                 HStack {
-                    Label("New Project", systemImage: "plus")
+                    Label {
+                        Text("New Project")
+                    } icon: {
+                        PhosphorIcon.plusFill
+                            .renderingMode(.template)
+                            .scaledToFit()
+                            .frame(width: 14, height: 14)
+                    }
                     Spacer(minLength: 0)
                     Text("⌘N")
                         .font(.system(size: 12, weight: .medium))
@@ -83,7 +99,14 @@ struct ProjectsRail: View {
                     openWindow(id: "app-studio")
                 } label: {
                     HStack {
-                        Label("Add global applet", systemImage: "plus")
+                        Label {
+                            Text("Add global applet")
+                        } icon: {
+                            PhosphorIcon.plusFill
+                                .renderingMode(.template)
+                                .scaledToFit()
+                                .frame(width: 14, height: 14)
+                        }
                         Spacer(minLength: 0)
                         Text("⇧⌘L")
                             .font(.system(size: 12, weight: .medium))
@@ -104,6 +127,38 @@ struct ProjectsRail: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 Color.clear.frame(height: 30)
+                if let wordmark = Self.wordmark {
+                    // The box keeps the photo's full footprint; the image
+                    // shrinks inside it and blends because the fill is
+                    // sampled from the photo's own background.
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Self.wordmarkPink)
+                        .aspectRatio(wordmark.size.width / wordmark.size.height,
+                                     contentMode: .fit)
+                        .overlay(
+                            Image(nsImage: wordmark)
+                                .resizable()
+                                .scaledToFit()
+                                // Feathered mask: the photo's background
+                                // isn't perfectly flat, so a hard edge
+                                // shows against the sampled fill — fade
+                                // the last few points out instead.
+                                .mask(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .padding(6)
+                                        .blur(radius: 6)
+                                )
+                                .scaleEffect(0.6)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color.secondary.opacity(0.3))
+                        )
+                        .accessibilityLabel("Dreamux")
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 8)
+                }
                 Button(action: onOpenPalette) {
                     HStack(spacing: 6) {
                         Image(systemName: "magnifyingglass")

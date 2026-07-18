@@ -56,37 +56,14 @@ struct TabItemView: View {
 
     @ViewBuilder
     private var tabBackground: some View {
-        if isSelected {
-            // The active tab is a top-rounded squircle whose flat bottom sits
-            // flush against the content. Filled with the content-area color
-            // and drawn opaquely to the bar's bottom edge, it covers the
-            // bar's baseline so tab + content read as one continuous surface.
-            UnevenRoundedRectangle(
-                topLeadingRadius: TabBarMetrics.activeCornerRadius,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: TabBarMetrics.activeCornerRadius,
-                style: .continuous
-            )
-            .fill(TabBarColors.activeTabBackground)
-            .overlay(
-                UnevenRoundedRectangle(
-                    topLeadingRadius: TabBarMetrics.activeCornerRadius,
-                    bottomLeadingRadius: 0,
-                    bottomTrailingRadius: 0,
-                    topTrailingRadius: TabBarMetrics.activeCornerRadius,
-                    style: .continuous
-                )
-                .fill(TabBarColors.activeTabLift)
-            )
-        } else {
-            // Inactive tabs are floating squircle buttons: transparent until
-            // hovered, then a soft wash. No separators, no accent line.
-            RoundedRectangle(cornerRadius: TabBarMetrics.inactiveCornerRadius, style: .continuous)
-                .fill(isHovered ? TabBarColors.hoveredTabBackground : Color.clear)
-                .padding(.vertical, TabBarMetrics.inactiveVerticalInset)
-                .padding(.horizontal, TabBarMetrics.inactiveHorizontalInset)
-        }
+        // Every tab is a floating squircle button; selection is the same
+        // shape as hover, just a clearly stronger wash. No separators, no
+        // accent line, no browser-style attached tab.
+        RoundedRectangle(cornerRadius: TabBarMetrics.inactiveCornerRadius, style: .continuous)
+            .fill(isSelected ? TabBarColors.selectedTabBackground
+                : (isHovered ? TabBarColors.hoveredTabBackground : Color.clear))
+            .padding(.vertical, TabBarMetrics.inactiveVerticalInset)
+            .padding(.horizontal, TabBarMetrics.inactiveHorizontalInset)
     }
 
     // MARK: - Close Button / Dirty Indicator

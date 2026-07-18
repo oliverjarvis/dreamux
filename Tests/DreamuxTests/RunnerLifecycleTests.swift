@@ -643,7 +643,7 @@ final class RunnerLifecycleTests: XCTestCase {
     // MARK: - 11. startPinned shares fixed-port switch semantics
 
     /// Regression test for the header popover's per-row Start (and
-    /// RunSetupView's scoped Start): `startPinned` must displace a
+    /// RunConfigCard's scoped Start): `startPinned` must displace a
     /// fixed-port runner's live instance on another worktree rather
     /// than trip the bind probe's "port in use" failure — the same
     /// switch semantics `executeStart`/`startPlan` already gave the
@@ -792,7 +792,7 @@ final class RunnerLifecycleTests: XCTestCase {
     }
 
     /// One `[[runners]]` block in the exact shape `ParsedRunner.parseAll`
-    /// understands (see RunSetupView's documented run.toml contract).
+    /// understands (see RunConfigCard's documented run.toml contract).
     private func runnerBlock(
         name: String,
         cwd: String,

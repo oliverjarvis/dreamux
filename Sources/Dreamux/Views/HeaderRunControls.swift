@@ -1,5 +1,12 @@
 import SwiftUI
 
+private struct ConfigureHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// The context header's run cluster: a play/stop capsule and a services
 /// popover, sitting left of the git chip. Status derives from the
 /// shared `RunnerManager` (via the tested aggregation in
@@ -14,11 +21,27 @@ struct HeaderRunControls: View {
     let runners: RunnerManager
     let start: () -> Void
     let stop: () -> Void
-    let openRunPane: () -> Void
     let showLogs: (_ runnerName: String) -> Void
+    /// The popover's Configure tab — run configuration (Detect, runner
+    /// rows, run.toml) merged into this cluster (2026-07-18). Built by
+    /// the owner, which holds the stores; `AnyView` keeps this type
+    /// non-generic for the `makeRunControls` signatures.
+    let configContent: () -> AnyView
+    /// True for the context header's instance only: it consumes
+    /// `RunnerManager.pendingConfigureWorkspaceID` so every "Run
+    /// Settings" entry point opens exactly one popover.
+    var consumesConfigureRequests: Bool = false
+
+    enum PopoverTab {
+        case services, configure
+    }
 
     @State private var showServices = false
+    @State private var popoverTab: PopoverTab = .services
     @State private var hoveredRowID: String?
+    /// The Configure tab content's measured natural height — the popover
+    /// hugs it up to a 520pt cap (see the tab's ScrollView).
+    @State private var configureHeight: CGFloat = 0
 
     /// Fixed height of the outlined control so its two segments and the
     /// divider between them line up.
@@ -49,6 +72,23 @@ struct HeaderRunControls: View {
         .popover(isPresented: $showServices, arrowEdge: .bottom) {
             servicesPopover
         }
+        .onAppear(perform: consumeConfigureRequestIfAny)
+        .onChange(of: runners.pendingConfigureWorkspaceID) { _, _ in
+            consumeConfigureRequestIfAny()
+        }
+    }
+
+    /// Open the popover on the Configure tab.
+    private func openConfigure() {
+        popoverTab = .configure
+        showServices = true
+    }
+
+    private func consumeConfigureRequestIfAny() {
+        guard consumesConfigureRequests,
+              runners.pendingConfigureWorkspaceID == workspace.id else { return }
+        runners.pendingConfigureWorkspaceID = nil
+        openConfigure()
     }
 
     // MARK: - Segments
@@ -56,7 +96,7 @@ struct HeaderRunControls: View {
     private func playSegment(_ summary: HeaderRunSummary) -> some View {
         Button {
             if !summary.hasConfig {
-                openRunPane()
+                openConfigure()
             } else if summary.runningCount > 0 {
                 stop()
             } else {
@@ -102,7 +142,12 @@ struct HeaderRunControls: View {
 
     private var chevronButton: some View {
         Button {
-            showServices.toggle()
+            if showServices {
+                showServices = false
+            } else {
+                popoverTab = .services
+                showServices = true
+            }
         } label: {
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .bold))
@@ -117,6 +162,70 @@ struct HeaderRunControls: View {
     // MARK: - Popover
 
     private var servicesPopover: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            tabPicker
+                .padding(8)
+            Divider()
+            if popoverTab == .services {
+                servicesTab
+            } else {
+                // The Configure tab can outgrow a popover — scroll it,
+                // sized to the content's MEASURED height capped at 520.
+                // A scroll view reports no ideal height of its own, so a
+                // flexible frame kept the Services tab's measurement
+                // (clipping), and a fixed one left dead space when the
+                // pane was short — hence the preference-key measure.
+                ScrollView(showsIndicators: false) {
+                    configContent()
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: ConfigureHeightKey.self,
+                                    value: proxy.size.height)
+                            })
+                }
+                .onPreferenceChange(ConfigureHeightKey.self) { height in
+                    // Ignore the 0 the preference collapses to when this
+                    // branch leaves the tree, and sub-point jitter — both
+                    // caused a re-render storm during the popover's
+                    // resize that swallowed tab clicks.
+                    guard height > 0, abs(height - configureHeight) > 1 else { return }
+                    configureHeight = height
+                }
+                .frame(height: min(max(configureHeight, 120), 520))
+            }
+        }
+        .frame(width: 360)
+    }
+
+    /// Services / Configure — two tabs over one popover, because
+    /// running services and configuring how they run are the same job.
+    private var tabPicker: some View {
+        HStack(spacing: 4) {
+            tabButton("Services", .services)
+            tabButton("Configure", .configure)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func tabButton(_ title: String, _ tab: PopoverTab) -> some View {
+        Button {
+            popoverTab = tab
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(popoverTab == tab ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(popoverTab == tab ? Color.primary.opacity(0.08) : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var servicesTab: some View {
         let active = runners.serviceRows(for: workspace)
         let other = runners.otherWorktreeRows(excluding: workspace)
         return VStack(alignment: .leading, spacing: 0) {
@@ -145,7 +254,6 @@ struct HeaderRunControls: View {
             Divider()
             footer
         }
-        .frame(width: 320)
     }
 
     /// One service line: status dot · name · (branch when out of scope)
@@ -284,8 +392,7 @@ struct HeaderRunControls: View {
             }
             Spacer(minLength: 0)
             Button {
-                showServices = false
-                openRunPane()
+                popoverTab = .configure
             } label: {
                 Label("Edit run config", systemImage: "slider.horizontal.3")
             }

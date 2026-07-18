@@ -35,6 +35,13 @@ enum TabBarColors {
         Color(nsColor: .labelColor).opacity(0.08)
     }
 
+    /// The selected tab is the same floating squircle as a hovered one,
+    /// just a clearly stronger wash — selection reads by weight, not by a
+    /// different shape.
+    static var selectedTabBackground: Color {
+        Color(nsColor: .labelColor).opacity(0.14)
+    }
+
     static var inactiveTabBackground: Color {
         .clear
     }

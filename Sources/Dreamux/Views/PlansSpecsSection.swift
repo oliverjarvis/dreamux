@@ -126,16 +126,13 @@ struct PlansSpecsSection: View {
         VStack(alignment: .leading, spacing: 4) {
             header
             if layout.plansExpanded {
-                mainRow
-                queueSection()
-                if docStore.plans.isEmpty && docStore.unpairedSpecs.isEmpty
-                    && docStore.otherDocs.isEmpty {
-                    emptyState
-                } else {
+                SidebarSectionChildren {
+                    mainRow
+                    queueSection()
                     rows
+                    newWorkspaceRow
+                    projectGraphMiniMap
                 }
-                newWorkspaceRow
-                projectGraphMiniMap
             }
         }
         .onAppear { docStore.startWatching() }
@@ -175,42 +172,30 @@ struct PlansSpecsSection: View {
     // MARK: - Pieces
 
     private var header: some View {
-        // Just the collapse control now — no per-header action icons. Docs
+        // Just the collapse control — no per-header action icons. Docs
         // auto-rescan via `docStore.startWatching()` (no manual refresh), and
         // "New workspace" lives as a labelled row at the foot of the list.
-        Button {
-            withAnimation(.snappy(duration: 0.18)) { layout.plansExpanded.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(layout.plansExpanded ? 90 : 0))
-                Text("Workspaces")
-                    .font(.system(size: 13, weight: .semibold))
-                    .kerning(0.4)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, 2)
+        SidebarSectionHeader(
+            title: "Workspaces", icon: PhosphorIcon.gitBranchFill,
+            isExpanded: $layout.plansExpanded)
     }
 
-    /// Borderless "＋ New workspace" row at the foot of the list — a plain
-    /// plus (no circle, no box), highlighting only on hover, mirroring the
+    /// Borderless "＋ New workspace" row at the foot of the list — the
+    /// Phosphor plus-square glyph, highlighting only on hover, mirroring the
     /// Repositories section's add row. Opens a planning session, which mints
     /// the new run's workspace.
     private var newWorkspaceRow: some View {
         Button(action: onNewPlan) {
             HStack(spacing: 11) {
-                Image(systemName: "plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 28, height: 28)
+                PhosphorIcon.plusFill
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
+                    .frame(width: 22, height: 22)
                 Text("New workspace")
                     .font(.system(size: 15))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
                 Text("⌘P")
                     .font(.system(size: 12, weight: .medium))
@@ -229,6 +214,7 @@ struct PlansSpecsSection: View {
             }
         }
         .onHover { newWorkspaceHovered = $0 }
+        .help("Starts a planning session that writes the spec and plan to this project's docs/ folder, then mints the workspace (⌘P)")
     }
 
     /// A tiny "Dependencies" preview of the project's plan graph, at the
@@ -279,8 +265,10 @@ struct PlansSpecsSection: View {
             onOpenMain()
         } label: {
             HStack(spacing: 9) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 14, weight: .semibold))
+                PhosphorIcon.gitForkFill
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
                     .foregroundStyle(mainWorktreeIssue == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.orange))
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
@@ -306,7 +294,8 @@ struct PlansSpecsSection: View {
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(mainWorkspaceActive ? Color.primary.opacity(0.08)
-                          : (mainRowHovered ? Color.primary.opacity(0.04) : .clear)))
+                          : (mainRowHovered ? Color.primary.opacity(0.04) : .clear))
+                    .padding(.horizontal, 4))
         }
         .buttonStyle(.plain)
         .onHover { mainRowHovered = $0 }
@@ -318,14 +307,6 @@ struct PlansSpecsSection: View {
     /// its run controls visible without hover while something is running.
     private func runnersLive(for workspace: Workspace) -> Bool {
         !runners.runningRunners(onBranch: workspace.name).isEmpty
-    }
-
-    private var emptyState: some View {
-        Text("No specs or plans yet. “＋” starts a planning session that writes them to this project's docs/ folder.")
-            .font(.system(size: 12))
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 4)
     }
 
     @ViewBuilder

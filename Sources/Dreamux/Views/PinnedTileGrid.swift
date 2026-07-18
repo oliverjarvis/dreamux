@@ -45,8 +45,10 @@ struct PinnedTileGrid: View {
             onTap(tile)
         } label: {
             VStack {
-                Image(systemName: tile.symbol)
-                    .font(.system(size: 20, weight: .semibold))
+                tile.icon
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
                     .foregroundStyle(tile.tint)
             }
             .frame(maxWidth: .infinity)

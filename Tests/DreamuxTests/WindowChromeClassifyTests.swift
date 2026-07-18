@@ -120,15 +120,35 @@ final class WindowChromeClassifyTests: XCTestCase {
         let (window, boundary) = makeWindow()
         let plain = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: window.frame.height))
         boundary.addSubview(plain)
-        // 5pt below the physical top, x = 50 — inside the rail's 210pt
-        // column, same zone the projects rail's Search-button spacer
-        // occupies.
-        let point = NSPoint(x: 50, y: window.frame.height - 5)
+        // 10pt below the physical top (clear of the 6pt resize band),
+        // x = 50 — inside the rail's 210pt column, same zone the
+        // projects rail's Search-button spacer occupies.
+        let point = NSPoint(x: 50, y: window.frame.height - 10)
         let hit = boundary.hitTest(point)!
         XCTAssertEqual(
             WindowChromeInteractions.classify(
                 hit: hit, locationInWindow: point, window: window, boundary: boundary),
             .chrome)
+    }
+
+    /// The top few points belong to AppKit's edge-resize band: grabbing
+    /// the top edge (or the top-left corner diagonal) must resize, not
+    /// start a window drag — classifying them chrome consumed the
+    /// mouse-down and moved the window instead.
+    func testResizeBandAtTopEdgeIsContent() {
+        let (window, boundary) = makeWindow()
+        let plain = NSView(frame: NSRect(x: 0, y: 0, width: window.frame.width, height: window.frame.height))
+        boundary.addSubview(plain)
+        for point in [
+            NSPoint(x: 50, y: window.frame.height - 3),   // top edge
+            NSPoint(x: 3, y: window.frame.height - 3),    // top-left corner
+        ] {
+            let hit = boundary.hitTest(point)!
+            XCTAssertEqual(
+                WindowChromeInteractions.classify(
+                    hit: hit, locationInWindow: point, window: window, boundary: boundary),
+                .content)
+        }
     }
 
     /// Same top-strip y as the previous case, but x is past the rail's

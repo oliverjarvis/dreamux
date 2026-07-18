@@ -26,6 +26,9 @@ struct FileTreePanel: View {
     /// — opening from inside the sheet's confirm action would interleave
     /// tab creation with the dismissal transaction.
     @State private var pendingOpen: URL?
+    /// Per-root git status (repo-relative path → change kind) for the
+    /// rows' badges; reloaded with the tree.
+    @State private var gitStatuses: [URL: [String: GitOperations.FileChangeKind]] = [:]
 
     private var roots: [FileNode] {
         tree.roots(for: store.activeWorkspace, repositories: repoStore.repositories)
@@ -34,26 +37,38 @@ struct FileTreePanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             if roots.isEmpty {
                 emptyState
             } else {
-                List {
-                    ForEach(roots) { root in
-                        FileTreeRow(
-                            node: root,
-                            rootURL: root.url,
-                            tree: tree,
-                            onOpenFile: onOpenFile,
-                            onAction: { handle($0, on: $1, rootURL: root.url) })
+                // Custom rows, not a List: every row shares one font
+                // size, one row height, and the app's standard hover
+                // wash — and carries a git badge the sidebar list style
+                // couldn't.
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(roots) { root in
+                            FileTreeRow(
+                                node: root,
+                                rootURL: root.url,
+                                depth: 0,
+                                tree: tree,
+                                statuses: gitStatuses[root.url] ?? [:],
+                                onOpenFile: onOpenFile,
+                                onAction: { handle($0, on: $1, rootURL: root.url) })
+                        }
                     }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 6)
                 }
-                .listStyle(.sidebar)
-                // No material of its own — the tree lives inside the
-                // card and shares its fill/transparency.
-                .scrollContentBackground(.hidden)
                 .id(reloadToken)
             }
+        }
+        .task(id: statusReloadKey) {
+            var next: [URL: [String: GitOperations.FileChangeKind]] = [:]
+            for root in roots {
+                next[root.url] = await GitOperations.fileStatuses(in: root.url)
+            }
+            gitStatuses = next
         }
         .sheet(item: $renaming) { node in
             NameSheet(
@@ -87,6 +102,12 @@ struct FileTreePanel: View {
                 }
             }
         }
+    }
+
+    /// Reload git badges whenever the tree reloads or the root set
+    /// changes worktrees.
+    private var statusReloadKey: String {
+        reloadToken.uuidString + roots.map(\.url.path).joined(separator: "|")
     }
 
     private func handle(_ action: FileTreeAction, on node: FileNode, rootURL: URL) {
@@ -134,10 +155,8 @@ struct FileTreePanel: View {
     private var header: some View {
         HStack {
             Text("Files")
-                .font(.system(size: 11, weight: .semibold))
-                .kerning(0.6)
-                .textCase(.uppercase)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
             Spacer()
             Button { reloadToken = UUID() } label: {
                 Image(systemName: "arrow.clockwise")
@@ -148,9 +167,13 @@ struct FileTreePanel: View {
             .help("Refresh")
         }
         .padding(.horizontal, 12)
-        // Bonsplit's TabBarMetrics.barHeight — the FILES strip sits next
-        // to the tab bar and their bottom hairlines must align.
-        .frame(height: 33)
+        // Bonsplit's TabBarMetrics.barHeight (40) — the Files strip sits
+        // next to the tab bar and their bottom hairlines must align. The
+        // hairline rides INSIDE the 40 (an overlay, not a stacked
+        // Divider) for the same reason: stacked, it lands at 40..41 and
+        // reads one pixel lower than the tab bar's.
+        .frame(height: 40)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     @ViewBuilder
@@ -179,67 +202,159 @@ private struct CreateTarget: Identifiable {
     var id: String { "\(directory.path)|\(isDirectory)" }
 }
 
-/// One row in the tree. Directories are lazy `DisclosureGroup`s (children
-/// read from disk only while expanded); files are buttons that open an
-/// editor tab. Repo roots default to expanded. Every row drags as its
-/// file URL and carries the file-manager context menu.
+/// One row in the tree. Every row — repo root, folder, file — shares one
+/// 14pt label, one row height, and the app's standard hover wash;
+/// folders expand in place (children read from disk only while
+/// expanded), files open an editor tab. A trailing badge carries the
+/// row's git state: a status letter for files, a dot for containers
+/// with changed descendants. Every row drags as its file URL and
+/// carries the file-manager context menu.
 private struct FileTreeRow: View {
     let node: FileNode
     /// The repo worktree root this row lives under (Copy Relative Path's
-    /// base). Repo roots pass their own url down.
+    /// base and the key into `statuses`). Repo roots pass their own url
+    /// down.
     let rootURL: URL
+    let depth: Int
     let tree: FileTreeStore
+    /// Repo-relative path → change kind for this row's worktree.
+    let statuses: [String: GitOperations.FileChangeKind]
     let onOpenFile: (URL) -> Void
     let onAction: (FileTreeAction, FileNode) -> Void
     @State private var expanded: Bool
+    @State private var isHovered = false
 
     init(
         node: FileNode,
         rootURL: URL,
+        depth: Int,
         tree: FileTreeStore,
+        statuses: [String: GitOperations.FileChangeKind],
         onOpenFile: @escaping (URL) -> Void,
         onAction: @escaping (FileTreeAction, FileNode) -> Void
     ) {
         self.node = node
         self.rootURL = rootURL
+        self.depth = depth
         self.tree = tree
+        self.statuses = statuses
         self.onOpenFile = onOpenFile
         self.onAction = onAction
         _expanded = State(initialValue: node.isRepoRoot)
     }
 
     var body: some View {
-        if node.isDirectory {
-            DisclosureGroup(isExpanded: $expanded) {
-                if expanded {
-                    ForEach(tree.children(of: node)) { child in
-                        FileTreeRow(
-                            node: child,
-                            rootURL: rootURL,
-                            tree: tree,
-                            onOpenFile: onOpenFile,
-                            onAction: onAction)
+        VStack(alignment: .leading, spacing: 1) {
+            row
+            if node.isDirectory, expanded {
+                ForEach(tree.children(of: node)) { child in
+                    FileTreeRow(
+                        node: child,
+                        rootURL: rootURL,
+                        depth: depth + 1,
+                        tree: tree,
+                        statuses: statuses,
+                        onOpenFile: onOpenFile,
+                        onAction: onAction)
+                }
+            }
+        }
+    }
+
+    private var row: some View {
+        Button {
+            if node.isDirectory {
+                withAnimation(.snappy(duration: 0.18)) { expanded.toggle() }
+            } else {
+                onOpenFile(node.url)
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Group {
+                    if node.isDirectory {
+                        PhosphorIcon.caretRightFill
+                            .renderingMode(.template)
+                            .scaledToFit()
+                            .frame(width: 9, height: 9)
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                    } else {
+                        Color.clear
                     }
                 }
-            } label: {
-                Label(node.name, systemImage: node.isRepoRoot ? "shippingbox.fill" : "folder.fill")
-                    .font(.callout)
+                .frame(width: 12, height: 12)
+
+                Image(systemName: iconName)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+
+                Text(node.name)
+                    .font(.system(size: 14, weight: node.isRepoRoot ? .medium : .regular))
+                    .foregroundStyle(nameColor)
                     .lineLimit(1)
-                    .contentShape(Rectangle())
-                    .onDrag { NSItemProvider(object: node.url as NSURL) }
-                    .contextMenu { menu }
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 4)
+
+                statusBadge
             }
-        } else {
-            Button { onOpenFile(node.url) } label: {
-                Label(node.name, systemImage: "doc.text")
-                    .font(.callout)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+            .padding(.leading, CGFloat(depth) * 14 + 6)
+            .padding(.trailing, 8)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if isHovered {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
             }
-            .buttonStyle(.plain)
-            .onDrag { NSItemProvider(object: node.url as NSURL) }
-            .contextMenu { menu }
+        }
+        .onHover { isHovered = $0 }
+        .onDrag { NSItemProvider(object: node.url as NSURL) }
+        .contextMenu { menu }
+    }
+
+    private var iconName: String {
+        if node.isRepoRoot { return "shippingbox.fill" }
+        return node.isDirectory ? "folder.fill" : "doc.text"
+    }
+
+    /// This row's path relative to its worktree root — the key shape
+    /// `git status --porcelain` reports.
+    private var relativePath: String {
+        FileTreeOperations.relativePath(of: node.url, under: rootURL)
+    }
+
+    private var fileChange: GitOperations.FileChangeKind? {
+        node.isDirectory ? nil : statuses[relativePath]
+    }
+
+    /// A folder "contains changes" when any porcelain path lives under
+    /// it; the repo root rolls up the whole worktree.
+    private var containsChanges: Bool {
+        guard node.isDirectory else { return false }
+        if node.isRepoRoot { return !statuses.isEmpty }
+        let prefix = relativePath + "/"
+        return statuses.keys.contains { $0.hasPrefix(prefix) }
+    }
+
+    private var nameColor: Color {
+        if let fileChange { return fileChange.tint }
+        return .primary
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        if let fileChange {
+            Text(fileChange.letter)
+                .font(.system(size: 11, weight: .semibold).monospaced())
+                .foregroundStyle(fileChange.tint)
+        } else if containsChanges {
+            Circle()
+                .fill(Color.orange.opacity(0.75))
+                .frame(width: 6, height: 6)
         }
     }
 
@@ -266,6 +381,28 @@ private struct FileTreeRow: View {
             Divider()
             Button("Rename…") { onAction(.rename, node) }
             Button("Move to Trash", role: .destructive) { onAction(.trash, node) }
+        }
+    }
+}
+
+/// VS Code's badge language: a letter per change kind, tinted.
+private extension GitOperations.FileChangeKind {
+    var letter: String {
+        switch self {
+        case .modified: return "M"
+        case .added: return "A"
+        case .untracked: return "U"
+        case .deleted: return "D"
+        case .renamed: return "R"
+        case .conflicted: return "!"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .modified, .renamed: return .orange
+        case .added, .untracked: return .green
+        case .deleted, .conflicted: return .red
         }
     }
 }

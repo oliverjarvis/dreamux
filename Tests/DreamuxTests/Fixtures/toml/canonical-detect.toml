@@ -1,5 +1,5 @@
-# .dreamux/run.toml — the exact two-runner shape RunSetupView's
-# detect prompt asks Claude to write (see RunSetupView.detectPrompt).
+# .dreamux/run.toml — the exact two-runner shape RunConfigCard's
+# detect prompt asks Claude to write (see RunConfigCard.detectPrompt).
 
 [[runners]]
 name = "frontend"

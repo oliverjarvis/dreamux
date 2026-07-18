@@ -250,10 +250,15 @@ final class RunnerManager {
     private(set) var activeBranches: [String: String] = [:]
 
     /// A runner the sidebar's "Isolate with Claude" alert wants the
-    /// Run pane to kick the isolate flow on the moment it appears. The
-    /// pane consumes (and clears) this when it loads so the user
-    /// doesn't have to manually navigate and click Isolate.
+    /// run-config flow kicked on. `ContentView`'s handoff consumer picks
+    /// it up (and clears it) so the user doesn't have to manually click
+    /// Isolate.
     var pendingIsolation: ParsedRunner?
+
+    /// Workspace whose run-config popover should open (on the Configure
+    /// tab). Set by "Run Settings" entry points; consumed (and cleared)
+    /// by the context header's `HeaderRunControls`.
+    var pendingConfigureWorkspaceID: UUID?
 
     /// Fires on every distinct status transition (same-value writes are
     /// swallowed) — the project session turns these into service.health
