@@ -143,6 +143,7 @@ final class ProjectStore {
         let project = Project(name: safeName, rootPath: url)
         projects.append(project)
         projects.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        scanGeneration += 1   // a scan started before this create is stale
         save()
         return project
     }
@@ -153,30 +154,101 @@ final class ProjectStore {
     /// was deleted/moved disappears. We persist stable IDs in
     /// projects.json so the same folder keeps the same identity across
     /// launches (which keeps SwiftUI window restoration sane).
+    ///
+    /// The scan itself runs OFF the main actor: `projectsRoot` defaults
+    /// to a folder in `~/Documents`, and iCloud's bird daemon can block
+    /// `open()`/`readdir` there for minutes mid-sync. Called from
+    /// `init()`, a synchronous scan wedged the whole app before its
+    /// first window — unlaunchable, and unable to service even a quit
+    /// AppleEvent (which is how the self-updater asks it to exit). The
+    /// cached list from `load()` keeps the UI populated until the scan
+    /// lands; a scan that raced a create/delete is discarded, not
+    /// applied — the mutation already bumped `scanGeneration`.
     func refresh() {
-        let fm = FileManager.default
-        let contents = (try? fm.contentsOfDirectory(
-            at: projectsRoot,
+        scanGeneration += 1
+        let generation = scanGeneration
+        let root = projectsRoot
+        Task.detached(priority: .utility) {
+            let scanned = Self.scanProjectFolders(root: root)
+            await MainActor.run {
+                guard self.scanGeneration == generation else { return }
+                self.apply(scanned)
+            }
+        }
+    }
+
+    /// `refresh()` you can await — same off-main scan, same stale-scan
+    /// guard. Launch routing (and e2e auto-open) needs the scan result
+    /// before it can pick a window destination.
+    func refreshAndWait() async {
+        scanGeneration += 1
+        let generation = scanGeneration
+        let root = projectsRoot
+        let scanned = await Task.detached(priority: .userInitiated) {
+            Self.scanProjectFolders(root: root)
+        }.value
+        guard scanGeneration == generation else { return }
+        apply(scanned)
+    }
+
+    /// Bumped by every scan start and every local mutation; an in-flight
+    /// scan only applies if the world hasn't moved under it.
+    private var scanGeneration = 0
+
+    private func apply(_ scanned: [ScannedProjectFolder]) {
+        projects = Self.reconciled(current: projects, scanned: scanned)
+        save()
+    }
+
+    /// One project-folder candidate as seen on disk. `url` is already
+    /// standardized; `createdAt` comes from the same resource fetch as
+    /// the directory check so `reconciled` never touches the filesystem.
+    struct ScannedProjectFolder: Sendable {
+        let url: URL
+        let createdAt: Date?
+    }
+
+    /// The blocking half of a refresh: enumerate `root` and keep real,
+    /// non-reserved project folders. Safe to call from any thread; in
+    /// production it runs detached because this is exactly the call an
+    /// iCloud sync stall can block for minutes.
+    nonisolated static func scanProjectFolders(root: URL) -> [ScannedProjectFolder] {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: root,
             includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey],
             options: [.skipsHiddenFiles]
         )) ?? []
 
-        var byPath: [String: Project] = [:]
-        for project in projects {
-            byPath[project.rootPath.standardizedFileURL.path] = project
-        }
-
-        var refreshed: [Project] = []
+        var scanned: [ScannedProjectFolder] = []
         for url in contents {
             let standardized = url.standardizedFileURL
-            guard !Self.isReservedProjectFolderName(standardized.lastPathComponent) else { continue }
+            guard !isReservedProjectFolderName(standardized.lastPathComponent) else { continue }
             let resources = try? standardized.resourceValues(forKeys: [
                 .isDirectoryKey, .creationDateKey,
             ])
             guard resources?.isDirectory == true else { continue }
+            scanned.append(ScannedProjectFolder(
+                url: standardized, createdAt: resources?.creationDate))
+        }
+        return scanned
+    }
 
-            let folderName = standardized.lastPathComponent
-            if let existing = byPath[standardized.path] {
+    /// The pure half of a refresh: merge what the scan found with the
+    /// current list, preserving identity (and user-chosen icon/tint) for
+    /// folders we already know, following on-disk renames, dropping
+    /// vanished folders, and sorting Finder-style.
+    nonisolated static func reconciled(
+        current: [Project], scanned: [ScannedProjectFolder]
+    ) -> [Project] {
+        var byPath: [String: Project] = [:]
+        for project in current {
+            byPath[project.rootPath.standardizedFileURL.path] = project
+        }
+
+        var refreshed: [Project] = []
+        for folder in scanned {
+            let folderName = folder.url.lastPathComponent
+            if let existing = byPath[folder.url.path] {
                 if existing.name == folderName {
                     refreshed.append(existing)
                 } else {
@@ -185,7 +257,7 @@ final class ProjectStore {
                     refreshed.append(Project(
                         id: existing.id,
                         name: folderName,
-                        rootPath: standardized,
+                        rootPath: folder.url,
                         createdAt: existing.createdAt,
                         symbol: existing.symbol,
                         tintHex: existing.tintHex
@@ -194,15 +266,14 @@ final class ProjectStore {
             } else {
                 refreshed.append(Project(
                     name: folderName,
-                    rootPath: standardized,
-                    createdAt: resources?.creationDate ?? .now
+                    rootPath: folder.url,
+                    createdAt: folder.createdAt ?? .now
                 ))
             }
         }
 
         refreshed.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        projects = refreshed
-        save()
+        return refreshed
     }
 
     /// Set (or clear, with nil) the project's custom glyph symbol.
@@ -231,6 +302,7 @@ final class ProjectStore {
             try fm.trashItem(at: project.rootPath, resultingItemURL: &trashedURL)
         }
         projects.removeAll { $0.id == project.id }
+        scanGeneration += 1   // a scan started before this delete is stale
         save()
     }
 
@@ -241,9 +313,12 @@ final class ProjectStore {
               let decoded = try? JSONDecoder().decode([Project].self, from: data)
         else { return }
 
-        // Drop entries whose folder has gone missing — the user moved or
-        // deleted them outside Dreamux.
-        projects = decoded.filter { FileManager.default.fileExists(atPath: $0.rootPath.path) }
+        // No existence check here: stat'ing every rootPath is ~Documents
+        // I/O on the main thread at launch (same iCloud-stall hazard as
+        // the scan). Entries whose folder vanished drop out when the
+        // first async scan reconciles; until then MissingProjectView
+        // covers a window bound to one.
+        projects = decoded
     }
 
     private func save() {
