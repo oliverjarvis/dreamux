@@ -33,8 +33,12 @@ ever prompts, right-click it → **Open** once.
 `./Scripts/install-app.sh`. This works from a terminal *inside* Dreamux: when
 the installed app is running, the script hands the quit → swap → relaunch tail
 to a detached helper (log: `$TMPDIR/dreamux-install-app.log`), gracefully
-quits the app, swaps the bundle, and relaunches it on the new build. Check
-what's installed with
+quits the app, swaps the bundle, and relaunches it on the new build — the
+terminal you typed it in closes with the app; the helper finishes without it.
+The app is only ever asked to quit, never force-killed: if live runs exist,
+Dreamux shows its usual quit confirmation — click **Quit** to let the update
+proceed; cancel (or ignore it for 30s) and the updater aborts with the old
+install untouched, ready to re-run. Check what's installed with
 `plutil -p /Applications/Dreamux.app/Contents/Info.plist | grep Dreamux` —
 every build is stamped with its commit, build date, and source checkout.
 
