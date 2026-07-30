@@ -699,6 +699,15 @@ struct ContentView: View {
     private var collapsedRailStub: some View {
         VStack(spacing: 10) {
             Color.clear.frame(height: 26)
+            // Brand mark only — the expanded rail's icon + "Dreamux" row
+            // loses its text here; same NSApp-sourced icon so it always
+            // matches the installed AppIcon.
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 34, height: 34)
+                .accessibilityLabel("Dreamux")
             railToggle
             Button {
                 showPalette = true
