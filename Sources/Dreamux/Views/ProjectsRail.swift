@@ -22,15 +22,6 @@ struct ProjectsRail: View {
     /// entry point to the same overlay).
     let onOpenPalette: () -> Void
 
-    /// Wordmark banner shown above the search bar. Loaded once — a loose
-    /// bundle resource, not an asset catalog, so `Image(_:bundle:)` can't
-    /// find it by name.
-    private static let wordmark = Bundle.module.image(forResource: "DreamuxWordmark")
-
-    /// Sampled from DreamuxWordmark.png's background (sRGB #F4BDC3) so the
-    /// banner box reads as one continuous surface behind the smaller image.
-    private static let wordmarkPink = Color(.sRGB, red: 0.9604, green: 0.7419, blue: 0.7686)
-
     @Environment(\.openWindow) private var openWindow
     @State private var showCreate = false
     @State private var pendingDelete: Project?
@@ -127,65 +118,45 @@ struct ProjectsRail: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 Color.clear.frame(height: 30)
-                if let wordmark = Self.wordmark {
-                    // The box keeps the photo's full footprint; the image
-                    // shrinks inside it and blends because the fill is
-                    // sampled from the photo's own background.
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Self.wordmarkPink)
-                        .aspectRatio(wordmark.size.width / wordmark.size.height,
-                                     contentMode: .fit)
-                        .overlay(
-                            Image(nsImage: wordmark)
-                                .resizable()
-                                .scaledToFit()
-                                // Feathered mask: the photo's background
-                                // isn't perfectly flat, so a hard edge
-                                // shows against the sampled fill — fade
-                                // the last few points out instead.
-                                .mask(
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .padding(6)
-                                        .blur(radius: 6)
-                                )
-                                .scaleEffect(0.6)
+                // App icon + search: the icon comes straight from the
+                // running app's AppIcon (NSApp), so it can never drift
+                // from the real icon; its squircle margins and shadow are
+                // baked into the icns, so no extra chrome around it.
+                HStack(spacing: 8) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 30, height: 30)
+                        .accessibilityLabel("Dreamux")
+                    Button(action: onOpenPalette) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("Search")
+                                .font(.system(size: 15))
+                            Spacer(minLength: 0)
+                            Text("⌘K")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                // Card-surface fill (the panels' color) so the field stands off the
+                                // tinted-glass rail backdrop — primary-0.04 was invisible against it.
+                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.8))
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8)
                                 .strokeBorder(Color.secondary.opacity(0.3))
                         )
-                        .accessibilityLabel("Dreamux")
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 8)
-                }
-                Button(action: onOpenPalette) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("Search")
-                            .font(.system(size: 15))
-                        Spacer(minLength: 0)
-                        Text("⌘K")
-                            .font(.system(size: 12, weight: .medium))
+                        .contentShape(Rectangle())
                     }
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            // Card-surface fill (the panels' color) so the field stands off the
-                            // tinted-glass rail backdrop — primary-0.04 was invisible against it.
-                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.8))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Color.secondary.opacity(0.3))
-                    )
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .help("Search and quick actions (⌘K)")
                 }
-                .buttonStyle(.plain)
-                .help("Search and quick actions (⌘K)")
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
                 HStack {
