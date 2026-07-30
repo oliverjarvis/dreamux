@@ -7,8 +7,13 @@
 # CFBundleIdentifier `com.dreamux.Dreamux.<tag>` and display name
 # "Dreamux (<tag>)" stamped into its COPIED Info.plist (the source
 # plist is never touched), and lands at Dreamux-<tag>.app so it runs
-# side-by-side with an untagged build. Untagged runs are byte-identical
-# to before.
+# side-by-side with an untagged build.
+#
+# Every bundle (tagged or not) also gets build-identity stamps in the
+# copied plist: CFBundleVersion (commit count), DreamuxBuildCommit,
+# DreamuxBuildDate, DreamuxSourceCheckout. Metadata only — no path or
+# bundle-id derivation reads these, so the self-hosting isolation
+# invariants are unaffected.
 set -euo pipefail
 
 CONFIG="${1:-debug}"
@@ -46,6 +51,20 @@ if [[ -n "$TAG" ]]; then
     plutil -replace CFBundleDisplayName -string "Dreamux ($TAG)"           "$APP/Contents/Info.plist"
     plutil -replace CFBundleName        -string "Dreamux ($TAG)"           "$APP/Contents/Info.plist"
 fi
+
+# Build-identity stamps. CFBundleVersion becomes the commit count so
+# successive installs carry a monotonic build number; the Dreamux* keys
+# let `plutil -p` (or a future in-app updater) say exactly which commit
+# and checkout produced an installed bundle.
+if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    BUILD_NUM="$(git -C "$ROOT" rev-list --count HEAD)"
+    COMMIT="$(git -C "$ROOT" rev-parse --short HEAD)"
+    git -C "$ROOT" diff --quiet HEAD -- 2>/dev/null || COMMIT="$COMMIT-dirty"
+    plutil -replace CFBundleVersion    -string "$BUILD_NUM" "$APP/Contents/Info.plist"
+    plutil -replace DreamuxBuildCommit -string "$COMMIT"    "$APP/Contents/Info.plist"
+fi
+plutil -replace DreamuxBuildDate      -string "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$APP/Contents/Info.plist"
+plutil -replace DreamuxSourceCheckout -string "$ROOT"                          "$APP/Contents/Info.plist"
 
 # App icon: CFBundleIconFile in Info.plist points at "AppIcon", so the
 # compiled .icns must land at Contents/Resources/AppIcon.icns.

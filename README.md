@@ -9,30 +9,34 @@
 ## Install
 
 Dreamux is a native macOS app you build from source — there's no App Store
-listing or notarized download yet (both are on the roadmap). Installing is two
-steps: build the `.app`, then drop it in an Applications folder.
+listing or notarized download yet (both are on the roadmap). One command
+builds a release `.app`, installs it, and launches it:
 
 **Requirements:** macOS 14+ and a Swift toolchain (Xcode, or the Command Line
 Tools via `xcode-select --install`).
 
 ```sh
-# 1. Build a release Dreamux.app (produces ./Dreamux.app)
-./Scripts/make-app.sh release
-
-# 2a. Install for everyone (system Applications — needs admin):
-sudo ditto Dreamux.app /Applications/Dreamux.app
-
-# 2b. …or just for you — no sudo, still shows in Launchpad + Spotlight:
-ditto Dreamux.app ~/Applications/Dreamux.app
+./Scripts/install-app.sh
 ```
 
-Then launch it from Spotlight (⌘-Space → "Dreamux"), Launchpad, or Finder — and
+It installs to `/Applications` (admin users need no sudo), or `~/Applications`
+when that isn't writable — an existing install always wins, so re-runs update
+in place. Flags: `--dest DIR` to pick the folder, `--no-relaunch` to skip
+launching, `debug` for a debug build.
+
+Launch it from Spotlight (⌘-Space → "Dreamux"), Launchpad, or Finder — and
 drag it to the Dock to keep it handy. Because you built it yourself the app
 isn't quarantined, so Gatekeeper opens it without complaint; if a later build
 ever prompts, right-click it → **Open** once.
 
 **Updating** (there's no auto-updater yet): `git pull` on `main`, then re-run
-the two steps above.
+`./Scripts/install-app.sh`. This works from a terminal *inside* Dreamux: when
+the installed app is running, the script hands the quit → swap → relaunch tail
+to a detached helper (log: `$TMPDIR/dreamux-install-app.log`), gracefully
+quits the app, swaps the bundle, and relaunches it on the new build. Check
+what's installed with
+`plutil -p /Applications/Dreamux.app/Contents/Info.plist | grep Dreamux` —
+every build is stamped with its commit, build date, and source checkout.
 
 > **Side-by-side dev builds.** `./Scripts/dev-dogfood.sh` builds and launches a
 > *tagged* Dreamux (`./Scripts/make-app.sh release <tag>`) with its own bundle
