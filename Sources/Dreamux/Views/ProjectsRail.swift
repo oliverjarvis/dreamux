@@ -118,45 +118,52 @@ struct ProjectsRail: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 Color.clear.frame(height: 30)
-                // App icon + search: the icon comes straight from the
-                // running app's AppIcon (NSApp), so it can never drift
-                // from the real icon; its squircle margins and shadow are
-                // baked into the icns, so no extra chrome around it.
+                // Brand row above the search field: the icon comes
+                // straight from the running app's AppIcon (NSApp), so it
+                // can never drift from the real icon; its squircle
+                // margins and shadow are baked into the icns, so no
+                // extra chrome around it.
                 HStack(spacing: 8) {
                     Image(nsImage: NSApp.applicationIconImage)
                         .resizable()
                         .interpolation(.high)
                         .scaledToFit()
                         .frame(width: 30, height: 30)
-                        .accessibilityLabel("Dreamux")
-                    Button(action: onOpenPalette) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 13, weight: .medium))
-                            Text("Search")
-                                .font(.system(size: 15))
-                            Spacer(minLength: 0)
-                            Text("⌘K")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                // Card-surface fill (the panels' color) so the field stands off the
-                                // tinted-glass rail backdrop — primary-0.04 was invisible against it.
-                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.8))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(Color.secondary.opacity(0.3))
-                        )
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Search and quick actions (⌘K)")
+                    Text("Dreamux")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Spacer(minLength: 0)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Dreamux")
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+                Button(action: onOpenPalette) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("Search")
+                            .font(.system(size: 15))
+                        Spacer(minLength: 0)
+                        Text("⌘K")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            // Card-surface fill (the panels' color) so the field stands off the
+                            // tinted-glass rail backdrop — primary-0.04 was invisible against it.
+                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.8))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.secondary.opacity(0.3))
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Search and quick actions (⌘K)")
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
                 HStack {
