@@ -69,7 +69,10 @@ design's invariants hold.
   script started from a terminal inside Dreamux dies with the app's process
   group when the app quits. Phase 2: gracefully quit via AppleScript
   (`tell application id "com.dreamux.Dreamux" to quit` — SIGTERM would skip
-  AppKit's termination path), wait up to 15s, **abort without swapping** on
+  AppKit's termination path, including the quit-confirmation shown when live
+  runs exist), wait up to 30s with the clock started *before* the quit event
+  and the AppleScript wrapped in `with timeout of 5 seconds` (osascript's
+  default AppleEvent timeout is ~2 minutes), **abort without swapping** on
   timeout (never force-kill an app that may host live Claude runs), swap,
   `open`, then verify the new pid differs from the old (quit+open has been
   observed reactivating the same pid).
@@ -80,7 +83,27 @@ design's invariants hold.
   fixed string (`ps` + `grep -F`), so tagged side-by-side builds
   (`Dreamux-dogfood.app`) are never touched.
 
-### 3. README
+### 3. Launch must not block on `~/Documents` (found by the live update test)
+
+The first live self-update run exposed a launch defect that breaks the whole
+loop: `DreamuxApp.init()` → `ProjectStore.init()` → `refresh()` enumerated
+`~/Documents/Dreamux` synchronously on the main thread, and iCloud's bird
+daemon blocked that `open()` in the kernel for ~5 minutes — an app that never
+finished launching, couldn't draw a window, and couldn't service the
+updater's quit AppleEvent (osascript error `-1712`). Fix, in `ProjectStore`:
+
+- Split `refresh()` into `scanProjectFolders(root:)` (the blocking I/O,
+  `nonisolated static`) and `reconciled(current:scanned:)` (the pure merge) —
+  both unit-testable without a store instance.
+- `refresh()` now runs the scan detached and applies the result on the main
+  actor; a `scanGeneration` counter (bumped by every scan start and by
+  `createProject`/`deleteProject`) discards scans that raced a mutation.
+- `refreshAndWait()` is the awaitable variant; `LaunchGate.resolve()` awaits
+  it (via `.task`) before routing, which keeps e2e auto-open deterministic.
+- `load()` no longer stats each cached project's folder (same launch-time
+  hazard); vanished folders drop out when the first scan reconciles.
+
+### 4. README
 
 Install section becomes the one command; "Updating" becomes `git pull` +
 re-run, with a note that it's safe from a terminal inside Dreamux.

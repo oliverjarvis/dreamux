@@ -145,11 +145,14 @@ private struct LaunchGate: View {
                 Color.clear
             }
         }
-        .onAppear(perform: resolve)
+        .task(resolve)
     }
 
-    private func resolve() {
-        projects.refresh()
+    /// Awaits the folder scan before routing: the scan runs off-main (an
+    /// iCloud sync stall must never wedge launch), but picking a window
+    /// destination — and e2e auto-open matching — needs its result.
+    @Sendable private func resolve() async {
+        await projects.refreshAndWait()
         // e2e convenience: jump straight into the named project's window
         // so drivers don't script project selection. Falls through to
         // normal launch routing when the name doesn't match a discovered

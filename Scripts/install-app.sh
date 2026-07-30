@@ -14,8 +14,8 @@
 # (logging to $TMPDIR/dreamux-install-app.log), so it survives the app
 # tearing down its process group on quit. The app is only ever quit
 # gracefully (AppleScript quit — SIGTERM would skip AppKit's termination
-# path); if it won't quit within 15s the update aborts with the old install
-# untouched.
+# path, including its quit-confirmation when live runs exist); if it won't
+# quit within 30s the update aborts with the old install untouched.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -52,18 +52,28 @@ if [[ "${1:-}" == "--phase2" ]]; then
     DEST="$2"; STAGING="$3"; OLD_PIDS="$4"
     echo "[$(ts)] phase2: updating $DEST (old pids: $OLD_PIDS)"
 
+    # Clock starts BEFORE the quit event: osascript itself can block on a
+    # busy app, and that wait counts against the budget. The AppleScript
+    # `with timeout` makes osascript return promptly instead of sitting
+    # out its 2-minute default AppleEvent timeout — the quit event stays
+    # queued in the app either way. 30s covers the app's own quit
+    # confirmation (shown when live runs would be killed).
+    deadline=$(( $(date +%s) + 30 ))
     for pid in $OLD_PIDS; do
         kill -0 "$pid" 2>/dev/null || continue
         echo "[$(ts)] phase2: asking Dreamux (pid $pid) to quit"
-        osascript -e "if application id \"$BUNDLE_ID\" is running then tell application id \"$BUNDLE_ID\" to quit" || true
+        osascript \
+            -e "with timeout of 5 seconds" \
+            -e "if application id \"$BUNDLE_ID\" is running then tell application id \"$BUNDLE_ID\" to quit" \
+            -e "end timeout" || true
         break   # one quit event covers the app; now wait on every pid
     done
 
-    deadline=$(( $(date +%s) + 15 ))
     for pid in $OLD_PIDS; do
         while kill -0 "$pid" 2>/dev/null; do
             if (( $(date +%s) >= deadline )); then
-                echo "[$(ts)] phase2: Dreamux (pid $pid) didn't quit within 15s — aborting, old install untouched. Quit it manually and re-run." >&2
+                echo "[$(ts)] phase2: Dreamux (pid $pid) didn't quit within 30s — aborting, old install untouched." >&2
+                echo "[$(ts)] phase2: likely causes: its quit-confirmation dialog is waiting for a click (live runs), or the main thread is blocked (sample $pid to see where). Quit it, then re-run the installer." >&2
                 rm -rf "$STAGING"
                 exit 1
             fi
@@ -149,6 +159,7 @@ if [[ -n "$OLD_PIDS" ]]; then
     echo "Dreamux is running — quit/swap/relaunch handed off to a detached updater."
     echo "  build $NEW_BUILD ($NEW_COMMIT) -> $DEST"
     echo "  log: $LOG"
+    echo "If Dreamux asks to confirm quitting (live runs), click Quit to let the update continue."
     echo "If this terminal lives inside Dreamux, it will close when the app quits; the update continues."
     exit 0
 fi
