@@ -43,7 +43,6 @@ let package = Package(
             resources: [
                 .copy("Resources/Monaco"),
                 .copy("Resources/AppletScaffold"),
-                .copy("Resources/DreamuxWordmark.png"),
                 .copy("Resources/PhosphorIcons"),
             ]
         ),
