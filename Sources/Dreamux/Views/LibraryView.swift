@@ -313,9 +313,11 @@ private struct DetailPanel: View {
                     Text(item.name)
                         .font(.title3.weight(.semibold))
                     Spacer(minLength: 0)
-                    Image(systemName: item.accessible ? "checkmark.seal.fill" : "xmark.seal")
-                        .foregroundStyle(item.accessible ? Color.green : Color.secondary)
+                    if item.accessible {
+                        ActivePill()
+                    }
                 }
+                ScopePill(label: item.scopeLabel)
                 Text(item.accessReason)
                     .font(.caption)
                     .foregroundStyle(item.accessible ? Color.secondary : Color.orange)
