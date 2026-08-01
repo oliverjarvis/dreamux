@@ -127,7 +127,7 @@ struct LibraryView: View {
 
     private var grid: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 // Plugins first: they're the bundles skills and servers
                 // ship inside; the standalone sections follow.
                 section("Plugins", kind: .plugin)
@@ -143,7 +143,7 @@ struct LibraryView: View {
                         .padding(.top, 40)
                 }
             }
-            .padding(16)
+            .padding(20)
         }
     }
 
@@ -152,13 +152,19 @@ struct LibraryView: View {
         let sectionItems = filtered.filter { $0.kind == kind }
         if !sectionItems.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .kerning(0.6)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                    Text("\(sectionItems.count)")
+                        .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                }
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 220), spacing: 12)],
+                    columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 12)],
                     alignment: .leading, spacing: 12
                 ) {
                     ForEach(sectionItems) { item in
