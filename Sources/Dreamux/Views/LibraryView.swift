@@ -97,21 +97,15 @@ struct LibraryView: View {
         }
     }
 
+    /// Everything except kind narrowing — chip counts read this so each
+    /// chip can show what you'd get by clicking it.
+    private var searchScoped: [LibraryItem] {
+        LibraryFilter.searchScoped(items, query: query, activeOnly: activeOnly)
+    }
+
     private var filtered: [LibraryItem] {
-        var result = items
-        if activeOnly {
-            result = result.filter(\.accessible)
-        }
-        if let kindFilter {
-            result = result.filter { $0.kind == kindFilter }
-        }
-        guard !query.isEmpty else { return result }
-        let needle = query.lowercased()
-        return result.filter {
-            $0.name.lowercased().contains(needle)
-                || $0.description.lowercased().contains(needle)
-                || $0.scopeLabel.lowercased().contains(needle)
-        }
+        guard let kindFilter else { return searchScoped }
+        return searchScoped.filter { $0.kind == kindFilter }
     }
 
     private var grid: some View {
@@ -278,6 +272,25 @@ private struct DetailPanel: View {
                 Spacer(minLength: 0)
             }
             .padding(14)
+        }
+    }
+}
+
+/// Pure filtering pipeline for the library page: activeOnly → query.
+enum LibraryFilter {
+    static func searchScoped(
+        _ items: [LibraryItem], query: String, activeOnly: Bool
+    ) -> [LibraryItem] {
+        var result = items
+        if activeOnly {
+            result = result.filter(\.accessible)
+        }
+        guard !query.isEmpty else { return result }
+        let needle = query.lowercased()
+        return result.filter {
+            $0.name.lowercased().contains(needle)
+                || $0.description.lowercased().contains(needle)
+                || $0.scopeLabel.lowercased().contains(needle)
         }
     }
 }
