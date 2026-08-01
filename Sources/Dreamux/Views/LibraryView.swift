@@ -20,13 +20,12 @@ struct LibraryView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     searchBar
                     filterBar
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(.regularMaterial)
                 Divider()
                 if !loaded {
                     ProgressView()
@@ -38,7 +37,6 @@ struct LibraryView: View {
                 footer
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
-                    .background(.regularMaterial)
             }
             if let selected = items.first(where: { $0.id == selectedID }) {
                 Divider()
@@ -62,61 +60,72 @@ struct LibraryView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
                 .foregroundStyle(.secondary)
             TextField("Search skills, servers, plugins", text: $query)
                 .textFieldStyle(.plain)
-            Spacer()
-            Text("\(filtered.count) of \(items.count)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 14))
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.12)))
     }
 
-    /// Kind picker + active-only toggle. Plugins lead — they're the
-    /// containers most skills/servers arrive in.
+    /// Kind chips + active-only switch. Plugins lead — they're the
+    /// containers most skills/servers arrive in. Chip counts reflect the
+    /// current search and active-toggle, but not the kind narrowing.
     private var filterBar: some View {
-        HStack(spacing: 10) {
-            Picker("", selection: $kindFilter) {
-                Text("All").tag(LibraryItemKind?.none)
-                Text("Plugins").tag(LibraryItemKind?.some(.plugin))
-                Text("Skills").tag(LibraryItemKind?.some(.skill))
-                Text("MCP Servers").tag(LibraryItemKind?.some(.mcpServer))
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+        HStack(spacing: 8) {
+            FilterChip(label: "All", count: searchScoped.count,
+                       isActive: kindFilter == nil) { kindFilter = nil }
+            FilterChip(label: "Plugins", count: kindCount(.plugin),
+                       isActive: kindFilter == .plugin) { kindFilter = .plugin }
+            FilterChip(label: "Skills", count: kindCount(.skill),
+                       isActive: kindFilter == .skill) { kindFilter = .skill }
+            FilterChip(label: "MCP Servers", count: kindCount(.mcpServer),
+                       isActive: kindFilter == .mcpServer) { kindFilter = .mcpServer }
             Spacer(minLength: 12)
             Toggle(isOn: $activeOnly) {
                 Text("Active in this project")
-                    .font(.caption)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
-            .toggleStyle(.checkbox)
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(.teal)
             .help("Show only what this project's agents can reach right now")
         }
     }
 
+    private func kindCount(_ kind: LibraryItemKind) -> Int {
+        searchScoped.filter { $0.kind == kind }.count
+    }
+
+    /// Everything except kind narrowing — chip counts read this so each
+    /// chip can show what you'd get by clicking it.
+    private var searchScoped: [LibraryItem] {
+        LibraryFilter.searchScoped(items, query: query, activeOnly: activeOnly)
+    }
+
     private var filtered: [LibraryItem] {
-        var result = items
-        if activeOnly {
-            result = result.filter(\.accessible)
-        }
-        if let kindFilter {
-            result = result.filter { $0.kind == kindFilter }
-        }
-        guard !query.isEmpty else { return result }
-        let needle = query.lowercased()
-        return result.filter {
-            $0.name.lowercased().contains(needle)
-                || $0.description.lowercased().contains(needle)
-                || $0.scopeLabel.lowercased().contains(needle)
-        }
+        guard let kindFilter else { return searchScoped }
+        return searchScoped.filter { $0.kind == kindFilter }
     }
 
     private var grid: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 // Plugins first: they're the bundles skills and servers
                 // ship inside; the standalone sections follow.
                 section("Plugins", kind: .plugin)
@@ -132,7 +141,7 @@ struct LibraryView: View {
                         .padding(.top, 40)
                 }
             }
-            .padding(16)
+            .padding(20)
         }
     }
 
@@ -141,13 +150,19 @@ struct LibraryView: View {
         let sectionItems = filtered.filter { $0.kind == kind }
         if !sectionItems.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .kerning(0.6)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                    Text("\(sectionItems.count)")
+                        .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                }
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 220), spacing: 12)],
+                    columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 12)],
                     alignment: .leading, spacing: 12
                 ) {
                     ForEach(sectionItems) { item in
@@ -162,56 +177,34 @@ struct LibraryView: View {
         Button {
             selectedID = selectedID == item.id ? nil : item.id
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: icon(for: item.kind))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    KindTile(kind: item.kind)
                     Text(item.name)
-                        .font(.callout.weight(.medium))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 0)
-                    Image(systemName: item.accessible ? "checkmark.seal.fill" : "xmark.seal")
-                        .font(.system(size: 11))
-                        .foregroundStyle(item.accessible ? Color.green : Color.secondary)
-                        .help(item.accessReason)
                 }
                 Text(item.description.isEmpty ? "—" : item.description)
-                    .font(.caption)
+                    .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2, reservesSpace: true)
                     .multilineTextAlignment(.leading)
-                Text(item.scopeLabel)
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.primary.opacity(0.07)))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if item.accessible {
+                        ActivePill()
+                    }
+                    ScopePill(label: item.scopeLabel)
+                }
+                .padding(.top, 2)
             }
-            .padding(10)
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(selectedID == item.id
-                          ? Color.accentColor.opacity(0.10)
-                          : Color.primary.opacity(0.04)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(
-                        selectedID == item.id
-                            ? Color.accentColor.opacity(0.5)
-                            : Color.primary.opacity(0.06)))
-            .contentShape(Rectangle())
+            .cardSurface(isSelected: selectedID == item.id)
         }
         .buttonStyle(.plain)
-    }
-
-    private func icon(for kind: LibraryItemKind) -> String {
-        switch kind {
-        case .skill: return "wand.and.stars"
-        case .mcpServer: return "server.rack"
-        case .plugin: return "puzzlepiece.extension"
-        }
+        .help(item.accessReason)
     }
 
     private var footer: some View {
@@ -221,6 +214,88 @@ struct LibraryView: View {
                 .foregroundStyle(.tertiary)
             Spacer()
         }
+    }
+}
+
+/// 34pt rounded-square icon tile tinted per kind. Phosphor glyph where
+/// the bundled set has one; SF Symbol fallback otherwise. Never emoji.
+private struct KindTile: View {
+    let kind: LibraryItemKind
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(tint.opacity(fillOpacity))
+            glyph
+        }
+        .frame(width: 34, height: 34)
+    }
+
+    private var tint: Color {
+        switch kind {
+        case .plugin: return .purple
+        case .skill: return .orange
+        case .mcpServer: return .blue
+        }
+    }
+
+    private var fillOpacity: Double {
+        switch kind {
+        case .plugin: return 0.16
+        case .skill: return 0.14
+        case .mcpServer: return 0.15
+        }
+    }
+
+    @ViewBuilder private var glyph: some View {
+        switch kind {
+        case .plugin:
+            PhosphorIcon.packageFill
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+                .foregroundStyle(tint)
+        case .skill:
+            Image(systemName: "sparkles")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(tint)
+        case .mcpServer:
+            Image(systemName: "server.rack")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tint)
+        }
+    }
+}
+
+/// Green "Active" pill — shown only on items this project can reach.
+private struct ActivePill: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(Color.green).frame(width: 6, height: 6)
+            Text("Active")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(Color.green)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.green.opacity(0.13)))
+    }
+}
+
+/// Neutral capsule for the free-form scope label (six string shapes:
+/// Project / Global / Plugin: <name> / Feature: <dir> /
+/// Project (Claude config) / Project-scoped) — renders any string.
+private struct ScopePill: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.primary.opacity(0.07)))
     }
 }
 
@@ -236,9 +311,11 @@ private struct DetailPanel: View {
                     Text(item.name)
                         .font(.title3.weight(.semibold))
                     Spacer(minLength: 0)
-                    Image(systemName: item.accessible ? "checkmark.seal.fill" : "xmark.seal")
-                        .foregroundStyle(item.accessible ? Color.green : Color.secondary)
+                    if item.accessible {
+                        ActivePill()
+                    }
                 }
+                ScopePill(label: item.scopeLabel)
                 Text(item.accessReason)
                     .font(.caption)
                     .foregroundStyle(item.accessible ? Color.secondary : Color.orange)
@@ -278,6 +355,25 @@ private struct DetailPanel: View {
                 Spacer(minLength: 0)
             }
             .padding(14)
+        }
+    }
+}
+
+/// Pure filtering pipeline for the library page: activeOnly → query.
+enum LibraryFilter {
+    static func searchScoped(
+        _ items: [LibraryItem], query: String, activeOnly: Bool
+    ) -> [LibraryItem] {
+        var result = items
+        if activeOnly {
+            result = result.filter(\.accessible)
+        }
+        guard !query.isEmpty else { return result }
+        let needle = query.lowercased()
+        return result.filter {
+            $0.name.lowercased().contains(needle)
+                || $0.description.lowercased().contains(needle)
+                || $0.scopeLabel.lowercased().contains(needle)
         }
     }
 }
