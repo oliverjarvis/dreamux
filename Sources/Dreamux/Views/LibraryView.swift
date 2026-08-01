@@ -26,7 +26,6 @@ struct LibraryView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(.regularMaterial)
                 Divider()
                 if !loaded {
                     ProgressView()
@@ -38,7 +37,6 @@ struct LibraryView: View {
                 footer
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
-                    .background(.regularMaterial)
             }
             if let selected = items.first(where: { $0.id == selectedID }) {
                 Divider()
