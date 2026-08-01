@@ -20,7 +20,7 @@ struct LibraryView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     searchBar
                     filterBar
                 }
@@ -62,39 +62,56 @@ struct LibraryView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
                 .foregroundStyle(.secondary)
             TextField("Search skills, servers, plugins", text: $query)
                 .textFieldStyle(.plain)
-            Spacer()
-            Text("\(filtered.count) of \(items.count)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 14))
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.12)))
     }
 
-    /// Kind picker + active-only toggle. Plugins lead — they're the
-    /// containers most skills/servers arrive in.
+    /// Kind chips + active-only switch. Plugins lead — they're the
+    /// containers most skills/servers arrive in. Chip counts reflect the
+    /// current search and active-toggle, but not the kind narrowing.
     private var filterBar: some View {
-        HStack(spacing: 10) {
-            Picker("", selection: $kindFilter) {
-                Text("All").tag(LibraryItemKind?.none)
-                Text("Plugins").tag(LibraryItemKind?.some(.plugin))
-                Text("Skills").tag(LibraryItemKind?.some(.skill))
-                Text("MCP Servers").tag(LibraryItemKind?.some(.mcpServer))
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
+        HStack(spacing: 8) {
+            FilterChip(label: "All", count: searchScoped.count,
+                       isActive: kindFilter == nil) { kindFilter = nil }
+            FilterChip(label: "Plugins", count: kindCount(.plugin),
+                       isActive: kindFilter == .plugin) { kindFilter = .plugin }
+            FilterChip(label: "Skills", count: kindCount(.skill),
+                       isActive: kindFilter == .skill) { kindFilter = .skill }
+            FilterChip(label: "MCP Servers", count: kindCount(.mcpServer),
+                       isActive: kindFilter == .mcpServer) { kindFilter = .mcpServer }
             Spacer(minLength: 12)
             Toggle(isOn: $activeOnly) {
                 Text("Active in this project")
-                    .font(.caption)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
-            .toggleStyle(.checkbox)
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(.teal)
             .help("Show only what this project's agents can reach right now")
         }
+    }
+
+    private func kindCount(_ kind: LibraryItemKind) -> Int {
+        searchScoped.filter { $0.kind == kind }.count
     }
 
     /// Everything except kind narrowing — chip counts read this so each
