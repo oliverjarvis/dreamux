@@ -173,56 +173,34 @@ struct LibraryView: View {
         Button {
             selectedID = selectedID == item.id ? nil : item.id
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: icon(for: item.kind))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    KindTile(kind: item.kind)
                     Text(item.name)
-                        .font(.callout.weight(.medium))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
                         .lineLimit(1).truncationMode(.tail)
                     Spacer(minLength: 0)
-                    Image(systemName: item.accessible ? "checkmark.seal.fill" : "xmark.seal")
-                        .font(.system(size: 11))
-                        .foregroundStyle(item.accessible ? Color.green : Color.secondary)
-                        .help(item.accessReason)
                 }
                 Text(item.description.isEmpty ? "—" : item.description)
-                    .font(.caption)
+                    .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(2, reservesSpace: true)
                     .multilineTextAlignment(.leading)
-                Text(item.scopeLabel)
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.primary.opacity(0.07)))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    if item.accessible {
+                        ActivePill()
+                    }
+                    ScopePill(label: item.scopeLabel)
+                }
+                .padding(.top, 2)
             }
-            .padding(10)
+            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(selectedID == item.id
-                          ? Color.accentColor.opacity(0.10)
-                          : Color.primary.opacity(0.04)))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(
-                        selectedID == item.id
-                            ? Color.accentColor.opacity(0.5)
-                            : Color.primary.opacity(0.06)))
-            .contentShape(Rectangle())
+            .cardSurface(isSelected: selectedID == item.id)
         }
         .buttonStyle(.plain)
-    }
-
-    private func icon(for kind: LibraryItemKind) -> String {
-        switch kind {
-        case .skill: return "wand.and.stars"
-        case .mcpServer: return "server.rack"
-        case .plugin: return "puzzlepiece.extension"
-        }
+        .help(item.accessReason)
     }
 
     private var footer: some View {
@@ -232,6 +210,88 @@ struct LibraryView: View {
                 .foregroundStyle(.tertiary)
             Spacer()
         }
+    }
+}
+
+/// 34pt rounded-square icon tile tinted per kind. Phosphor glyph where
+/// the bundled set has one; SF Symbol fallback otherwise. Never emoji.
+private struct KindTile: View {
+    let kind: LibraryItemKind
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(tint.opacity(fillOpacity))
+            glyph
+        }
+        .frame(width: 34, height: 34)
+    }
+
+    private var tint: Color {
+        switch kind {
+        case .plugin: return .purple
+        case .skill: return .orange
+        case .mcpServer: return .blue
+        }
+    }
+
+    private var fillOpacity: Double {
+        switch kind {
+        case .plugin: return 0.16
+        case .skill: return 0.14
+        case .mcpServer: return 0.15
+        }
+    }
+
+    @ViewBuilder private var glyph: some View {
+        switch kind {
+        case .plugin:
+            PhosphorIcon.packageFill
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 16, height: 16)
+                .foregroundStyle(tint)
+        case .skill:
+            Image(systemName: "sparkles")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(tint)
+        case .mcpServer:
+            Image(systemName: "server.rack")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tint)
+        }
+    }
+}
+
+/// Green "Active" pill — shown only on items this project can reach.
+private struct ActivePill: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle().fill(Color.green).frame(width: 6, height: 6)
+            Text("Active")
+                .font(.system(size: 11, weight: .medium))
+        }
+        .foregroundStyle(Color.green)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.green.opacity(0.13)))
+    }
+}
+
+/// Neutral capsule for the free-form scope label (six string shapes:
+/// Project / Global / Plugin: <name> / Feature: <dir> /
+/// Project (Claude config) / Project-scoped) — renders any string.
+private struct ScopePill: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(Color.primary.opacity(0.07)))
     }
 }
 
