@@ -2,11 +2,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Work Items column of a project window. Top to bottom: icon+label
-/// tile rows (Signals, Browser, Flows, Skills & MCPs), the live Flows
+/// tile rows (Signals, Browser, Flows, Context & MCPs), the live Flows
 /// section (plan-backed work reachable from its rows, with a "View all"
-/// jump to the Flows page), the collapsible Plans / Specs / Project Files
-/// lists, and the always-visible, borderless Repositories list with its
-/// Add repository row.
+/// jump to the Flows page), and the always-visible, borderless
+/// Repositories list with its Add repository row. Plans, specs, and
+/// config files are browsed on the Context & MCPs page, not here.
 struct WorkspaceSidebar: View {
     @Bindable var store: WorkspaceStore
     @Bindable var repoStore: RepoStore
@@ -71,9 +71,6 @@ struct WorkspaceSidebar: View {
     let configContent: (Workspace) -> AnyView
 
     @State private var hoveredTile: SidebarTile?
-    @State private var hoveredFileGroup: String?
-    /// Hovered doc/config file row in the Plans/Specs/Project Files lists.
-    @State private var hoveredOrchestrationURL: URL?
     /// Hover state for the borderless "Add repository" row.
     @State private var addRepoHovered = false
     @State private var showAddFeature = false
@@ -261,11 +258,9 @@ struct WorkspaceSidebar: View {
                 onPublish: { handlePublishApp($0) }
             )
 
-            contextSection
-
-            // Hairline between the navigation group above (tiles, Applets,
-            // Context) and the work sections below — the one deliberate
-            // rule in the sidebar.
+            // Hairline between the navigation group above (tiles, Applets)
+            // and the work sections below — the one deliberate rule in
+            // the sidebar.
             Color.primary.opacity(0.08)
                 .frame(height: 1)
                 .padding(.horizontal, 10)
@@ -376,254 +371,6 @@ struct WorkspaceSidebar: View {
             }
         }
         .onHover { addRepoHovered = $0 }
-    }
-
-    // MARK: - File lists (Plans / Specs / Project Files)
-
-    /// Every plan file, newest-first — the date-prefixed names make plain
-    /// alphabetical order oldest-first, which buries current work.
-    private var planDocs: [PlanDoc] {
-        docStore.docs.filter { $0.kind == .plan }
-            .sorted { $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent }
-    }
-
-    /// Every spec file, newest-first.
-    private var specDocs: [PlanDoc] {
-        docStore.docs.filter { $0.kind == .spec }
-            .sorted { $0.fileURL.lastPathComponent > $1.fileURL.lastPathComponent }
-    }
-
-    /// One place for everything an agent reads as context: the Plans and
-    /// Specs groups, plus the project's instruction/config files (CLAUDE.md
-    /// and friends). Collapsing all three former top-level sections under
-    /// one header keeps the sidebar from sprouting a header per doc kind.
-    private var contextSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SidebarSectionHeader(
-                title: "Context", icon: PhosphorIcon.filesFill,
-                isExpanded: $layout.contextExpanded)
-            if layout.contextExpanded {
-                SidebarSectionChildren(spacing: 3) {
-                    nestedFileGroup(title: "Plans", isExpanded: $layout.planFilesExpanded,
-                                    docs: planDocs, emptyHint: "No plans yet.")
-                    nestedFileGroup(title: "Specs", isExpanded: $layout.specFilesExpanded,
-                                    docs: specDocs, emptyHint: "No specs yet.")
-                    configFileRows
-                }
-            }
-        }
-    }
-
-    /// A light, indented sub-group inside Context (Plans / Specs) — the
-    /// section-header construction one notch down: Phosphor folder glyph
-    /// (open/closed) in the leading column, caret at the far trailing
-    /// edge, same hover wash.
-    @ViewBuilder
-    private func nestedFileGroup(
-        title: String, isExpanded: Binding<Bool>, docs: [PlanDoc], emptyHint: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Button {
-                withAnimation(.snappy(duration: 0.18)) { isExpanded.wrappedValue.toggle() }
-            } label: {
-                HStack(spacing: 11) {
-                    (isExpanded.wrappedValue
-                        ? PhosphorIcon.folderOpenFill : PhosphorIcon.folderFill)
-                        .renderingMode(.template)
-                        .scaledToFit()
-                        .frame(width: 15, height: 15)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22)
-                    Text(title)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.primary)
-                    if docs.count > 0 {
-                        Text("\(docs.count)")
-                            .font(.system(size: 12).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                    PhosphorIcon.caretRightFill
-                        .renderingMode(.template)
-                        .scaledToFit()
-                        .frame(width: 10, height: 10)
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .background {
-                if hoveredFileGroup == title {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
-                        .padding(.horizontal, 4)
-                }
-            }
-            .onHover { hovering in
-                if hovering { hoveredFileGroup = title }
-                else if hoveredFileGroup == title { hoveredFileGroup = nil }
-            }
-
-            if isExpanded.wrappedValue {
-                if docs.isEmpty {
-                    listHint(emptyHint)
-                } else {
-                    VStack(alignment: .leading, spacing: 1) {
-                        ForEach(docs) { doc in docFileRow(doc) }
-                    }
-                }
-            }
-        }
-    }
-
-    /// The project's instruction/config files, listed directly under
-    /// Context (no separate section). `.mcp.json` is intentionally omitted.
-    @ViewBuilder
-    private var configFileRows: some View {
-        let files = projectConfigFiles
-        let hasClaude = files.contains { $0.lastPathComponent == "CLAUDE.md" }
-        // Config files are siblings of the Plans/Specs groups, so their glyph
-        // aligns with the group folder column (inset 10, 22-wide) rather
-        // than indenting like a file nested inside a group.
-        ForEach(files, id: \.self) { url in
-            fileRow(url: url, symbol: configSymbol(for: url.lastPathComponent),
-                    leadingInset: 10, iconWidth: 22)
-        }
-        // CLAUDE.md is the one people reach for most — offer to create it
-        // inline when it's missing.
-        if !hasClaude { createClaudeRow }
-    }
-
-    private func listHint(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 12))
-            .foregroundStyle(.tertiary)
-            .padding(.leading, 20)
-            .padding(.trailing, 10)
-            .padding(.vertical, 4)
-    }
-
-    private func docFileRow(_ doc: PlanDoc) -> some View {
-        fileRow(url: doc.fileURL,
-                symbol: doc.kind == .plan ? "checklist"
-                    : (doc.kind == .spec ? "doc.text.magnifyingglass" : "doc.text"))
-    }
-
-    /// One openable file row (filename + type glyph), hover-highlighted.
-    /// `leadingInset`/`iconWidth` let a caller align the glyph column: files
-    /// nested under a Plans/Specs group indent past it (default), while the
-    /// config files sit at the group level, their glyph aligned with the
-    /// group chevrons.
-    private func fileRow(
-        url: URL, symbol: String, leadingInset: CGFloat = 20, iconWidth: CGFloat = 18
-    ) -> some View {
-        Button { onOpenDoc(url) } label: {
-            HStack(spacing: 9) {
-                Image(systemName: symbol)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .frame(width: iconWidth)
-                Text(url.lastPathComponent)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1).truncationMode(.middle)
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, leadingInset)
-            .padding(.trailing, 10)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background {
-            if hoveredOrchestrationURL == url {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.primary.opacity(0.04))
-                    .padding(.horizontal, 4)
-            }
-        }
-        .onHover { hovering in
-            if hovering { hoveredOrchestrationURL = url }
-            else if hoveredOrchestrationURL == url { hoveredOrchestrationURL = nil }
-        }
-        .contextMenu {
-            Button("Reveal in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
-            Button("Copy Path") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(url.path, forType: .string)
-            }
-        }
-    }
-
-    // MARK: - Project Files (CLAUDE.md and friends)
-
-    /// Known project-root config/instruction files, in a stable order,
-    /// filtered to the ones that actually exist.
-    private static let configFileNames = [
-        "CLAUDE.md", "AGENTS.md", "GEMINI.md", "run.toml", "README.md",
-    ]
-
-    private var projectConfigFiles: [URL] {
-        let root = docStore.projectRoot
-        let fm = FileManager.default
-        return Self.configFileNames.compactMap { name in
-            let url = root.appendingPathComponent(name)
-            return fm.fileExists(atPath: url.path) ? url : nil
-        }
-    }
-
-    private func configSymbol(for name: String) -> String {
-        switch name {
-        case "CLAUDE.md", "AGENTS.md", "GEMINI.md": return "sparkles"
-        case "run.toml": return "gearshape"
-        default: return "doc.richtext"
-        }
-    }
-
-    private var createClaudeRow: some View {
-        Button(action: createAndOpenClaudeMd) {
-            HStack(spacing: 9) {
-                PhosphorIcon.plusFill
-                    .renderingMode(.template)
-                    .scaledToFit()
-                    .frame(width: 13, height: 13)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22)
-                Text("New CLAUDE.md")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Create a CLAUDE.md at the project root and open it")
-    }
-
-    /// Write a minimal CLAUDE.md at the project root (if absent) and open
-    /// it in an editor tab.
-    private func createAndOpenClaudeMd() {
-        let url = docStore.projectRoot.appendingPathComponent("CLAUDE.md")
-        if !FileManager.default.fileExists(atPath: url.path) {
-            let stub = """
-            # \(repoStore.project.name)
-
-            Project instructions for Claude. Describe the architecture,
-            conventions, and anything an agent should know before working
-            here.
-            """
-            try? stub.write(to: url, atomically: true, encoding: .utf8)
-        }
-        onOpenDoc(url)
     }
 
     /// One icon+label row per pinned destination — monochrome outline
