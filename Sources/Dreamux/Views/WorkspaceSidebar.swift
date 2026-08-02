@@ -320,7 +320,8 @@ struct WorkspaceSidebar: View {
                 mainBranchDisplayName: repoStore.repositories.first?.defaultBranch ?? "main",
                 mainRepoNames: repoStore.repositories.map(\.name),
                 mainWorkspace: { store.workspaces.first(where: \.isMain) },
-                prState: { name in prState(forFeature: name) }
+                prState: { name in prState(forFeature: name) },
+                mainSyncBadge: { syncStatus.badgeText }
             )
 
             switchNoticeIfAny

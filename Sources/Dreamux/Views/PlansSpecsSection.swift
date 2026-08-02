@@ -86,6 +86,10 @@ struct PlansSpecsSection: View {
     /// (keyed on the live main workspace's branch, if provisioned) and
     /// `planRow` (keyed on `featureName(plan)`) with `PRStatusBadge`.
     let prState: (String) -> PRLaneState?
+    /// Aggregate ↓behind/↑ahead badge text for the pinned main row
+    /// (`SyncStatusStore.badgeText`), `nil` when in sync / no remote.
+    /// A closure, like `prState`, so the row re-reads live store state.
+    let mainSyncBadge: () -> String?
 
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
@@ -286,6 +290,11 @@ struct PlansSpecsSection: View {
                             .foregroundStyle(.primary)
                         if let pr {
                             PRStatusBadge(state: pr)
+                        }
+                        if let badge = mainSyncBadge() {
+                            Text(badge)
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
                         }
                     }
                     if mainRepoNames.count > 1 {
