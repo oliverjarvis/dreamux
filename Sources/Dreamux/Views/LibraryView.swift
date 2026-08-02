@@ -146,7 +146,7 @@ struct LibraryView: View {
                 // inventory sections follow.
                 section("Plans", kind: .plan)
                 section("Specs", kind: .spec)
-                section("Config Files", kind: .configFile)
+                configFilesSection
                 section("Plugins", kind: .plugin)
                 section("Skills", kind: .skill)
                 section("MCP Servers", kind: .mcpServer)
@@ -180,6 +180,104 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    /// The create card is an offer, not inventory: only when CLAUDE.md is
+    /// missing, no kind chip other than All/Context is narrowing, and no
+    /// search is underway — it never matches a query.
+    private var showsCreateClaudeCard: Bool {
+        query.isEmpty
+            && (chip == .all || chip == .context)
+            && !contextItems.contains { $0.kind == .configFile && $0.name == "CLAUDE.md" }
+    }
+
+    /// Config Files renders like every section, plus the trailing create
+    /// card — which counts as content for the hide-when-empty rule, so a
+    /// project with no config files at all can still create CLAUDE.md.
+    @ViewBuilder
+    private var configFilesSection: some View {
+        let sectionItems = filtered.filter { $0.kind == .configFile }
+        if !sectionItems.isEmpty || showsCreateClaudeCard {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionHeader("Config Files", count: sectionItems.count)
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 12)],
+                    alignment: .leading, spacing: 12
+                ) {
+                    ForEach(sectionItems) { item in
+                        card(item)
+                    }
+                    if showsCreateClaudeCard {
+                        createClaudeCard
+                    }
+                }
+            }
+        }
+    }
+
+    /// Dashed-outline create card — secondary styling throughout; the
+    /// hidden pill row reserves the same footer height as its neighbors.
+    private var createClaudeCard: some View {
+        Button(action: createAndOpenClaudeMd) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                        PhosphorIcon.plusFill
+                            .renderingMode(.template)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 16, height: 16)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(width: 34, height: 34)
+                    Text("New CLAUDE.md")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                Text("Create project instructions for Claude at the project root")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: true)
+                    .multilineTextAlignment(.leading)
+                HStack(spacing: 6) {
+                    ActivePill()
+                    ScopePill(label: "Project")
+                }
+                .padding(.top, 2)
+                .hidden()
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.15),
+                                  style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help("Create a CLAUDE.md at the project root and open it")
+    }
+
+    /// Write a minimal CLAUDE.md at the project root (if absent) and open
+    /// it in an editor tab — moved from the sidebar's Context section.
+    /// Best-effort: if the write fails, nothing opens.
+    private func createAndOpenClaudeMd() {
+        let url = projectRoot.appendingPathComponent("CLAUDE.md")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let stub = """
+            # \(projectName)
+
+            Project instructions for Claude. Describe the architecture,
+            conventions, and anything an agent should know before working
+            here.
+            """
+            try? stub.write(to: url, atomically: true, encoding: .utf8)
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        onOpenDoc(url)
     }
 
     private func sectionHeader(_ title: String, count: Int) -> some View {
