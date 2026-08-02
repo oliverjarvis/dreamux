@@ -60,7 +60,10 @@ struct LibraryView: View {
             }
             if let selected = allItems.first(where: { $0.id == selectedID }) {
                 Divider()
-                DetailPanel(item: selected)
+                DetailPanel(
+                    item: selected,
+                    onOpenInEditor: selected.kind.isContext
+                        ? { onOpenDoc(selected.path) } : nil)
                     .frame(width: 300)
             }
         }
@@ -294,7 +297,20 @@ struct LibraryView: View {
         }
     }
 
+    /// Single click selects and opens the panel, as for every card. On
+    /// context cards a two-tap gesture rides alongside the select button:
+    /// double-click opens the editor directly, skipping the panel.
+    @ViewBuilder
     private func card(_ item: LibraryItem) -> some View {
+        if item.kind.isContext {
+            cardButton(item).simultaneousGesture(
+                TapGesture(count: 2).onEnded { onOpenDoc(item.path) })
+        } else {
+            cardButton(item)
+        }
+    }
+
+    private func cardButton(_ item: LibraryItem) -> some View {
         Button {
             selectedID = selectedID == item.id ? nil : item.id
         } label: {
@@ -330,7 +346,7 @@ struct LibraryView: View {
 
     private var footer: some View {
         HStack {
-            Text("Read-only inventory. Browse skills.sh — coming soon.")
+            Text("Browse-only inventory — docs open in the editor. Browse skills.sh — coming soon.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -452,6 +468,8 @@ private struct ScopePill: View {
 /// contents, path, Reveal in Finder. Read-only by design.
 private struct DetailPanel: View {
     let item: LibraryItem
+    /// Non-nil for context kinds — the primary "Open in Editor" action.
+    var onOpenInEditor: (() -> Void)?
 
     var body: some View {
         ScrollView {
@@ -492,6 +510,14 @@ private struct DetailPanel: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.tertiary)
                         .lineLimit(2).truncationMode(.middle)
+                    if let onOpenInEditor {
+                        Button(action: onOpenInEditor) {
+                            Label("Open in Editor", systemImage: "square.and.pencil")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
                     Button {
                         NSWorkspace.shared.activateFileViewerSelecting([item.path])
                     } label: {
