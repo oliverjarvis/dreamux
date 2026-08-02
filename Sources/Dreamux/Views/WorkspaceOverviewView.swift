@@ -9,6 +9,8 @@ struct WorkspaceOverviewDependencies {
     let docStore: DocStore
     let planQueue: PlanQueueController
     let repoStore: RepoStore
+    /// Main's Overview sync line + Sync/Push action (Mode B only).
+    let syncStatus: SyncStatusStore
     let featureName: (PlanDoc) -> String?
     /// Whether a feature name currently has a live workspace — the same
     /// closure `PlansSpecsSection.featureExists` is, needed so main's
@@ -91,6 +93,8 @@ struct WorkspaceOverviewView: View {
     /// Mode A doesn't read it (the branch-vs-base diff goes through
     /// `gateActions` instead, which already resolves worktrees itself).
     let repoStore: RepoStore
+    /// Main's Overview sync line + Sync/Push action (Mode B only).
+    let syncStatus: SyncStatusStore
     /// The same feature-name resolver the rail uses (ledger record first,
     /// else filename-derived branch) — matched against
     /// `session.workspace.name` via `WorkspacePlanResolver`.
@@ -749,6 +753,9 @@ struct WorkspaceOverviewView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: session.workspace.id) {
             headStatus = await resolveWorktreeGitStatus(for: session.workspace)
+            if session.workspace.isMain {
+                await syncStatus.refresh(fetch: true)
+            }
         }
     }
 
@@ -781,6 +788,17 @@ struct WorkspaceOverviewView: View {
                 if !session.workspace.linkedRepoIDs.isEmpty {
                     Text("·").foregroundStyle(.tertiary)
                     Text(session.workspace.linkedRepoIDs.joined(separator: " · "))
+                }
+                if session.workspace.isMain,
+                   syncStatus.snapshots.values.contains(where: \.hasRemote) {
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(SyncStatusStore.overviewText(
+                        behind: syncStatus.aggregateBehind,
+                        ahead: syncStatus.aggregateAhead))
+                        .foregroundStyle(
+                            syncStatus.aggregateBehind + syncStatus.aggregateAhead > 0
+                                ? AnyShapeStyle(.orange)
+                                : AnyShapeStyle(.secondary))
                 }
                 Spacer(minLength: 0)
             }
@@ -818,6 +836,23 @@ struct WorkspaceOverviewView: View {
                 Label("Plan something here", systemImage: "sparkles")
             }
             .buttonStyle(.soft)
+            if session.workspace.isMain {
+                if syncStatus.aggregateBehind > 0 {
+                    Button {
+                        Task { await syncStatus.syncAll() }
+                    } label: {
+                        Label("Sync with origin", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(.soft)
+                } else if syncStatus.aggregateAhead > 0 {
+                    Button {
+                        Task { await syncStatus.pushAll() }
+                    } label: {
+                        Label("Push to origin", systemImage: "arrow.up.circle")
+                    }
+                    .buttonStyle(.soft)
+                }
+            }
             Button(action: session.createTab) {
                 Label("Open terminal", systemImage: "terminal")
             }

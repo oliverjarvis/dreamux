@@ -7,6 +7,13 @@ struct CommitTrailPopover: View {
     let worktreeURL: URL
     let branch: String
     let defaultBranch: String?
+    /// Sync-section inputs — `nil`/empty everywhere except the main
+    /// workspace's chip, where the popover doubles as the per-repo
+    /// sync detail (rows + Sync/Push/Sync All). `var`, not `let`: a
+    /// `let` with a default is dropped from the memberwise initializer,
+    /// which would break the chip's call site.
+    var syncStatus: SyncStatusStore? = nil
+    var syncRepos: [Repository] = []
     let openDiff: (DiffRequest) -> Void
 
     @State private var commits: [CommitInfo] = []
@@ -18,6 +25,27 @@ struct CommitTrailPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            if let syncStatus {
+                let rows = syncRepos.filter {
+                    syncStatus.snapshot(for: $0.name).hasRemote
+                }
+                if !rows.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(rows, id: \.name) { repo in
+                            syncRow(repo, store: syncStatus)
+                        }
+                        if rows.filter({ syncStatus.snapshot(for: $0.name).behind > 0 }).count > 1 {
+                            Button("Sync All") {
+                                Task { await syncStatus.syncAll() }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(10)
+                    Divider()
+                }
+            }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
@@ -44,6 +72,7 @@ struct CommitTrailPopover: View {
         }
         .frame(width: 340)
         .task { await load() }
+        .task { await syncStatus?.refresh(fetch: true) }
     }
 
     private var listHeight: CGFloat {
@@ -122,6 +151,53 @@ struct CommitTrailPopover: View {
                 NSPasteboard.general.setString(commit.sha, forType: .string)
             }
         }
+    }
+
+    /// One repo's sync line: state text, staleness/error notes, and the
+    /// single applicable action. Diverged gets no button by design —
+    /// resolution belongs to a terminal, not a porcelain.
+    @ViewBuilder
+    private func syncRow(_ repo: Repository, store: SyncStatusStore) -> some View {
+        let snap = store.snapshot(for: repo.name)
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(repo.name)
+                        .font(.callout)
+                    Text(SyncStatusStore.rowText(for: snap.state))
+                        .font(.caption)
+                        .foregroundStyle(
+                            snap.behind > 0 || snap.ahead > 0
+                                ? AnyShapeStyle(.orange)
+                                : AnyShapeStyle(.secondary))
+                }
+                if let note = SyncStatusStore.stalenessText(
+                    lastFetch: snap.lastFetch, failed: snap.lastFetchFailed) {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if let error = snap.lastActionError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+            if store.busy.contains(repo.name) {
+                ProgressView().controlSize(.small)
+            } else if snap.behind > 0, snap.ahead == 0 {
+                Button("Sync") { Task { await store.sync(repo) } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            } else if snap.ahead > 0, snap.behind == 0 {
+                Button("Push") { Task { await store.push(repo) } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
     private func subtitleFor(_ commit: CommitInfo) -> String {

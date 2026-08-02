@@ -322,6 +322,58 @@ final class PublishFlowTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktree(repo, feature).path))
         let branches = try await git(["branch", "--list", feature], in: repo.rootURL)
         XCTAssertEqual(branches, "", "feature branch survived cleanup: \(branches)")
+        XCTAssertEqual(flow.syncOutcomes[repo.name], .synced(commits: 1))
+    }
+
+    /// A local commit on main makes the post-PR fast-forward impossible.
+    /// Cleanup must still complete — and record .diverged instead of
+    /// pretending it synced.
+    func testCleanupWithDivergedMainRecordsDivergedAndStillCleansUp() async throws {
+        let (repo, remote) = try await makePublishableRepo(named: "diverged")
+        let (flow, _) = try await publishedFlow(for: repo)
+        try await mergeOnRemote(remote)
+
+        // Diverge local main: an extra commit origin doesn't have.
+        try write("local drift\n", to: "drift.txt", in: worktree(repo, "main"))
+        try await commitAll(in: worktree(repo, "main"), message: "local drift")
+
+        await flow.pollConflictedRepos()  // flips prOpen → prMerged
+        guard case .prMerged = flow.state(for: repo) else {
+            throw XCTSkip("PR did not reach merged state")
+        }
+        await flow.cleanup(repo)
+
+        XCTAssertEqual(flow.state(for: repo), .cleanedUp)
+        XCTAssertEqual(flow.syncOutcomes[repo.name], .diverged)
+        // The drifted commit must survive — ff-only never rewrites.
+        let drifted = FileManager.default.fileExists(
+            atPath: worktree(repo, "main").appendingPathComponent("drift.txt").path)
+        XCTAssertTrue(drifted)
+    }
+
+    // MARK: - Cleanup summary copy
+
+    func testCleanupSummaryStrings() {
+        XCTAssertEqual(
+            MergeFlow.cleanupSummary(outcome: nil, defaultBranch: "main"),
+            "Cleaned up")
+        XCTAssertEqual(
+            MergeFlow.cleanupSummary(outcome: .alreadyUpToDate, defaultBranch: "main"),
+            "Cleaned up")
+        XCTAssertEqual(
+            MergeFlow.cleanupSummary(outcome: .synced(commits: 3), defaultBranch: "main"),
+            "Cleaned up · main synced with origin")
+        XCTAssertEqual(
+            MergeFlow.cleanupSummary(outcome: .diverged, defaultBranch: "main"),
+            "Cleaned up · main diverged from origin — sync from the header")
+        XCTAssertEqual(
+            MergeFlow.cleanupSummary(
+                outcome: .fetchFailed(message: "x"), defaultBranch: "main"),
+            "Cleaned up · couldn't reach origin to sync main")
+        XCTAssertEqual(
+            MergeFlow.cleanupSummary(
+                outcome: .ffFailed(message: "x"), defaultBranch: "main"),
+            "Cleaned up · main couldn't fast-forward — sync from the header")
     }
 
     // MARK: - Resume

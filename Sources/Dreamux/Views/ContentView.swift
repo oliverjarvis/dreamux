@@ -197,6 +197,7 @@ struct ContentView: View {
                         runners: runners,
                         signals: signals,
                         prStatus: session.prStatus,
+                        syncStatus: session.syncStatus,
                         layout: layout,
                         sidebarMode: $sidebarMode,
                         docStore: docStore,
@@ -937,6 +938,15 @@ struct ContentView: View {
                                 }
                                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                             }
+                            // Aggregate ↓behind/↑ahead vs origin across the
+                            // project's repos — main workspace only (feature
+                            // branches answer to the PR flow instead).
+                            if store.activeWorkspace?.isMain == true,
+                               let sync = session.syncStatus.badgeText {
+                                Text(sync)
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .font(.system(size: 12))
                         .padding(.horizontal, 10)
@@ -966,6 +976,9 @@ struct ContentView: View {
                             worktreeURL: worktree,
                             branch: git.branch,
                             defaultBranch: gitDefaultBranch,
+                            syncStatus: store.activeWorkspace?.isMain == true
+                                ? session.syncStatus : nil,
+                            syncRepos: repoStore.repositories,
                             openDiff: { request in
                                 showCommitTrail = false
                                 openDiffTab(request)
@@ -1103,6 +1116,7 @@ struct ContentView: View {
             docStore: docStore,
             planQueue: planQueue,
             repoStore: repoStore,
+            syncStatus: session.syncStatus,
             featureName: { (plan: PlanDoc) -> String? in planFeatureName(for: plan) },
             featureExists: { name in store.featureNames.contains(name) },
             onOpenDoc: openFile,

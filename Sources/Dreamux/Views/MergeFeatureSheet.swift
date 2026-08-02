@@ -125,7 +125,7 @@ struct MergeFeatureSheet: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 Spacer()
-                stateBadge(state)
+                stateBadge(state, repo: repo)
             }
 
             if case .conflicted(let paths) = state {
@@ -315,7 +315,7 @@ struct MergeFeatureSheet: View {
     }
 
     @ViewBuilder
-    private func stateBadge(_ state: MergeRepoState) -> some View {
+    private func stateBadge(_ state: MergeRepoState, repo: Repository) -> some View {
         switch state {
         case .pending:
             Text("Pending")
@@ -352,7 +352,7 @@ struct MergeFeatureSheet: View {
                 Text("Cleaning up…").font(.caption)
             }
         case .cleanedUp:
-            Label("Cleaned up", systemImage: "trash")
+            Label(flow.cleanupSummary(for: repo), systemImage: "trash")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.tertiary)
         case .pushing:
