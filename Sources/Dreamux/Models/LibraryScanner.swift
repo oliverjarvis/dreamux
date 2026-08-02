@@ -15,7 +15,7 @@ enum LibraryItemKind: String {
     }
 }
 
-/// One card in the Skills & MCPs library. Read-only inventory — the
+/// One card in the Context & MCPs library. Read-only inventory — the
 /// page never mutates anything these point at.
 struct LibraryItem: Identifiable, Equatable {
     let kind: LibraryItemKind

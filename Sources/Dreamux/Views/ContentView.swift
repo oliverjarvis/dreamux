@@ -1605,7 +1605,7 @@ struct ContentView: View {
 /// terminal pane for the active feature; `.run` shows the Run page scoped
 /// to a specific workspace (its play button was clicked); `.signals`
 /// shows the project-wide log stream; `.flows` shows the Flows overview
-/// board; `.library` shows the Skills & MCPs inventory page; `.app` hosts a
+/// board; `.library` shows the Context & MCPs inventory page; `.app` hosts a
 /// project applet's preview (and, in Edit mode, its builder agent).
 /// Always-mounted consumer for run-config handoffs — the e2e
 /// `detectRunConfig` flag and the isolate alert's pending runner — so

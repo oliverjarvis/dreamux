@@ -19,7 +19,7 @@ final class SidebarTileTests: XCTestCase {
         XCTAssertEqual(SidebarTile.signals.label, "Signals")
         XCTAssertEqual(SidebarTile.browser.label, "Browser")
         XCTAssertEqual(SidebarTile.flows.label, "Flows")
-        XCTAssertEqual(SidebarTile.library.label, "Skills & MCPs")
+        XCTAssertEqual(SidebarTile.library.label, "Context & MCPs")
     }
 
     /// The bundled Phosphor PDFs must all resolve — a missing resource

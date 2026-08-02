@@ -1,10 +1,12 @@
 import SwiftUI
 import AppKit
 
-/// The Skills & MCPs library — a read-only, App-Store-ish inventory of
-/// every skill, MCP server, and plugin on this machine, badged with
-/// whether THIS project's agents can reach it. v1 browses; installing
-/// and the skills.sh registry land later (see the 2026-06-12 spec).
+/// The Context & MCPs library — the project's context docs (plans,
+/// specs, root config files) merged with a read-only, App-Store-ish
+/// inventory of every skill, MCP server, and plugin on this machine,
+/// badged with whether THIS project's agents can reach it. Docs open in
+/// the editor; installing and the skills.sh registry land later (see
+/// the 2026-06-12 spec).
 struct LibraryView: View {
     let projectRoot: URL
     /// Project display name — the CLAUDE.md create card's template header.
