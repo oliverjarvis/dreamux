@@ -179,7 +179,7 @@ struct LibraryView: View {
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    KindTile(kind: item.kind)
+                    KindTile(kind: item.kind, name: item.name)
                     Text(item.name)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(.primary)
@@ -221,6 +221,9 @@ struct LibraryView: View {
 /// the bundled set has one; SF Symbol fallback otherwise. Never emoji.
 private struct KindTile: View {
     let kind: LibraryItemKind
+    /// Item name — config-file glyphs are per-file (the sidebar's old
+    /// mapping); other kinds ignore it.
+    var name: String = ""
 
     var body: some View {
         ZStack {
@@ -236,6 +239,9 @@ private struct KindTile: View {
         case .plugin: return .purple
         case .skill: return .orange
         case .mcpServer: return .blue
+        case .plan: return .indigo
+        case .spec: return .cyan
+        case .configFile: return .mint
         }
     }
 
@@ -244,6 +250,7 @@ private struct KindTile: View {
         case .plugin: return 0.16
         case .skill: return 0.14
         case .mcpServer: return 0.15
+        case .plan, .spec, .configFile: return 0.15
         }
     }
 
@@ -263,6 +270,27 @@ private struct KindTile: View {
             Image(systemName: "server.rack")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(tint)
+        case .plan:
+            Image(systemName: "checklist")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tint)
+        case .spec:
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tint)
+        case .configFile:
+            Image(systemName: configGlyph)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tint)
+        }
+    }
+
+    /// The sidebar's old `configSymbol` mapping, carried over.
+    private var configGlyph: String {
+        switch name {
+        case "CLAUDE.md", "AGENTS.md", "GEMINI.md": return "sparkles"
+        case "run.toml": return "gearshape"
+        default: return "doc.richtext"
         }
     }
 }

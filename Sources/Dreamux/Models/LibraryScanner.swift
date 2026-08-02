@@ -3,6 +3,16 @@ import Foundation
 /// What a library card represents.
 enum LibraryItemKind: String {
     case skill, mcpServer, plugin
+    case plan, spec, configFile
+
+    /// The three kinds the Context chip covers — docs and config files
+    /// merged in from the old sidebar Context section.
+    var isContext: Bool {
+        switch self {
+        case .plan, .spec, .configFile: return true
+        case .skill, .mcpServer, .plugin: return false
+        }
+    }
 }
 
 /// One card in the Skills & MCPs library. Read-only inventory — the
@@ -21,7 +31,14 @@ struct LibraryItem: Identifiable, Equatable {
     let accessReason: String
     /// Contents lines for the detail panel (files, command, versions…).
     let detail: [String]
-    var id: String { "\(kind.rawValue)|\(scopeLabel)|\(name)" }
+    /// Context kinds key by path — two docs may share a title, but paths
+    /// are unique. Other kinds keep (kind, scope, name): MCP servers
+    /// share a `.mcp.json` path, so path can't be the universal key.
+    var id: String {
+        kind.isContext
+            ? "\(kind.rawValue)|\(path.path)"
+            : "\(kind.rawValue)|\(scopeLabel)|\(name)"
+    }
 }
 
 /// The single install of a plugin that matters for THIS project — the
