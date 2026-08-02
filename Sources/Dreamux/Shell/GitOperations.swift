@@ -365,25 +365,47 @@ enum GitOperations {
         )
     }
 
-    /// Fetch `origin` and fast-forward the local default branch from
-    /// `origin/<branch>` inside its worktree. Used after a PR merges
-    /// remotely so local main reflects the merged state before the
-    /// feature worktree is cleaned up. Best-effort by design: a
-    /// diverged local main is the user's situation to resolve, not a
-    /// reason to block cleanup. ff-only (never a real merge) because a
-    /// PR merged via squash/rebase produces remote commits unrelated to
-    /// the local feature tip — merging those would invent conflicts.
+    /// Outcome of a fetch + fast-forward attempt on the default branch.
+    /// `MergeFlow.cleanup` records it per repo and `SyncStatusStore.sync`
+    /// folds it into the repo's snapshot — neither treats failure as
+    /// fatal, but both now *know*.
+    enum FastForwardOutcome: Equatable {
+        case synced(commits: Int)
+        case alreadyUpToDate
+        case diverged
+        case fetchFailed(message: String)
+        case ffFailed(message: String)
+    }
+
+    /// Fetch `origin/<branch>` and fast-forward the local branch inside
+    /// its worktree. ff-only (never a real merge) because a PR merged
+    /// via squash/rebase produces remote commits unrelated to the local
+    /// feature tip — merging those would invent conflicts. A diverged
+    /// local branch is detected up front and reported, not attempted.
     static func fastForwardFromOrigin(
         branch: String,
         in baseWorktreeURL: URL,
         onLine: (@Sendable (String) -> Void)? = nil
-    ) async {
-        _ = try? await runGit(["fetch", "origin", branch], in: baseWorktreeURL, onLine: onLine)
-        _ = try? await runGit(
-            ["merge", "--ff-only", "origin/\(branch)"],
-            in: baseWorktreeURL,
-            onLine: onLine
-        )
+    ) async -> FastForwardOutcome {
+        do {
+            _ = try await runGit(
+                ["fetch", "origin", branch], in: baseWorktreeURL, onLine: onLine)
+        } catch {
+            return .fetchFailed(message: error.localizedDescription)
+        }
+        guard let counts = await aheadBehind(branch: branch, in: baseWorktreeURL) else {
+            return .fetchFailed(message: "origin/\(branch) not found after fetch")
+        }
+        if counts.behind == 0 { return .alreadyUpToDate }
+        if counts.ahead > 0 { return .diverged }
+        do {
+            _ = try await runGit(
+                ["merge", "--ff-only", "origin/\(branch)"],
+                in: baseWorktreeURL, onLine: onLine)
+            return .synced(commits: counts.behind)
+        } catch {
+            return .ffFailed(message: error.localizedDescription)
+        }
     }
 
     // MARK: - Merge

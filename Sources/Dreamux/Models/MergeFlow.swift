@@ -121,6 +121,10 @@ final class MergeFlow {
 
     private(set) var states: [String: MergeRepoState] = [:]
     private(set) var commitErrors: [String: String] = [:]
+    /// Per-repo result of the post-PR fast-forward that `cleanup` runs
+    /// on the `.prMerged` path — what lets the sheet's "Cleaned up"
+    /// badge say whether main actually caught up with origin.
+    private(set) var syncOutcomes: [String: GitOperations.FastForwardOutcome] = [:]
     /// Per-repo verdict on whether "Create PR" can be offered, filled
     /// once by `initializeStates`. Missing key (pre-check still
     /// running) renders the same as `.noRemote` — no PR button.
@@ -509,7 +513,7 @@ final class MergeFlow {
         // rest of cleanup leaves the repo in the same shape a local
         // merge would have.
         if case .prMerged = priorState {
-            await GitOperations.fastForwardFromOrigin(
+            syncOutcomes[repo.name] = await GitOperations.fastForwardFromOrigin(
                 branch: repo.defaultBranch,
                 in: baseWorktreeURL(for: repo),
                 onLine: liveLineHandler(for: repo.name)
@@ -559,5 +563,34 @@ final class MergeFlow {
                 self.liveOutput[repoName] = buffer
             }
         }
+    }
+
+    // MARK: - Cleanup summary
+
+    /// The "Cleaned up" badge's full text for a repo — base text plus
+    /// what the post-PR fast-forward actually did. `nil`/upToDate keep
+    /// the plain text: the local-merge path has no sync step, and an
+    /// already-current main needs no annotation.
+    static func cleanupSummary(
+        outcome: GitOperations.FastForwardOutcome?,
+        defaultBranch: String
+    ) -> String {
+        switch outcome {
+        case nil, .alreadyUpToDate:
+            return "Cleaned up"
+        case .synced:
+            return "Cleaned up · \(defaultBranch) synced with origin"
+        case .diverged:
+            return "Cleaned up · \(defaultBranch) diverged from origin — sync from the header"
+        case .fetchFailed:
+            return "Cleaned up · couldn't reach origin to sync \(defaultBranch)"
+        case .ffFailed:
+            return "Cleaned up · \(defaultBranch) couldn't fast-forward — sync from the header"
+        }
+    }
+
+    func cleanupSummary(for repo: Repository) -> String {
+        Self.cleanupSummary(
+            outcome: syncOutcomes[repo.name], defaultBranch: repo.defaultBranch)
     }
 }
