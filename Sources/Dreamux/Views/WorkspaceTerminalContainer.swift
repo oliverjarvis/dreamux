@@ -93,6 +93,7 @@ private struct TabContentView: View {
                 docStore: overview.docStore,
                 planQueue: overview.planQueue,
                 repoStore: overview.repoStore,
+                syncStatus: overview.syncStatus,
                 featureName: overview.featureName,
                 featureExists: overview.featureExists,
                 onOpenDoc: overview.onOpenDoc,

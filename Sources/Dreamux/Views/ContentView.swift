@@ -1116,6 +1116,7 @@ struct ContentView: View {
             docStore: docStore,
             planQueue: planQueue,
             repoStore: repoStore,
+            syncStatus: session.syncStatus,
             featureName: { (plan: PlanDoc) -> String? in planFeatureName(for: plan) },
             featureExists: { name in store.featureNames.contains(name) },
             onOpenDoc: openFile,
