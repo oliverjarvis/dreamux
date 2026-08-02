@@ -326,6 +326,29 @@ enum GitOperations {
         )) != nil
     }
 
+    /// (ahead, behind) of local `branch` vs `origin/<branch>`, read from
+    /// the local remote-tracking ref — offline-safe and instant; the
+    /// counts are only as fresh as the last fetch. `nil` when either
+    /// ref is missing (no remote, never fetched, unborn branch).
+    static func aheadBehind(
+        branch: String, in repoRootURL: URL
+    ) async -> (ahead: Int, behind: Int)? {
+        guard let output = try? await runGit(
+            ["rev-list", "--left-right", "--count",
+             "origin/\(branch)...\(branch)"],
+            in: repoRootURL
+        ) else { return nil }
+        let parts = output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\t")
+        guard parts.count == 2,
+              let behind = Int(parts[0]), let ahead = Int(parts[1])
+        else { return nil }
+        // Left side = commits only on origin/<branch> = behind;
+        // right side = commits only on local <branch> = ahead.
+        return (ahead: ahead, behind: behind)
+    }
+
     /// Push a branch to `origin`, creating/updating the remote branch
     /// and setting upstream. Auth prompts are disabled by `runGit`'s
     /// non-interactive env, so a missing credential fails fast with a
