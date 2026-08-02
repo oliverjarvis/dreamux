@@ -7,6 +7,13 @@ import AppKit
 /// and the skills.sh registry land later (see the 2026-06-12 spec).
 struct LibraryView: View {
     let projectRoot: URL
+    /// Project display name — the CLAUDE.md create card's template header.
+    let projectName: String
+    /// Live plan/spec docs (kqueue-watched) — doc cards appear and update
+    /// as agents write files, no rescan needed.
+    let docStore: DocStore
+    /// Open a doc in an editor tab, exactly as the old sidebar rows did.
+    let onOpenDoc: (URL) -> Void
 
     @State private var items: [LibraryItem] = []
     @State private var query = ""
@@ -16,6 +23,19 @@ struct LibraryView: View {
     @State private var chip: LibraryChip = .all
     /// Show only what THIS project's agents can reach right now.
     @State private var activeOnly = false
+
+    /// Context cards, recomputed per body evaluation: `docStore.docs` is
+    /// Observation-tracked so doc cards track disk live; the five config
+    /// `fileExists` checks are negligible.
+    private var contextItems: [LibraryItem] {
+        LibraryContext.docItems(docs: docStore.docs, projectRoot: projectRoot)
+            + LibraryContext.configItems(projectRoot: projectRoot)
+    }
+
+    /// Context first, then the one-shot scanned inventory.
+    private var allItems: [LibraryItem] {
+        contextItems + items
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -38,7 +58,7 @@ struct LibraryView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
             }
-            if let selected = items.first(where: { $0.id == selectedID }) {
+            if let selected = allItems.first(where: { $0.id == selectedID }) {
                 Divider()
                 DetailPanel(item: selected)
                     .frame(width: 300)
@@ -112,7 +132,7 @@ struct LibraryView: View {
     /// Everything except kind narrowing — chip counts read this so each
     /// chip can show what you'd get by clicking it.
     private var searchScoped: [LibraryItem] {
-        LibraryFilter.searchScoped(items, query: query, activeOnly: activeOnly)
+        LibraryFilter.searchScoped(allItems, query: query, activeOnly: activeOnly)
     }
 
     private var filtered: [LibraryItem] {
@@ -122,8 +142,11 @@ struct LibraryView: View {
     private var grid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Plugins first: they're the bundles skills and servers
-                // ship inside; the standalone sections follow.
+                // Context leads — the page is named for it; the scanned
+                // inventory sections follow.
+                section("Plans", kind: .plan)
+                section("Specs", kind: .spec)
+                section("Config Files", kind: .configFile)
                 section("Plugins", kind: .plugin)
                 section("Skills", kind: .skill)
                 section("MCP Servers", kind: .mcpServer)
@@ -146,17 +169,7 @@ struct LibraryView: View {
         let sectionItems = filtered.filter { $0.kind == kind }
         if !sectionItems.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.primary)
-                    Text("\(sectionItems.count)")
-                        .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.primary.opacity(0.08)))
-                }
+                sectionHeader(title, count: sectionItems.count)
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 12)],
                     alignment: .leading, spacing: 12
@@ -166,6 +179,20 @@ struct LibraryView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+            Text("\(count)")
+                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.primary.opacity(0.08)))
         }
     }
 

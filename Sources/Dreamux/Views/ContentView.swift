@@ -628,7 +628,11 @@ struct ContentView: View {
                 gateActions: flowGateActions
             )
         case .library:
-            LibraryView(projectRoot: repoStore.project.rootPath)
+            LibraryView(
+                projectRoot: repoStore.project.rootPath,
+                projectName: repoStore.project.name,
+                docStore: docStore,
+                onOpenDoc: openFile)
         case .app(let id):
             // The applet's folder is the source of truth: a removed applet
             // resolves to nil here and shows the missing state; the Applets
