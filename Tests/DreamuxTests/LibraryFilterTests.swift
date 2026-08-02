@@ -63,4 +63,38 @@ final class LibraryFilterTests: XCTestCase {
                 [activeMatch, inactiveMatch], query: "svelte", activeOnly: true),
             [activeMatch])
     }
+
+    func testChipKindSets() {
+        XCTAssertNil(LibraryChip.all.kinds)
+        XCTAssertEqual(LibraryChip.context.kinds, [.plan, .spec, .configFile])
+        XCTAssertEqual(LibraryChip.plugins.kinds, [.plugin])
+        XCTAssertEqual(LibraryChip.skills.kinds, [.skill])
+        XCTAssertEqual(LibraryChip.mcpServers.kinds, [.mcpServer])
+    }
+
+    func testNarrowedFiltersByChipKindSet() {
+        let plan = makeItem(kind: .plan, name: "plan")
+        let spec = makeItem(kind: .spec, name: "spec")
+        let config = makeItem(kind: .configFile, name: "CLAUDE.md")
+        let skill = makeItem(kind: .skill, name: "skill")
+        let items = [plan, spec, config, skill]
+        XCTAssertEqual(LibraryFilter.narrowed(items, chip: .all), items)
+        XCTAssertEqual(LibraryFilter.narrowed(items, chip: .context),
+                       [plan, spec, config])
+        XCTAssertEqual(LibraryFilter.narrowed(items, chip: .skills), [skill])
+    }
+
+    func testChipCountSemanticsQueryAndActiveApplyButNotKinds() {
+        // A chip's count = narrowed(searchScoped) — the composition the
+        // view uses, so Context counts cover all three kinds under the
+        // current query/active-toggle.
+        let activePlanMatch = makeItem(kind: .plan, name: "alpha plan", accessible: true)
+        let inactiveSpecMatch = makeItem(kind: .spec, name: "alpha spec", accessible: false)
+        let activeSkillMiss = makeItem(kind: .skill, name: "beta", accessible: true)
+        let scoped = LibraryFilter.searchScoped(
+            [activePlanMatch, inactiveSpecMatch, activeSkillMiss],
+            query: "alpha", activeOnly: true)
+        XCTAssertEqual(LibraryFilter.narrowed(scoped, chip: .context), [activePlanMatch])
+        XCTAssertEqual(LibraryFilter.narrowed(scoped, chip: .all), [activePlanMatch])
+    }
 }

@@ -12,8 +12,8 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var selectedID: LibraryItem.ID?
     @State private var loaded = false
-    /// nil = all kinds; otherwise the picker narrows to one section.
-    @State private var kindFilter: LibraryItemKind?
+    /// Active toolbar chip — `.all` shows every kind.
+    @State private var chip: LibraryChip = .all
     /// Show only what THIS project's agents can reach right now.
     @State private var activeOnly = false
 
@@ -64,7 +64,7 @@ struct LibraryView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
-            TextField("Search skills, servers, plugins", text: $query)
+            TextField("Search context, skills, servers", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
             if !query.isEmpty {
@@ -82,19 +82,16 @@ struct LibraryView: View {
                 .fill(Color.secondary.opacity(0.12)))
     }
 
-    /// Kind chips + active-only switch. Plugins lead — they're the
-    /// containers most skills/servers arrive in. Chip counts reflect the
-    /// current search and active-toggle, but not the kind narrowing.
+    /// Chip row + active-only switch. Context leads after All — the page
+    /// is named for it. Chip counts reflect the current search and
+    /// active-toggle, but not the kind narrowing.
     private var filterBar: some View {
         HStack(spacing: 8) {
-            FilterChip(label: "All", count: searchScoped.count,
-                       isActive: kindFilter == nil) { kindFilter = nil }
-            FilterChip(label: "Plugins", count: kindCount(.plugin),
-                       isActive: kindFilter == .plugin) { kindFilter = .plugin }
-            FilterChip(label: "Skills", count: kindCount(.skill),
-                       isActive: kindFilter == .skill) { kindFilter = .skill }
-            FilterChip(label: "MCP Servers", count: kindCount(.mcpServer),
-                       isActive: kindFilter == .mcpServer) { kindFilter = .mcpServer }
+            ForEach(LibraryChip.allCases, id: \.self) { candidate in
+                FilterChip(label: candidate.label,
+                           count: chipCount(candidate),
+                           isActive: chip == candidate) { chip = candidate }
+            }
             Spacer(minLength: 12)
             Toggle(isOn: $activeOnly) {
                 Text("Active in this project")
@@ -108,8 +105,8 @@ struct LibraryView: View {
         }
     }
 
-    private func kindCount(_ kind: LibraryItemKind) -> Int {
-        searchScoped.filter { $0.kind == kind }.count
+    private func chipCount(_ chip: LibraryChip) -> Int {
+        LibraryFilter.narrowed(searchScoped, chip: chip).count
     }
 
     /// Everything except kind narrowing — chip counts read this so each
@@ -119,8 +116,7 @@ struct LibraryView: View {
     }
 
     private var filtered: [LibraryItem] {
-        guard let kindFilter else { return searchScoped }
-        return searchScoped.filter { $0.kind == kindFilter }
+        LibraryFilter.narrowed(searchScoped, chip: chip)
     }
 
     private var grid: some View {
@@ -383,25 +379,6 @@ private struct DetailPanel: View {
                 Spacer(minLength: 0)
             }
             .padding(14)
-        }
-    }
-}
-
-/// Pure filtering pipeline for the library page: activeOnly → query.
-enum LibraryFilter {
-    static func searchScoped(
-        _ items: [LibraryItem], query: String, activeOnly: Bool
-    ) -> [LibraryItem] {
-        var result = items
-        if activeOnly {
-            result = result.filter(\.accessible)
-        }
-        guard !query.isEmpty else { return result }
-        let needle = query.lowercased()
-        return result.filter {
-            $0.name.lowercased().contains(needle)
-                || $0.description.lowercased().contains(needle)
-                || $0.scopeLabel.lowercased().contains(needle)
         }
     }
 }
