@@ -14,19 +14,6 @@ final class SidebarLayoutStore {
     var plansExpanded: Bool {
         didSet { if plansExpanded != oldValue { save() } }
     }
-    /// The Context section (Plans + Specs groups and the project's
-    /// instruction/config files).
-    var contextExpanded: Bool {
-        didSet { if contextExpanded != oldValue { save() } }
-    }
-    /// The Plans group inside Context (flat, filenames only).
-    var planFilesExpanded: Bool {
-        didSet { if planFilesExpanded != oldValue { save() } }
-    }
-    /// The Specs group inside Context (flat, filenames only).
-    var specFilesExpanded: Bool {
-        didSet { if specFilesExpanded != oldValue { save() } }
-    }
     /// The Applets section (Applet Studio applets adopted/created in this project).
     var appsExpanded: Bool {
         didSet { if appsExpanded != oldValue { save() } }
@@ -48,9 +35,6 @@ final class SidebarLayoutStore {
         tiles = Self.reconcile(loaded?.tiles ?? SidebarTile.allCases)
         featureOrder = loaded?.features ?? []
         plansExpanded = loaded?.plansExpanded ?? true
-        contextExpanded = loaded?.contextExpanded ?? false
-        planFilesExpanded = loaded?.planFilesExpanded ?? true
-        specFilesExpanded = loaded?.specFilesExpanded ?? true
         appsExpanded = loaded?.appsExpanded ?? true
         autoRunParallel = loaded?.autoRunParallel ?? false
     }
@@ -88,9 +72,6 @@ final class SidebarLayoutStore {
         var tiles: [SidebarTile]
         var features: [String]
         var plansExpanded: Bool?
-        var contextExpanded: Bool?
-        var planFilesExpanded: Bool?
-        var specFilesExpanded: Bool?
         var appsExpanded: Bool?
         var autoRunParallel: Bool?
     }
@@ -113,9 +94,6 @@ final class SidebarLayoutStore {
     private func save() {
         let payload = Payload(tiles: tiles, features: featureOrder,
                               plansExpanded: plansExpanded,
-                              contextExpanded: contextExpanded,
-                              planFilesExpanded: planFilesExpanded,
-                              specFilesExpanded: specFilesExpanded,
                               appsExpanded: appsExpanded,
                               autoRunParallel: autoRunParallel)
         let encoder = JSONEncoder()

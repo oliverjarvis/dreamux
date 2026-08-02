@@ -18,7 +18,7 @@ enum SidebarTile: String, Codable, CaseIterable, Identifiable {
         case .signals: return PhosphorIcon.airTrafficControlFill
         case .browser: return PhosphorIcon.globeFill
         case .flows: return PhosphorIcon.graphFill
-        case .library: return PhosphorIcon.puzzlePieceFill
+        case .library: return PhosphorIcon.filesFill
         }
     }
 
@@ -36,7 +36,7 @@ enum SidebarTile: String, Codable, CaseIterable, Identifiable {
         case .signals: return "Signals"
         case .browser: return "Browser"
         case .flows: return "Flows"
-        case .library: return "Skills & MCPs"
+        case .library: return "Context & MCPs"
         }
     }
 }

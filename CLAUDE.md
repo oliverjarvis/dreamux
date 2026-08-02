@@ -18,14 +18,14 @@ Concrete scale that reads well here:
 
 - **Row labels / file names:** 14–15pt. Never `.caption2` (11pt) for a real,
   clickable row.
-- **Section headers** (Applets, Workspaces, Context, Repositories): styled
+- **Section headers** (Applets, Workspaces, Repositories): styled
   identically to clickable rows — 15pt primary title-case label, Phosphor
   fill icon in the shared 22pt column, disclosure caret at the far trailing
   edge (since 2026-07-18). Sections read by position, icon, and caret, not
   by a smaller/dimmer type style.
-- **Nested sub-group headers** (Plans, Specs under Context): 14pt medium,
-  **primary** color — a sub-level is still a first-class row, not a faint
-  whisper. Do not shrink sub-items to signal nesting.
+- **Nested sub-group headers** (when a section nests a sub-list): 14pt
+  medium, **primary** color — a sub-level is still a first-class row, not a
+  faint whisper. Do not shrink sub-items to signal nesting.
 - **Icons:** 14–16pt; give leading glyphs a fixed-width frame so columns
   line up.
 - **Counts / metadata:** ~12–13pt, `.secondary` — not tiny `.tertiary`.
@@ -34,16 +34,18 @@ Concrete scale that reads well here:
 ### Show hierarchy with alignment and indentation, not by shrinking
 
 Siblings render at the same size and their glyph columns line up. A file that
-sits at a group's level (e.g. CLAUDE.md alongside the Plans/Specs groups)
-aligns its icon with those groups' chevrons; a file *nested inside* a group
-indents past it. Reach for a shared row builder with a `leadingInset`/
-`iconWidth` parameter rather than duplicating rows at different sizes.
+sits at a group's level aligns its icon with that group's chevron; a file
+*nested inside* a group indents past it. Reach for a shared row builder with
+a `leadingInset`/`iconWidth` parameter rather than duplicating rows at
+different sizes.
 
 ### Prefer few top-level sections
 
 Don't sprout a top-level header per data kind. Related lists collapse under
-one section (e.g. Plans + Specs + config files all live under **Context**).
-Fewer, well-named sections beat a wall of tiny headers.
+one section — or move to a page when they're really a browsing surface
+(plans, specs, and config files live as cards on the **Context & MCPs**
+page, not as sidebar sections). Fewer, well-named sections beat a wall of
+tiny headers.
 
 ### Consistent control shapes
 
