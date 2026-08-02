@@ -71,6 +71,10 @@ private struct ProjectWindowContents: View {
                 NotificationManager.shared.notify(
                     title: "Couldn't auto-run \(title)", body: message)
             }
+            // App-active gate for the sync poller — wired here, not in
+            // ProjectSession, for the same reason onAutoRunFailure is:
+            // AppKit singletons and SPM test processes don't mix.
+            session.syncStatus.isAppActive = { NSApplication.shared.isActive }
         }
         .onDisappear {
             // e2e bookkeeping (handles are weak; the bundle lives on in

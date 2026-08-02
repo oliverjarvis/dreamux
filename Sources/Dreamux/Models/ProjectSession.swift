@@ -40,6 +40,12 @@ final class ProjectSession {
     /// `ContentView` re-keys it onto workspace ids for `FlowsBoard.compose`.
     let prStatus = PRStatusStore()
 
+    /// Per-repo default-branch position vs origin — the store behind
+    /// the header chip's ↓/↑ badge, main's Overview sync line, the
+    /// sidebar main-row badge, and the commit-trail popover's sync
+    /// rows. Constructed in `init` (it needs `repoStore`).
+    let syncStatus: SyncStatusStore
+
     /// Live sessions for open applets, cached by applet id so a `WKWebView`
     /// and its builder-agent terminal survive SwiftUI redraws — the same
     /// keep-it-alive discipline the workspace terminal sessions use.
@@ -110,6 +116,7 @@ final class ProjectSession {
         let store = WorkspaceStore(defaultWorkingDirectory: project.rootPath.path)
         store.layout = layout
         let repoStore = RepoStore(project: project)
+        self.syncStatus = SyncStatusStore(repos: { repoStore.repositories })
 
         let runConfig = RunConfigStore(project: project)
         let signals = SignalStore()
@@ -678,6 +685,8 @@ final class ProjectSession {
         Task {
             await store.reloadFeatures(in: project, repoStore: repoStore)
             await seedPRTracking()
+            await syncStatus.refresh(fetch: true)
+            syncStatus.startPolling()
         }
     }
 

@@ -18,6 +18,10 @@ struct WorkspaceSidebar: View {
     /// a feature here the instant its PR opens, so the Flows lane picks
     /// up the badge without waiting for the next launch's seed pass.
     let prStatus: PRStatusStore
+    /// `ProjectSession.syncStatus` — the merge sheet's open/publish/
+    /// cleanup moments trigger its refreshes, and `PlansSpecsSection`'s
+    /// main row reads its badge (Task 7 wiring).
+    let syncStatus: SyncStatusStore
     @Bindable var layout: SidebarLayoutStore
     @Binding var sidebarMode: SidebarMode
     @Bindable var docStore: DocStore
@@ -125,6 +129,7 @@ struct WorkspaceSidebar: View {
         }
         .sheet(item: $pendingMerge, onDismiss: { emphasizePublish = false }) { workspace in
             mergeSheet(for: workspace)
+                .task { await syncStatus.refresh(fetch: true) }
         }
         .sheet(item: $customizing) { workspace in
             CustomizeWorkspaceSheet(
@@ -812,6 +817,7 @@ struct WorkspaceSidebar: View {
             },
             onRepoCleanedUp: { repo in
                 stopRunnersTiedToFeature(repo: repo, branch: workspace.name)
+                Task { await syncStatus.refresh(fetch: true) }
             },
             onAllCleanedUp: {
                 finalizeFeatureCleanup(workspace)
@@ -823,6 +829,7 @@ struct WorkspaceSidebar: View {
                 prStatus.track(
                     feature: workspace.name,
                     worktreeURL: repo.rootURL.appendingPathComponent(workspace.name))
+                Task { await syncStatus.refresh(fetch: true) }
             },
             onDismiss: { pendingMerge = nil },
             emphasizePublish: emphasizePublish

@@ -197,6 +197,7 @@ struct ContentView: View {
                         runners: runners,
                         signals: signals,
                         prStatus: session.prStatus,
+                        syncStatus: session.syncStatus,
                         layout: layout,
                         sidebarMode: $sidebarMode,
                         docStore: docStore,
