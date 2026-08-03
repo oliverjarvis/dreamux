@@ -224,6 +224,191 @@ final class PublishFlowTests: XCTestCase {
         XCTAssertEqual(PublishAvailability.decide(anyRemote: true, ghAvailable: true), .available)
     }
 
+    // MARK: - gh binary resolution
+
+    /// The PATH a launchd-started app inherits: no Homebrew, which is
+    /// where `gh` actually lives on Apple Silicon. Dreamux.app run from
+    /// ~/Applications gets exactly this, while the dev build launched by
+    /// RunnerManager (`/bin/sh -lc`) gets a login shell's richer PATH —
+    /// which is why this bug is invisible in development.
+    private let launchdPath = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
+
+    /// Real Homebrew/system install locations for gh, as
+    /// `ToolLocator` probes them by default.
+    private let wellKnownGhLocations = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+
+    /// A stub executable at `dir/name`, creating `dir`. Contents are
+    /// irrelevant: resolution is a filesystem check, never an exec.
+    @discardableResult
+    private func makeStubExecutable(named name: String, in dir: URL) throws -> String {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent(name)
+        try "#!/bin/sh\nexit 0\n".write(to: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
+        return path.path
+    }
+
+    private func sandboxDir(_ name: String) -> URL {
+        sandbox.root.appendingPathComponent(name, isDirectory: true)
+    }
+
+    /// The regression: gh is absent from the inherited PATH but sitting
+    /// in a well-known install directory. Resolution must find it —
+    /// before this, `/usr/bin/env gh` exited 127 and the merge sheet
+    /// showed a permanently disabled "Create PR" button.
+    func testResolvesGhFromWellKnownDirectoryWhenAbsentFromPath() throws {
+        let brew = sandboxDir("brew-bin")
+        let expected = try makeStubExecutable(named: "gh", in: brew)
+
+        let resolved = ToolLocator.resolve(
+            tool: "gh",
+            overrideKey: "DREAMUX_GH_BIN",
+            environment: ["PATH": launchdPath],
+            wellKnownDirectories: [brew.path]
+        )
+
+        XCTAssertEqual(resolved, expected)
+    }
+
+    /// PATH still counts — a gh the user put on their own PATH resolves
+    /// without any well-known directory being involved.
+    func testResolvesGhFromPathWhenPresentThere() throws {
+        let custom = sandboxDir("custom-bin")
+        let expected = try makeStubExecutable(named: "gh", in: custom)
+
+        let resolved = ToolLocator.resolve(
+            tool: "gh",
+            overrideKey: "DREAMUX_GH_BIN",
+            environment: ["PATH": "\(launchdPath):\(custom.path)"],
+            wellKnownDirectories: []
+        )
+
+        XCTAssertEqual(resolved, expected)
+    }
+
+    /// `DREAMUX_GH_BIN` outranks everything — the e2e harness and this
+    /// suite point it at `Tests/Fixtures/bin/gh` and must never get the
+    /// machine's real gh instead.
+    func testGhOverrideOutranksPathAndWellKnownDirectories() throws {
+        let override = try makeStubExecutable(named: "gh", in: sandboxDir("override-bin"))
+        let brew = sandboxDir("brew-bin")
+        try makeStubExecutable(named: "gh", in: brew)
+        let onPath = sandboxDir("path-bin")
+        try makeStubExecutable(named: "gh", in: onPath)
+
+        let resolved = ToolLocator.resolve(
+            tool: "gh",
+            overrideKey: "DREAMUX_GH_BIN",
+            environment: ["PATH": "\(onPath.path):\(launchdPath)", "DREAMUX_GH_BIN": override],
+            wellKnownDirectories: [brew.path]
+        )
+
+        XCTAssertEqual(resolved, override)
+    }
+
+    /// An override pointing at nothing must be returned as-is rather
+    /// than falling back to a real gh: that is how a test or harness
+    /// says "pretend gh is missing", and it is what keeps
+    /// `.ghMissing` reachable (see the ghMissing test above).
+    func testGhOverrideIsHonoredEvenWhenItPointsAtNothing() throws {
+        let missing = sandbox.root.appendingPathComponent("missing-gh").path
+        let brew = sandboxDir("brew-bin")
+        try makeStubExecutable(named: "gh", in: brew)
+
+        let resolved = ToolLocator.resolve(
+            tool: "gh",
+            overrideKey: "DREAMUX_GH_BIN",
+            environment: ["PATH": launchdPath, "DREAMUX_GH_BIN": missing],
+            wellKnownDirectories: [brew.path]
+        )
+
+        XCTAssertEqual(resolved, missing)
+    }
+
+    /// Genuinely-absent gh still reports unavailable, so the sheet keeps
+    /// rendering its disabled button + install hint.
+    func testResolutionReportsUnavailableWhenGhExistsNowhere() throws {
+        let empty = sandboxDir("empty-bin")
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+
+        XCTAssertNil(ToolLocator.resolve(
+            tool: "gh",
+            overrideKey: "DREAMUX_GH_BIN",
+            environment: ["PATH": "\(launchdPath):\(empty.path)"],
+            wellKnownDirectories: [empty.path, sandboxDir("does-not-exist").path]
+        ))
+    }
+
+    /// A directory named `gh` (or a non-executable file) is not a CLI —
+    /// `isExecutableFile` alone says yes to directories, so both must be
+    /// skipped in favour of the next candidate.
+    func testResolutionSkipsDirectoriesAndNonExecutableMatches() throws {
+        let dirTrap = sandboxDir("trap-dir")
+        try FileManager.default.createDirectory(
+            at: dirTrap.appendingPathComponent("gh", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        let fileTrap = sandboxDir("trap-file")
+        try FileManager.default.createDirectory(at: fileTrap, withIntermediateDirectories: true)
+        let plain = fileTrap.appendingPathComponent("gh")
+        try "not executable\n".write(to: plain, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: plain.path)
+
+        let real = sandboxDir("real-bin")
+        let expected = try makeStubExecutable(named: "gh", in: real)
+
+        let resolved = ToolLocator.resolve(
+            tool: "gh",
+            overrideKey: "DREAMUX_GH_BIN",
+            environment: ["PATH": "\(dirTrap.path):\(fileTrap.path)"],
+            wellKnownDirectories: [real.path]
+        )
+
+        XCTAssertEqual(resolved, expected)
+    }
+
+    /// End-to-end against the machine's real gh under the real launchd
+    /// PATH: the exact condition the installed app runs in. Skipped on
+    /// machines with no gh in a well-known location — where the honest
+    /// verdict is `.ghMissing`, covered above.
+    func testResolvesRealGhUnderLaunchdPath() throws {
+        let installed = wellKnownGhLocations.first {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }
+        guard let installed else {
+            throw XCTSkip("no gh at \(wellKnownGhLocations.joined(separator: " or "))")
+        }
+
+        // Default well-known directories, no override: precisely what
+        // GhOperations asks for inside Dreamux.app.
+        let resolved = ToolLocator.resolve(
+            tool: "gh",
+            overrideKey: "DREAMUX_GH_BIN",
+            environment: ["PATH": launchdPath]
+        )
+
+        XCTAssertEqual(resolved, installed)
+    }
+
+    /// The user-visible end of the same path: with the override cleared,
+    /// `GhOperations` must actually launch the machine's gh — this is
+    /// the probe whose failure produced `.ghMissing`. Run this one under
+    /// `env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin` to
+    /// reproduce the installed app's environment exactly.
+    func testGhOperationsIsAvailableWithoutOverride() async throws {
+        guard wellKnownGhLocations.contains(where: {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }) else {
+            throw XCTSkip("no gh at \(wellKnownGhLocations.joined(separator: " or "))")
+        }
+        // tearDown restores whatever the override held before the suite.
+        unsetenv("DREAMUX_GH_BIN")
+
+        let available = await GhOperations.isAvailable()
+
+        XCTAssertTrue(available, "gh is installed but GhOperations could not launch it")
+    }
+
     // MARK: - Publish
 
     /// The core contract of `publish`: the feature branch must actually
