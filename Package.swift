@@ -8,12 +8,11 @@ let package = Package(
         .executable(name: "Dreamux", targets: ["Dreamux"]),
     ],
     dependencies: [
-        // Upstream deleted the `1.0.1777879537` version tag (the repo was
-        // retagged to 1.2.x), so an `exact:` version pin no longer resolves
-        // from a clean checkout. Pin the same commit by revision instead —
-        // identical bytes, and the GhosttyKit.xcframework binary artifact
-        // (keyed by URL + checksum) is unaffected.
-        .package(url: "https://github.com/Lakr233/libghostty-spm.git", revision: "f10e02dd829271be3e361dcde56a6e33a79fa080"),
+        // Upstream prunes old `storage.*` release assets over time — the
+        // previously pinned revision's GhosttyKit.xcframework.zip 404s now
+        // too. Track their current release instead of a fixed revision so
+        // this doesn't silently rot again.
+        .package(url: "https://github.com/Lakr233/libghostty-spm.git", exact: "1.3.2"),
         // Vendored at vendor/bonsplit so we can patch dropZoneAtEnd to
         // absorb the trailing run-off (see TabBarView.swift).
         .package(path: "vendor/bonsplit"),
