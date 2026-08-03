@@ -38,11 +38,19 @@ enum GhOperations {
     }
 
     /// Path of the gh binary to exec: the `DREAMUX_GH_BIN` override
-    /// when set, otherwise whatever `gh` resolves to on PATH.
+    /// when set, otherwise gh wherever `ToolLocator` finds it.
+    ///
+    /// Resolving via PATH alone was the bug: Dreamux.app launched from
+    /// ~/Applications inherits launchd's PATH, which has no
+    /// `/opt/homebrew/bin`, so `/usr/bin/env gh` exited 127 and every
+    /// caller here — the merge sheet's pre-check, createPR, and the PR
+    /// status pollers — silently behaved as if gh weren't installed.
+    /// The `/usr/bin/env` form stays as a last resort for an install
+    /// somewhere we don't probe; when that fails too, callers still get
+    /// the honest "gh is missing" verdict.
     private static var ghInvocation: [String] {
-        if let override = ProcessInfo.processInfo.environment["DREAMUX_GH_BIN"],
-           !override.isEmpty {
-            return [override]
+        if let gh = ToolLocator.resolve(tool: "gh", overrideKey: "DREAMUX_GH_BIN") {
+            return [gh]
         }
         return ["/usr/bin/env", "gh"]
     }

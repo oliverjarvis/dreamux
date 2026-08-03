@@ -144,12 +144,12 @@ enum CLICredentialImporter {
     // MARK: - Process plumbing (gh)
 
     /// Path of the gh binary to exec: the `DREAMUX_GH_BIN` override when
-    /// set (mirrors `GhOperations`), otherwise whatever `gh` resolves to on
-    /// PATH.
+    /// set (mirrors `GhOperations`), otherwise gh wherever `ToolLocator`
+    /// finds it — PATH alone misses Homebrew in the installed app, which
+    /// turned "Import from gh" into a silent no-op there.
     private static var ghInvocation: [String] {
-        if let override = ProcessInfo.processInfo.environment["DREAMUX_GH_BIN"],
-           !override.isEmpty {
-            return [override]
+        if let gh = ToolLocator.resolve(tool: "gh", overrideKey: "DREAMUX_GH_BIN") {
+            return [gh]
         }
         return ["/usr/bin/env", "gh"]
     }
