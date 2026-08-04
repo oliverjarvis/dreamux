@@ -16,6 +16,13 @@ final class WebTabSession: Identifiable {
     /// again re-selects the existing tab rather than stacking a new one.
     let url: URL
 
+    /// True when this tab was opened with no destination (⌘⇧B / the tab
+    /// bar's ＋ ▸ Browser). Its `url` is `about:blank`, the web view skips
+    /// its initial load, and `WebTabView` focuses the address bar instead.
+    /// Also what exempts the tab from `WorkspaceSession.openWebTab`'s URL
+    /// dedup — every blank tab is its own tab.
+    let isBlank: Bool
+
     /// The live location, kept in sync with the web view as the user
     /// navigates. Drives the address bar.
     var currentURL: URL
@@ -33,7 +40,10 @@ final class WebTabSession: Identifiable {
         // the user's own dev server; inspectability is the point.
         view.isInspectable = true
         observeNavigation(view)
-        view.load(URLRequest(url: url))
+        // A blank tab loads nothing: the user is about to type an address.
+        if !isBlank {
+            view.load(URLRequest(url: url))
+        }
         _webView = view
         return view
     }
@@ -41,6 +51,15 @@ final class WebTabSession: Identifiable {
     init(url: URL) {
         self.url = url
         self.currentURL = url
+        self.isBlank = false
+    }
+
+    /// A blank tab — no destination, no initial load, address bar focused.
+    init() {
+        let blank = URL(string: "about:blank")!
+        self.url = blank
+        self.currentURL = blank
+        self.isBlank = true
     }
 
     func reload() { _webView?.reload() }
@@ -60,7 +79,11 @@ final class WebTabSession: Identifiable {
         NSWorkspace.shared.open(currentURL)
     }
 
-    nonisolated static func resolveNavigation(_ input: String) -> URL? {
+    /// A typed address that resolves to a REAL destination — a scheme'd
+    /// URL or a bare host — or nil. Deliberately no search fallback: the
+    /// ⌘K palette needs to tell "this is a URL" from "this is prose", and
+    /// typing prose into the palette must not offer to google it.
+    nonisolated static func directURL(_ input: String) -> URL? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if let url = URL(string: trimmed), let scheme = url.scheme,
@@ -71,6 +94,16 @@ final class WebTabSession: Identifiable {
            let url = URL(string: "https://\(trimmed)") {
             return url
         }
+        return nil
+    }
+
+    /// The address bar's parser: `directURL`, else a Google search —
+    /// Chrome/Arc omnibox behavior. Behaviour is unchanged from before
+    /// the `directURL` split.
+    nonisolated static func resolveNavigation(_ input: String) -> URL? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let direct = directURL(trimmed) { return direct }
         var comps = URLComponents(string: "https://www.google.com/search")!
         comps.queryItems = [URLQueryItem(name: "q", value: trimmed)]
         return comps.url

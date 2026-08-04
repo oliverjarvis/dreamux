@@ -296,14 +296,24 @@ private struct WebTabView: View {
             WebViewRepresentable(webView: session.webView)
         }
         .onAppear {
-            address = session.currentURL.absoluteString
+            // A blank tab starts with an EMPTY field, not the literal
+            // "about:blank" — the user is about to type an address. The
+            // async hop wins the focus race against the pane's terminal,
+            // same trick `CommandPaletteView` uses on first open.
+            address = session.isBlank ? "" : session.currentURL.absoluteString
+            if session.isBlank, address.isEmpty {
+                DispatchQueue.main.async { addressFocused = true }
+            }
             let source = importService.availableArcSource()
             arcSource = source
             showArcBanner = source != nil && !importService.hasOfferedArc
         }
         .onChange(of: session.currentURL) { _, newURL in
-            // Track the live page, but don't fight the user mid-edit.
-            if !addressFocused { address = newURL.absoluteString }
+            // Track the live page, but don't fight the user mid-edit, and
+            // never write a blank tab's `about:blank` placeholder into the
+            // field they are typing into.
+            guard !addressFocused, newURL.absoluteString != "about:blank" else { return }
+            address = newURL.absoluteString
         }
     }
 

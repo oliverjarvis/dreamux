@@ -236,6 +236,13 @@ final class WorkspaceSession {
             return
         }
 
+        // Blank web tab: no URL, no dedup, address bar focused.
+        if nextTabWebIsBlank {
+            nextTabWebIsBlank = false
+            webTabSessions[tab.id] = WebTabSession()
+            return
+        }
+
         // Web tab: the pending URL (set by openWebTab just before
         // createTab) claims this tab id instead of spawning a shell.
         if let url = nextTabWebURL {
@@ -476,18 +483,34 @@ final class WorkspaceSession {
     /// `nextTabCwdOverride`, read once in `handleDidCreateTab`.
     private var nextTabWebURL: URL?
 
+    /// Set by `openBlankWebTab` just before `createTab` so
+    /// `handleDidCreateTab` builds a BLANK `WebTabSession` rather than one
+    /// bound to a URL — the web analog of `nextTabIsOverview`. Read once
+    /// and cleared there.
+    private var nextTabWebIsBlank = false
+
     /// Open (or re-select) an in-app browser tab for `url`. Dedup is by
     /// URL: a runner's play fires its open every start, and the second
     /// play should bring the existing preview forward, not stack
-    /// another copy of the same page.
+    /// another copy of the same page. Blank tabs are excluded — they all
+    /// share the `about:blank` key and each one is deliberately its own.
     func openWebTab(url: URL, title: String) {
-        if let existing = webTabSessions.first(where: { $0.value.url == url }) {
+        if let existing = webTabSessions.first(where: { !$0.value.isBlank && $0.value.url == url }) {
             controller.selectTab(existing.key)
             return
         }
         nextTabWebURL = url
         controller.createTab(title: title, icon: "globe")
         nextTabWebURL = nil
+    }
+
+    /// Open a browser tab with no destination — `about:blank`, nothing
+    /// loaded, address bar focused (⌘⇧B, the tab bar's ＋ ▸ Browser). No
+    /// dedup: firing it twice is a request for two tabs.
+    func openBlankWebTab() {
+        nextTabWebIsBlank = true
+        controller.createTab(title: "New Tab", icon: "globe")
+        nextTabWebIsBlank = false
     }
 
     /// File claimed by the next created tab — the editor analog of
