@@ -1564,7 +1564,7 @@ struct ContentView: View {
         var commands: [PaletteCandidate] = [
             PaletteCandidate(id: "command-new-project", title: "New Project…",
                              subtitle: nil, icon: "plus") { showCreateProject = true },
-            PaletteCandidate(id: "command-new-plan", title: "New Plan…",
+            PaletteCandidate(id: "command-new-plan", title: "New Idea…",
                              subtitle: nil, icon: "list.bullet.clipboard") { showNewPlan = true },
             PaletteCandidate(id: "command-new-applet", title: "New Applet…",
                              subtitle: nil, icon: "plus.app") { showNewApplet = true },

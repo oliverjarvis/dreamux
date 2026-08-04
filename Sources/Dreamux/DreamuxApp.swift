@@ -298,7 +298,7 @@ private struct ProjectCommands: Commands {
             .keyboardShortcut("n", modifiers: [.command])
             .disabled(createProjectPresented == nil)
 
-            Button("New Plan…") {
+            Button("New Idea…") {
                 newPlanPresented = true
             }
             .keyboardShortcut("p", modifiers: [.command])
