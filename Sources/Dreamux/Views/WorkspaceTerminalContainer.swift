@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import Bonsplit
 import GhosttyTerminal
@@ -74,8 +75,37 @@ private struct WorkspaceBonsplitPane: View {
                     inPane: paneId
                 )
             }
+        } tabBarAccessory: { paneId in
+            NewTabControl { kind in
+                // Focus this pane first: every `open…` below creates through
+                // `BonsplitController.createTab`, which defaults to the
+                // FOCUSED pane. Focusing makes the click land in the bar the
+                // user clicked, without teaching each open method about panes.
+                session.controller.focusPane(paneId)
+                openNewTab(kind)
+            }
         }
         .onAppear { session.bootstrapIfNeeded() }
+    }
+
+    /// The `＋ ⌄` menu's three destinations. "File…" routes through the same
+    /// `openFileTab` the file tree and drag-drop use, so a file opened from
+    /// the tab bar dedups against an already-open editor tab like any other.
+    private func openNewTab(_ kind: NewTabControl.Kind) {
+        switch kind {
+        case .terminal:
+            session.createTab()
+        case .browser:
+            session.openBlankWebTab()
+        case .file:
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = false
+            panel.allowsMultipleSelection = false
+            panel.prompt = "Open"
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            session.openFileTab(at: url)
+        }
     }
 }
 
