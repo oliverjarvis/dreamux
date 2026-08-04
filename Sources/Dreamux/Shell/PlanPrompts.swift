@@ -205,6 +205,11 @@ enum PlanPrompts {
         \(digest)
         --- end ---
 
+        Any lines under "Idea sessions in progress" are sibling \
+        conversations being routed right now — no plan file exists for them \
+        yet. If this idea overlaps one, prefer `wait` or `integrate` over \
+        minting a competing plan.
+
         Judge the idea's scope against that snapshot (you have repo access — \
         use it), pick ONE disposition, and enact it:
 
