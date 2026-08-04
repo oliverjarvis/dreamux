@@ -281,7 +281,13 @@ final class ProjectSession {
         }
         nudgeCenter.send = { [weak self] path, prompt in
             guard let tab = self?.agentTab(forPlan: path) else { return }
-            ClaudePromptDriver.type(prompt, into: tab)
+            if !ClaudePromptDriver.type(prompt, into: tab) {
+                // Unbound: dreamux-hook never fired on this tab's PTY, so we
+                // can't tell a live REPL from a bare shell — and a bare shell
+                // would EXECUTE this line. Dropping it is the safe half of
+                // the trade (spec: Strand 3 "Known limit").
+                NSLog("PlanNudgeCenter: dropped a nudge for %@ — its agent tab is unbound", path)
+            }
         }
         // Retry parked nudges on the queue's existing poll cadence — an
         // additive hook, no state-machine change.

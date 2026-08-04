@@ -17,7 +17,18 @@ enum ClaudePromptDriver {
     /// echoes typed input, so send, then watch for ANY output. Silence
     /// means the bytes were flushed — wait and send again. The first
     /// send that lands echoes within milliseconds and ends the loop.
-    static func send(_ prompt: String, into session: TabSession) {
+    ///
+    /// Gated: this writes a SHELL COMMAND, so the tab must be **unbound**.
+    /// A live agent would receive the invocation as a chat message and the
+    /// real prompt would be eaten. Returns false (writing nothing) on
+    /// refusal — the caller decides what to tell the user.
+    @discardableResult
+    static func send(_ prompt: String, into session: TabSession) -> Bool {
+        guard PromptDelivery.mode(
+            intent: .launchClaude, bound: session.binding.isBound) == .launch else {
+            NSLog("ClaudePromptDriver: refused to launch claude in a tab that already has one bound")
+            return false
+        }
         // The prompt goes through a file, not the keyboard: prompts are
         // kilobytes of multi-line text, and the PTY input path is built
         // for human-scale typing (kernel input queues are small, and a
@@ -38,6 +49,7 @@ enum ClaudePromptDriver {
             command = Self.claudeCommand(prompt)
         }
         deliver(command, into: session)
+        return true
     }
 
     /// Type a single line into an ALREADY-RUNNING agent's REPL — the live
@@ -48,8 +60,19 @@ enum ClaudePromptDriver {
     /// then a newline submits. Used by `PlanNudgeCenter` to fold appended
     /// tasks and course corrections into a running plan through the same
     /// quiescence + echo discipline `send` uses.
-    static func type(_ line: String, into session: TabSession) {
+    ///
+    /// Gated: this writes a bare REPL line, so the tab must be **bound**. A
+    /// bare `zsh` would EXECUTE it. Returns false (writing nothing) on
+    /// refusal.
+    @discardableResult
+    static func type(_ line: String, into session: TabSession) -> Bool {
+        guard PromptDelivery.mode(
+            intent: .typeIntoAgent, bound: session.binding.isBound) == .type else {
+            NSLog("ClaudePromptDriver: refused to type a REPL line into an unbound tab")
+            return false
+        }
         deliver(line + "\n", into: session)
+        return true
     }
 
     /// Per-session delivery chain. Two independent typers now target the

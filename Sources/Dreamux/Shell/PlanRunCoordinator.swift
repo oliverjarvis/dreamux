@@ -25,7 +25,7 @@ final class PlanRunCoordinator {
 
     /// Injectable for tests (capture prompts without a PTY).
     var sendPrompt: (String, TabSession) -> Void = { prompt, session in
-        ClaudePromptDriver.send(prompt, into: session)
+        _ = ClaudePromptDriver.send(prompt, into: session)
     }
 
     init(project: Project, workspaceStore: WorkspaceStore,
