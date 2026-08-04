@@ -2,13 +2,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Tab bar view with scrollable tabs, drag/drop support, and split buttons
-struct TabBarView: View {
+struct TabBarView<Accessory: View>: View {
     @Environment(BonsplitController.self) private var controller
     @Environment(SplitViewController.self) private var splitViewController
-    
+
     @Bindable var pane: PaneState
     let isFocused: Bool
     var showSplitButtons: Bool = true
+    /// Host-supplied control rendered in the fixed trailing cluster, just
+    /// leading of the split buttons. Deliberately NOT placed after the last
+    /// tab: the tab strip scrolls (hence the fade overlays), and a control
+    /// that scrolls out of reach is worse than one a few points to the right.
+    @ViewBuilder let accessory: () -> Accessory
 
     @State private var dropTargetIndex: Int?
     @State private var scrollOffset: CGFloat = 0
@@ -99,6 +104,9 @@ struct TabBarView: View {
             }
 
             Spacer()
+
+            // Host accessory (Dreamux's ＋ / ⌄ new-tab pill), then split buttons.
+            accessory()
 
             // Split buttons
             if showSplitButtons {

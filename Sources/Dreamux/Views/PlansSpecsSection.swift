@@ -190,10 +190,16 @@ struct PlansSpecsSection: View {
             isExpanded: $layout.plansExpanded)
     }
 
-    /// Borderless "＋ New workspace" row at the foot of the list — the
-    /// Phosphor plus-square glyph, highlighting only on hover, mirroring the
-    /// Repositories section's add row. Opens a planning session, which mints
-    /// the new run's workspace.
+    /// The foot-of-list row's label. Static so its copy is pinned by test —
+    /// it used to read "New workspace", which named something the row does
+    /// not do.
+    static let newIdeaRowLabel = "New idea"
+
+    /// Borderless "＋ New idea" row at the foot of the list — the Phosphor
+    /// plus-square glyph, highlighting only on hover, mirroring the
+    /// Repositories section's add row. Opens the intake router, which
+    /// decides whether the idea becomes a new plan, a queued plan, or extra
+    /// tasks on an existing one.
     private var newWorkspaceRow: some View {
         Button(action: onNewPlan) {
             HStack(spacing: 11) {
@@ -202,7 +208,7 @@ struct PlansSpecsSection: View {
                     .scaledToFit()
                     .frame(width: 15, height: 15)
                     .frame(width: 22, height: 22)
-                Text("New workspace")
+                Text(Self.newIdeaRowLabel)
                     .font(.system(size: 15))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1145,6 +1151,14 @@ struct RunPlanSheet: View {
 /// Collects the idea, then the caller opens the planning terminal with
 /// a brainstorming kickoff carrying it.
 struct NewPlanSheet: View {
+    /// Pinned by test — the sheet used to be titled "New Plan", which
+    /// promised a plan file the conversation may never write.
+    static let title = "New idea"
+    static let helpText =
+        "Describes an idea to claude, which decides whether it's new "
+        + "work, work that should wait on something in flight, or extra "
+        + "tasks for a plan you already have."
+
     /// The project this plan lands in — badged at the top of the sheet so
     /// it reads distinctly from ⌘N's app-global "New Project" sheet.
     let project: Project
@@ -1160,13 +1174,13 @@ struct NewPlanSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New Plan")
+            Text(Self.title)
                 .font(.title3.weight(.semibold))
             SheetScopeBadge(icon: {
                 ProjectGlyph(name: project.name, size: 14,
                              symbol: project.symbol, tint: project.glyphTint())
             }, text: "\(project.name) · this project only")
-            Text("Describe the idea. A claude planning session opens in a project terminal, brainstorms it with you, and writes the spec and plan into this project's docs/ folder — they'll appear in the sidebar.")
+            Text(Self.helpText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

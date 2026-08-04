@@ -229,4 +229,14 @@ final class PlanPromptsTests: XCTestCase {
         XCTAssertFalse(off.contains("full heading text"))
         XCTAssertFalse(off.contains("nothing to commit"))
     }
+
+    /// The disposition instructions must tell the agent what the sibling
+    /// section means, or it reads the titles as noise.
+    func testIntakeGuidanceExplainsSiblingSessions() {
+        let prompt = PlanPrompts.brainstormKickoff(
+            idea: "browser tile",
+            intakeDigest: "Idea sessions in progress (not yet written up):\n  · idea: x")
+        XCTAssertTrue(prompt.contains("sibling conversations being routed right now"))
+        XCTAssertTrue(prompt.contains("prefer `wait` or `integrate`"))
+    }
 }

@@ -236,6 +236,13 @@ final class WorkspaceSession {
             return
         }
 
+        // Blank web tab: no URL, no dedup, address bar focused.
+        if nextTabWebIsBlank {
+            nextTabWebIsBlank = false
+            webTabSessions[tab.id] = WebTabSession()
+            return
+        }
+
         // Web tab: the pending URL (set by openWebTab just before
         // createTab) claims this tab id instead of spawning a shell.
         if let url = nextTabWebURL {
@@ -278,7 +285,7 @@ final class WorkspaceSession {
         fileDirtyObservers.removeValue(forKey: tabId)
         diffTabSessions.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
-        if planningTabID == tabId { planningTabID = nil }
+        intakeTabIDs.remove(tabId)
         if agentTabID == tabId { agentTabID = nil }
         if runConfigTabID == tabId { runConfigTabID = nil }
         if composerTabID == tabId { composerTabID = nil }
@@ -395,7 +402,7 @@ final class WorkspaceSession {
     }
 
     /// Tab id of this feature's plan-execution agent terminal — the tab a
-    /// plan run typed its kickoff into. Tracked like `planningTabID` so the
+    /// plan run typed its kickoff into. Tracked so the
     /// nudge center can reach the live agent to type re-read / course-
     /// correction prompts; cleared when the tab closes.
     private var agentTabID: TabID?
@@ -418,21 +425,29 @@ final class WorkspaceSession {
         return tabSessions[id]
     }
 
-    /// Tab id of this session's planning terminal, if one was opened.
-    /// Cleared when the tab closes (`handleDidCloseTab`).
-    private var planningTabID: TabID?
+    /// Tab ids of the intake (idea-routing) sessions opened in this
+    /// workspace. Unlike the single-slot ids above this is a SET: every
+    /// fired idea gets its own tab, on purpose — ideas can be fired in
+    /// rapid succession and each deserves its own live router. Entries are
+    /// removed in `handleDidCloseTab` like every other tracked id.
+    private var intakeTabIDs: Set<TabID> = []
 
-    /// Re-select the live planning tab, or open a fresh one cwd'd at
-    /// `path`. One planning terminal per session keeps kickoffs from
-    /// stacking tabs.
-    func reuseOrOpenPlanningTab(at path: String) -> TabSession? {
-        if let id = planningTabID, let existing = tabSessions[id] {
-            controller.selectTab(id)
-            return existing
-        }
-        let tab = openAgentTab(at: path, title: "planning", icon: "lightbulb")
-        planningTabID = lastCreatedTabID
-        return tab
+    /// Record a freshly-opened intake tab. Called by `IdeaIntakeLauncher`
+    /// with the id `openAgentTab` just caused to exist.
+    func registerIntakeTab(_ id: TabID) {
+        intakeTabIDs.insert(id)
+    }
+
+    /// Titles of every OPEN intake tab, read live off the controller — the
+    /// sibling list the intake digest carries. Live rather than cached
+    /// because a tab's chip is the user's own name for that conversation;
+    /// note that an OSC title escape from the tab's shell can overwrite it
+    /// (`TitleObserver`), in which case the sibling reads as whatever the
+    /// shell last set. That is a legibility degradation, not a correctness
+    /// one — the count and the fact of a live sibling are what the digest
+    /// needs.
+    var intakeTabTitles: [String] {
+        intakeTabIDs.compactMap { controller.tab($0)?.title }
     }
 
     /// Tab id of this workspace's run-config agent terminal — the tab the
@@ -442,7 +457,7 @@ final class WorkspaceSession {
     private var runConfigTabID: TabID?
 
     /// Re-select the live run-config terminal, or open a fresh one cwd'd
-    /// at `path`. Mirrors `reuseOrOpenPlanningTab`.
+    /// at `path`. Mirrors `reuseOrOpenComposerTab`.
     func reuseOrOpenRunConfigTab(at path: String) -> TabSession? {
         if let id = runConfigTabID, let existing = tabSessions[id] {
             controller.selectTab(id)
@@ -459,35 +474,54 @@ final class WorkspaceSession {
     private var composerTabID: TabID?
 
     /// Re-select the live composer claude terminal, or open a fresh one
-    /// cwd'd at `path`. `reused` tells the caller whether a claude REPL
-    /// is presumed live in it (type into it) or the tab is fresh (launch
-    /// claude seeded with the prompt).
-    func reuseOrOpenComposerTab(at path: String) -> (tab: TabSession, reused: Bool)? {
+    /// cwd'd at `path`. Returns just the tab: whether a claude is live in it
+    /// is not something this method can know — it used to return
+    /// `reused: true` whenever `composerTabID` was still set, and the caller
+    /// took that as "a claude REPL is presumed live". Quit claude in that
+    /// tab and the next composer message was typed at a bare `zsh` prompt —
+    /// and executed. The caller asks `tab.binding` instead.
+    func reuseOrOpenComposerTab(at path: String) -> TabSession? {
         if let id = composerTabID, let existing = tabSessions[id] {
             controller.selectTab(id)
-            return (existing, true)
+            return existing
         }
         guard let tab = openAgentTab(at: path, title: "claude", icon: "sparkles") else { return nil }
         composerTabID = lastCreatedTabID
-        return (tab, false)
+        return tab
     }
 
     /// URL claimed by the next created tab — the web analog of
     /// `nextTabCwdOverride`, read once in `handleDidCreateTab`.
     private var nextTabWebURL: URL?
 
+    /// Set by `openBlankWebTab` just before `createTab` so
+    /// `handleDidCreateTab` builds a BLANK `WebTabSession` rather than one
+    /// bound to a URL — the web analog of `nextTabIsOverview`. Read once
+    /// and cleared there.
+    private var nextTabWebIsBlank = false
+
     /// Open (or re-select) an in-app browser tab for `url`. Dedup is by
     /// URL: a runner's play fires its open every start, and the second
     /// play should bring the existing preview forward, not stack
-    /// another copy of the same page.
+    /// another copy of the same page. Blank tabs are excluded — they all
+    /// share the `about:blank` key and each one is deliberately its own.
     func openWebTab(url: URL, title: String) {
-        if let existing = webTabSessions.first(where: { $0.value.url == url }) {
+        if let existing = webTabSessions.first(where: { !$0.value.isBlank && $0.value.url == url }) {
             controller.selectTab(existing.key)
             return
         }
         nextTabWebURL = url
         controller.createTab(title: title, icon: "globe")
         nextTabWebURL = nil
+    }
+
+    /// Open a browser tab with no destination — `about:blank`, nothing
+    /// loaded, address bar focused (⌘⇧B, the tab bar's ＋ ▸ Browser). No
+    /// dedup: firing it twice is a request for two tabs.
+    func openBlankWebTab() {
+        nextTabWebIsBlank = true
+        controller.createTab(title: "New Tab", icon: "globe")
+        nextTabWebIsBlank = false
     }
 
     /// File claimed by the next created tab — the editor analog of

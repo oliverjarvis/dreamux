@@ -247,6 +247,59 @@ final class IntakeDigestTests: XCTestCase {
         XCTAssertTrue(digest.lowercased().contains("no plans"))
     }
 
+    // MARK: - Sibling intake sessions
+
+    private func oneReadyPlan() -> [IntakeDigest.Entry] {
+        [(title: "Viewers", path: "docs/plans/v.md", status: .ready,
+          feature: nil, remainingTasks: [])]
+    }
+
+    /// Absent by default — the section only appears when siblings exist.
+    func testNoSessionsSectionWhenNoneAreLive() {
+        let digest = IntakeDigest.render(
+            plans: oneReadyPlan(), territories: [:], queue: [])
+        XCTAssertFalse(digest.contains("Idea sessions in progress"))
+    }
+
+    func testSessionsSectionListsEveryLiveSibling() {
+        let digest = IntakeDigest.render(
+            plans: oneReadyPlan(), territories: [:], queue: [],
+            liveIntakeSessions: ["idea: browser tile", "idea: sidebar hover states"])
+        XCTAssertTrue(digest.contains("Idea sessions in progress (not yet written up):"))
+        XCTAssertTrue(digest.contains("  · idea: browser tile"))
+        XCTAssertTrue(digest.contains("  · idea: sidebar hover states"))
+    }
+
+    /// A project with no plans on record but a sibling in flight must still
+    /// say so — the sibling IS work in flight.
+    func testSessionsAppearAlongsideTheNoPlansMarker() {
+        let digest = IntakeDigest.render(
+            plans: [], territories: [:], queue: [],
+            liveIntakeSessions: ["idea: browser tile"])
+        XCTAssertTrue(digest.contains("(no plans on record)"))
+        XCTAssertTrue(digest.contains("  · idea: browser tile"))
+    }
+
+    func testNoPlansAndNoSessionsIsStillTheBareMarker() {
+        XCTAssertEqual(
+            IntakeDigest.render(plans: [], territories: [:], queue: []),
+            "(no plans on record)")
+    }
+
+    /// The 2048-byte cap governs the WHOLE rendering, sessions included.
+    func testCapStillHonouredWithSessionsAppended() {
+        let plans: [IntakeDigest.Entry] = (1...60).map { i in
+            (title: "Plan \(i) with a deliberately long title to eat bytes",
+             path: "docs/plans/2026-08-04-\(i).md", status: .ready,
+             feature: nil, remainingTasks: [])
+        }
+        let sessions = (1...20).map { "idea: sibling number \($0)" }
+        let digest = IntakeDigest.render(
+            plans: plans, territories: [:], queue: [], liveIntakeSessions: sessions)
+        XCTAssertLessThanOrEqual(digest.utf8.count, IntakeDigest.maxBytes)
+        XCTAssertTrue(digest.contains("truncated"), "truncation is never silent")
+    }
+
     // MARK: - Helpers
 
     private func writeDoc(in project: Project, _ relative: String, _ contents: String) throws {

@@ -54,13 +54,22 @@ struct ContentView: View {
     @State private var appletActionError: String?
     /// ⌘K command palette visibility (also opened by the rail's search bar).
     @State private var showPalette = false
+    /// ⌘⇧B trigger, published as a focused value so the File-menu item
+    /// fires it while a Ghostty terminal is first responder. Consumed and
+    /// reset in the `.onChange` below — the same one-shot pattern the
+    /// e2e bridge's `pending*` channels use.
+    @State private var openBrowserRequested = false
 
     // MARK: Bottom prompt composer
     /// Collapsed state persists across launches — reopened via the chip.
     @AppStorage("promptComposerHidden") private var composerHidden = false
     @State private var composerText = ""
-    /// Explicit composer target; nil is Auto (active workspace, else main).
-    @State private var composerTargetID: UUID?
+    /// Which of the bar's two jobs the next send does. Idea by default —
+    /// the bar's primary job is now routing an idea, not messaging one
+    /// workspace's claude.
+    @State private var composerTarget: ComposerTarget = .idea
+    /// One-line feedback under the bar after a refused delivery.
+    @State private var composerNote: String?
     /// Rebuilt fresh on every palette open so results reflect live stores.
     @State private var paletteModel: PaletteModel?
     /// Run-the-plan sheet fired from a workspace's Overview (Mode A's lime
@@ -203,6 +212,7 @@ struct ContentView: View {
                         docStore: docStore,
                         flows: session.flows,
                         planRunner: planRunner,
+                        ideaLauncher: session.ideaLauncher,
                         planQueue: planQueue,
                         gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
                         gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
@@ -310,7 +320,7 @@ struct ContentView: View {
                 ),
                 onSubmit: { idea in
                     showNewPlan = false
-                    openOverviewPlanningSession { digest in
+                    openOverviewIntakeSession(title: IdeaTitle.tabTitle(for: idea)) { digest in
                         PlanPrompts.brainstormKickoff(idea: idea, intakeDigest: digest)
                     }
                 },
@@ -398,6 +408,12 @@ struct ContentView: View {
         .focusedSceneValue(\.createProjectPresented, $showCreateProject)
         .focusedSceneValue(\.newPlanPresented, $showNewPlan)
         .focusedSceneValue(\.newAppletPresented, $showNewApplet)
+        .focusedSceneValue(\.openBrowserRequested, $openBrowserRequested)
+        .onChange(of: openBrowserRequested) { _, requested in
+            guard requested else { return }
+            openBrowserRequested = false
+            openBlankBrowserTab()
+        }
         .onAppear {
             // e2e only (no-op otherwise): sync the bridge with this
             // window's starting mode. (Store registration and the plan
@@ -405,6 +421,7 @@ struct ContentView: View {
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
             consumePendingPaletteIfAny()
+            consumePendingComposerIfAny()
 
             // `store.workspaces` is empty until the async `reloadFeatures`
             // (fired from `ProjectWindowContents.onAppear`) completes —
@@ -469,6 +486,9 @@ struct ContentView: View {
         .onChange(of: e2eBridge?.pendingPalette) { _, _ in
             consumePendingPaletteIfAny()
         }
+        .onChange(of: e2eBridge?.pendingComposer) { _, _ in
+            consumePendingComposerIfAny()
+        }
         .focusedSceneValue(\.palettePresented, $showPalette)
         .onChange(of: showPalette) { _, visible in
             if visible {
@@ -508,8 +528,9 @@ struct ContentView: View {
             } else {
                 PromptComposer(
                     text: $composerText,
-                    targetID: $composerTargetID,
+                    target: $composerTarget,
                     workspaces: store.workspaces,
+                    note: composerNote,
                     onSend: { sendComposerPrompt() },
                     onHide: {
                         withAnimation(Self.composerSpring) { composerHidden = true }
@@ -530,33 +551,57 @@ struct ContentView: View {
 
     private static let composerSpring: Animation = .snappy(duration: 0.28, extraBounce: 0.12)
 
-    /// Send the composer's prompt to its target workspace's claude tab.
-    /// Auto (no explicit target) resolves to the active workspace when
-    /// one is showing, else `main`, else the first workspace. A fresh
-    /// tab launches claude seeded with the prompt; an existing one gets
-    /// the text typed into its live REPL.
+    /// Send the composer's prompt. **Idea** (the default) fires the intake
+    /// router — byte-identical to what ⌘P sends — into a brand-new session
+    /// in `main`. Auto (no explicit target) resolves to the active workspace
+    /// when one is showing, else `main`, else the first workspace; that path
+    /// asks the tab's binding whether a claude is live (type into it) or not
+    /// (launch one seeded with the prompt), rather than presuming from a
+    /// stale reuse flag.
     private func sendComposerPrompt() {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        let explicit = composerTargetID.flatMap { id in
-            store.workspaces.first { $0.id == id }
+        composerNote = nil
+
+        if composerTarget == .idea {
+            composerText = ""
+            session.ideaLauncher.fire(
+                title: IdeaTitle.tabTitle(for: text),
+                store: store,
+                repoStore: repoStore,
+                docStore: docStore,
+                planQueue: planQueue,
+                sidebarMode: $sidebarMode
+            ) { digest in
+                PlanPrompts.brainstormKickoff(idea: text, intakeDigest: digest)
+            }
+            return
         }
+
+        let explicit: Workspace? = {
+            guard case .workspace(let id) = composerTarget else { return nil }
+            return store.workspaces.first { $0.id == id }
+        }()
         let auto = (sidebarMode == .workspace ? store.activeWorkspace : nil)
             ?? store.workspaces.first(where: \.isMain)
             ?? store.workspaces.first
         guard let workspace = explicit ?? auto else { return }
-        composerText = ""
         store.activate(workspace.id)
         sidebarMode = .workspace
-        let session = store.session(for: workspace)
+        let workspaceSession = store.session(for: workspace)
         let cwd = workspace.workingDirectory ?? repoStore.project.rootPath.path
-        guard let (tab, reused) = session.reuseOrOpenComposerTab(at: cwd)
-        else { return }
+        guard let tab = workspaceSession.reuseOrOpenComposerTab(at: cwd) else { return }
         tab.startIfNeeded()
-        if reused {
-            ClaudePromptDriver.type(text, into: tab)
+        // The binding is checked immediately before delivering, so a refusal
+        // here is the narrow race where claude exited in between. Keep the
+        // text in the field and say so rather than dropping it.
+        let delivered = tab.binding.isBound
+            ? ClaudePromptDriver.type(text, into: tab)
+            : ClaudePromptDriver.send(text, into: tab)
+        if delivered {
+            composerText = ""
         } else {
-            ClaudePromptDriver.send(text, into: tab)
+            composerNote = "Couldn't deliver — that tab's claude session just changed. Send again."
         }
     }
 
@@ -1268,10 +1313,13 @@ struct ContentView: View {
     }
 
     /// Mode B's "Plan something here" kickoff — the same shared
-    /// `PlanningSessionLauncher` the rail's `+` uses, so the two entry
+    /// `IdeaIntakeLauncher` the rail's New idea row uses, so the two entry
     /// points can't drift.
-    private func openOverviewPlanningSession(buildPrompt: @escaping (String?) -> String) {
-        PlanningSessionLauncher.open(
+    private func openOverviewIntakeSession(
+        title: String, buildPrompt: @escaping (String?) -> String
+    ) {
+        session.ideaLauncher.fire(
+            title: title,
             store: store,
             repoStore: repoStore,
             docStore: docStore,
@@ -1404,6 +1452,28 @@ struct ContentView: View {
         store.session(for: workspace).openFileTab(at: url, revealingLine: line)
     }
 
+    /// The workspace a browser tab should land in: whatever is active,
+    /// else the first, else a fresh scratch one — the same fallback
+    /// `openFile` uses, so a browser shortcut is never inert. Flips to the
+    /// terminal/tab view so the new tab is visible.
+    private func browserHostSession() -> WorkspaceSession {
+        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        return store.session(for: workspace)
+    }
+
+    /// ⌘⇧B / palette "Open Browser" / ＋ ▸ Browser: an empty tab with a
+    /// focused address bar. No homepage, by design (spec: Decisions §2).
+    private func openBlankBrowserTab() {
+        browserHostSession().openBlankWebTab()
+    }
+
+    /// The ⌘K URL row: a web tab at an address the user typed.
+    private func openWebTab(at url: URL) {
+        browserHostSession().openWebTab(url: url, title: url.host ?? "Browser")
+    }
+
     /// Mirrors `WorkspaceSidebar.handleCreateApp` for the ⌘L / palette path:
     /// scaffold a local-born applet, spawn its builder agent, open its host.
     private func createProjectApplet(name: String, description: String) {
@@ -1433,7 +1503,22 @@ struct ContentView: View {
 
     private func paletteSources() -> [PaletteSource] {
         [
-            PaletteSource(kind: .projects, cap: 5, showsOnEmptyQuery: true) {
+            // Ranks first: when the query IS an address, that is what the
+            // user meant. `directURL` (not `resolveNavigation`) so prose
+            // never turns into an offer to google it.
+            PaletteSource(kind: .url, cap: 1, showsOnEmptyQuery: false,
+                          dependsOnQuery: true) { query in
+                guard let url = WebTabSession.directURL(query) else { return [] }
+                return [PaletteCandidate(
+                    id: "url-\(url.absoluteString)",
+                    title: "Open \(url.host ?? url.absoluteString)",
+                    subtitle: url.absoluteString,
+                    icon: "globe"
+                ) {
+                    openWebTab(at: url)
+                }]
+            },
+            PaletteSource(kind: .projects, cap: 5, showsOnEmptyQuery: true) { _ in
                 projects.projects.map { project in
                     PaletteCandidate(
                         id: "project-\(project.id)",
@@ -1445,7 +1530,7 @@ struct ContentView: View {
                     }
                 }
             },
-            PaletteSource(kind: .workspaces, cap: 5, showsOnEmptyQuery: false) {
+            PaletteSource(kind: .workspaces, cap: 5, showsOnEmptyQuery: false) { _ in
                 let workspaceItems = store.workspaces.map { workspace in
                     PaletteCandidate(
                         id: "workspace-\(workspace.id)",
@@ -1470,10 +1555,10 @@ struct ContentView: View {
                 }
                 return workspaceItems + docItems
             },
-            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) {
+            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) { _ in
                 paletteCommandCandidates()
             },
-            PaletteSource(kind: .files, cap: 8, showsOnEmptyQuery: false) {
+            PaletteSource(kind: .files, cap: 8, showsOnEmptyQuery: false) { _ in
                 paletteFileCandidates()
             },
         ]
@@ -1483,7 +1568,7 @@ struct ContentView: View {
         var commands: [PaletteCandidate] = [
             PaletteCandidate(id: "command-new-project", title: "New Project…",
                              subtitle: nil, icon: "plus") { showCreateProject = true },
-            PaletteCandidate(id: "command-new-plan", title: "New Plan…",
+            PaletteCandidate(id: "command-new-plan", title: "New Idea…",
                              subtitle: nil, icon: "list.bullet.clipboard") { showNewPlan = true },
             PaletteCandidate(id: "command-new-applet", title: "New Applet…",
                              subtitle: nil, icon: "plus.app") { showNewApplet = true },
@@ -1500,6 +1585,8 @@ struct ContentView: View {
                              subtitle: nil, icon: "plus.square") { _ = store.addWorkspace() },
             PaletteCandidate(id: "command-new-tab", title: "New Tab",
                              subtitle: nil, icon: "plus.rectangle") { store.activeSession?.createTab() },
+            PaletteCandidate(id: "command-open-browser", title: "Open Browser",
+                             subtitle: nil, icon: "globe") { openBlankBrowserTab() },
             PaletteCandidate(id: "command-toggle-file-explorer", title: "Toggle File Explorer",
                              subtitle: nil, icon: "sidebar.right") { showFileTree.toggle() },
             PaletteCandidate(id: "command-go-signals", title: "Go to Signals",
@@ -1601,6 +1688,26 @@ struct ContentView: View {
             showPalette = false
             bridge.paletteModel = nil
         }
+    }
+
+    /// Same consume-and-clear shape as `consumePendingPaletteIfAny`: set the
+    /// bar's target and text, then press its own send button, so an
+    /// automated send takes the exact path a typed one does.
+    private func consumePendingComposerIfAny() {
+        guard let bridge = e2eBridge, let request = bridge.pendingComposer else { return }
+        bridge.pendingComposer = nil
+        switch request.target {
+        case "idea":
+            composerTarget = .idea
+        case "auto":
+            composerTarget = .auto
+        default:
+            guard let workspace = store.workspaces.first(where: { $0.name == request.target })
+            else { return }
+            composerTarget = .workspace(workspace.id)
+        }
+        composerText = request.text
+        sendComposerPrompt()
     }
 
     /// Same consume-and-clear shape as `consumePendingSidebarModeIfAny`,
@@ -1801,6 +1908,10 @@ private struct NewAppletPresentedKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
+private struct OpenBrowserRequestedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
 extension FocusedValues {
     var createProjectPresented: Binding<Bool>? {
         get { self[CreateProjectPresentedKey.self] }
@@ -1820,6 +1931,13 @@ extension FocusedValues {
     var newAppletPresented: Binding<Bool>? {
         get { self[NewAppletPresentedKey.self] }
         set { self[NewAppletPresentedKey.self] = newValue }
+    }
+
+    /// One-shot ⌘⇧B trigger: the File-menu item flips it true, the focused
+    /// project window opens a blank web tab and flips it back.
+    var openBrowserRequested: Binding<Bool>? {
+        get { self[OpenBrowserRequestedKey.self] }
+        set { self[OpenBrowserRequestedKey.self] = newValue }
     }
 }
 

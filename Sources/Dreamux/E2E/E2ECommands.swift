@@ -101,6 +101,10 @@ enum E2ECommands {
             return try setPalette(request: request)
         case "paletteState":
             return try paletteState(request: request)
+        case "executePalette":
+            return try executePalette(request: request)
+        case "sendComposer":
+            return try sendComposer(request: request)
         case "listDocs":
             return handleListDocs()
         case "runPlan":
@@ -193,6 +197,11 @@ enum E2ECommands {
                     "name": workspace.name,
                     "linkedRepoIDs": workspace.linkedRepoIDs,
                     "isActive": workspace.id == store.activeID,
+                    // The reserved main workspace — where intake sessions live.
+                    "isMain": workspace.isMain,
+                    // Titles of the live intake (idea-routing) tabs. Two
+                    // ideas fired back to back must produce two entries.
+                    "intakeTabs": session.intakeTabTitles,
                     // In-app browser tabs (runner `open` URLs land here)
                     // — scenarios assert each worktree previews its own
                     // port.
@@ -605,6 +614,40 @@ enum E2ECommands {
                 ] as [String: Any]
             },
         ]
+    }
+
+    /// Run a palette row — the Return the user would press. `title` picks
+    /// the row by exact title; omit it to run whatever is selected.
+    private static func executePalette(request: [String: Any]) throws -> [String: Any] {
+        let (handles, _, _) = try projectStores()
+        guard let model = handles.bridge.paletteModel else {
+            throw CommandError(message: "the palette is not open")
+        }
+        if let title = request["title"] as? String {
+            guard let row = model.flatRows.first(where: { $0.candidate.title == title }) else {
+                throw CommandError(
+                    message: "no palette row titled \"\(title)\" — have: "
+                        + model.flatRows.map(\.candidate.title).joined(separator: ", "))
+            }
+            model.select(row.id)
+        }
+        guard let executed = model.selectedRow?.candidate.title else {
+            throw CommandError(message: "no palette row is selectable")
+        }
+        model.executeSelected()
+        return ["ok": true, "executed": executed]
+    }
+
+    /// Type into the window's bottom prompt bar and press send. `target` is
+    /// `"idea"` (the default), `"auto"`, or a workspace name. Parked on the
+    /// bridge and consumed by ContentView, like `setPalette`, so the send
+    /// runs through the real `sendComposerPrompt`.
+    private static func sendComposer(request: [String: Any]) throws -> [String: Any] {
+        let text = try string("text", in: request)
+        let target = request["target"] as? String ?? "idea"
+        let (handles, _, _) = try projectStores()
+        handles.bridge.pendingComposer = E2EComposerRequest(text: text, target: target)
+        return ["ok": true]
     }
 
     /// Open a file as a Monaco editor tab in the active (or named)

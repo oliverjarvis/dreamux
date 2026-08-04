@@ -2,11 +2,12 @@ import SwiftUI
 import AppKit
 
 /// SwiftUI wrapper around NSSplitView for native split behavior
-struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentable {
+struct SplitContainerView<Content: View, EmptyContent: View, Accessory: View>: NSViewRepresentable {
     @Bindable var splitState: SplitState
     let controller: SplitViewController
     let contentBuilder: (TabItem, PaneID) -> Content
     let emptyPaneBuilder: (PaneID) -> EmptyContent
+    let tabBarAccessoryBuilder: (PaneID) -> Accessory
     var showSplitButtons: Bool = true
     var contentViewLifecycle: ContentViewLifecycle = .recreateOnSwitch
     /// Callback when geometry changes. Bool indicates if change is during active divider drag.
@@ -130,6 +131,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 controller: controller,
                 contentBuilder: contentBuilder,
                 emptyPaneBuilder: emptyPaneBuilder,
+                tabBarAccessoryBuilder: tabBarAccessoryBuilder,
                 showSplitButtons: showSplitButtons,
                 contentViewLifecycle: contentViewLifecycle
             )
@@ -139,6 +141,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 controller: controller,
                 contentBuilder: contentBuilder,
                 emptyPaneBuilder: emptyPaneBuilder,
+                tabBarAccessoryBuilder: tabBarAccessoryBuilder,
                 showSplitButtons: showSplitButtons,
                 contentViewLifecycle: contentViewLifecycle,
                 onGeometryChange: onGeometryChange

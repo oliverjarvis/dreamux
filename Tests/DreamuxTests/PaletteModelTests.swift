@@ -21,10 +21,67 @@ final class PaletteModelTests: XCTestCase {
         files: [PaletteCandidate] = []
     ) -> PaletteModel {
         PaletteModel(sources: [
-            PaletteSource(kind: .projects, cap: 5, showsOnEmptyQuery: true) { projects },
-            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) { commands },
-            PaletteSource(kind: .files, cap: 8, showsOnEmptyQuery: false) { files },
+            PaletteSource(kind: .projects, cap: 5, showsOnEmptyQuery: true) { _ in projects },
+            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) { _ in commands },
+            PaletteSource(kind: .files, cap: 8, showsOnEmptyQuery: false) { _ in files },
         ])
+    }
+
+    // MARK: - Query-dependent sources (the ⌘K URL source)
+
+    /// A source whose candidates ARE a function of the query can't be
+    /// snapshotted at `refresh()`. `dependsOnQuery` re-pulls it on every
+    /// keystroke and takes its rows verbatim — no fuzzy filter, because the
+    /// source already decided what this query yields.
+    private func urlModel() -> PaletteModel {
+        PaletteModel(sources: [
+            PaletteSource(kind: .url, cap: 1, showsOnEmptyQuery: false,
+                          dependsOnQuery: true) { query in
+                guard let url = WebTabSession.directURL(query) else { return [] }
+                return [PaletteCandidate(
+                    id: "url-\(url.absoluteString)",
+                    title: "Open \(url.host ?? url.absoluteString)",
+                    subtitle: url.absoluteString,
+                    icon: "globe"
+                ) { self.performed.append("url") }]
+            },
+            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) { _ in
+                [self.candidate("c1", "Open Browser")]
+            },
+        ])
+    }
+
+    func testQueryDependentSourceIsSilentOnEmptyQuery() {
+        let m = urlModel()
+        m.refresh()
+        XCTAssertEqual(m.sections.map(\.kind), [.commands])
+    }
+
+    func testQueryDependentSourceOffersATypedHost() {
+        let m = urlModel()
+        m.refresh()
+        m.query = "github.com"
+        XCTAssertEqual(m.sections.first?.kind, .url, "the URL source ranks first")
+        XCTAssertEqual(m.sections.first?.rows.first?.candidate.title, "Open github.com")
+        XCTAssertEqual(m.sections.first?.rows.first?.candidate.subtitle, "https://github.com")
+    }
+
+    /// Prose must never offer to google it from ⌘K.
+    func testQueryDependentSourceIgnoresProse() {
+        let m = urlModel()
+        m.refresh()
+        m.query = "open browser"
+        XCTAssertFalse(m.sections.contains { $0.kind == .url })
+    }
+
+    /// The source is re-pulled per keystroke, not frozen at open time.
+    func testQueryDependentSourceTracksSuccessiveQueries() {
+        let m = urlModel()
+        m.refresh()
+        m.query = "github.com"
+        XCTAssertEqual(m.sections.first?.rows.first?.candidate.subtitle, "https://github.com")
+        m.query = "example.org"
+        XCTAssertEqual(m.sections.first?.rows.first?.candidate.subtitle, "https://example.org")
     }
 
     func testEmptyQueryShowsOnlyEmptyQuerySectionsInSourceOrder() {

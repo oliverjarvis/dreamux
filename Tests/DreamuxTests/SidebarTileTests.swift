@@ -4,20 +4,24 @@ import SwiftUI
 
 final class SidebarTileTests: XCTestCase {
     func testCanonicalOrder() {
-        XCTAssertEqual(SidebarTile.allCases, [.signals, .browser, .flows, .library])
+        XCTAssertEqual(SidebarTile.allCases, [.signals, .flows, .library])
     }
 
     func testRawValuesAreStableForPersistence() {
         XCTAssertEqual(SidebarTile.signals.rawValue, "signals")
-        XCTAssertEqual(SidebarTile.browser.rawValue, "browser")
         XCTAssertEqual(SidebarTile.flows.rawValue, "flows")
         XCTAssertEqual(SidebarTile.library.rawValue, "library")
         XCTAssertEqual(SidebarTile.signals.id, "signals")
     }
 
+    /// Every pinned tile is a destination now — the retired `browser`
+    /// case was a verb in a list of nouns (spec: Strand 1).
+    func testRetiredBrowserRawValueNoLongerDecodes() {
+        XCTAssertNil(SidebarTile(rawValue: "browser"))
+    }
+
     func testDisplayMetadata() {
         XCTAssertEqual(SidebarTile.signals.label, "Signals")
-        XCTAssertEqual(SidebarTile.browser.label, "Browser")
         XCTAssertEqual(SidebarTile.flows.label, "Flows")
         XCTAssertEqual(SidebarTile.library.label, "Context & MCPs")
     }
@@ -42,8 +46,8 @@ final class SidebarTileTests: XCTestCase {
     }
 
     func testCodableRoundTrip() throws {
-        let data = try JSONEncoder().encode([SidebarTile.browser, .signals, .flows, .library])
+        let data = try JSONEncoder().encode([SidebarTile.library, .signals, .flows])
         let decoded = try JSONDecoder().decode([SidebarTile].self, from: data)
-        XCTAssertEqual(decoded, [.browser, .signals, .flows, .library])
+        XCTAssertEqual(decoded, [.library, .signals, .flows])
     }
 }

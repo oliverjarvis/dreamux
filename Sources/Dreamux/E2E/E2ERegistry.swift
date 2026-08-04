@@ -7,6 +7,13 @@ struct E2EPaletteRequest: Equatable {
     let query: String
 }
 
+/// One `sendComposer` request. Equatable so views can `.onChange` on it.
+struct E2EComposerRequest: Equatable {
+    let text: String
+    /// `"idea"`, `"auto"`, or a workspace name.
+    let target: String
+}
+
 /// Pending UI actions the automation server hands to the view layer,
 /// one bridge per project window. Views consume (and clear) each value
 /// via `.onAppear`/`.onChange`, following the exact precedent of
@@ -50,6 +57,12 @@ final class E2EBridge {
     /// consumed by `ContentView` — the consume-and-clear idiom above.
     /// `query` applies only when `visible` is true.
     var pendingPalette: E2EPaletteRequest?
+
+    /// Bottom-composer send parked by the `sendComposer` command and
+    /// consumed by `ContentView` — the consume-and-clear idiom above. Goes
+    /// through the real `sendComposerPrompt`, so an e2e send exercises the
+    /// app's own routing, not a parallel implementation of it.
+    var pendingComposer: E2EComposerRequest?
 
     /// The live palette model while the palette is open, for the
     /// `paletteState` command. Weak: the window's ContentView owns it.

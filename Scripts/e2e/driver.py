@@ -1981,6 +1981,85 @@ def scenario_quit(d):
     d.wait_for_exit()
 
 
+def scenario_idea_intake(d):
+    """Two things unit tests can't reach: the ⌘K palette actually opening a
+    web tab at a typed address, and two ideas fired back to back producing
+    two live intake sessions in `main` (impossible before 2026-08-04 — the
+    second re-selected the first's tab and its prompt was eaten).
+
+    Self-contained: launches the app when nothing is connected."""
+    if d.sock is None:
+        d.launch_app()
+
+        def project_window_up():
+            state = d.state()
+            active = state.get("activeProject")
+            return active and active.get("name") == PROJECT_NAME
+        d.wait_until(project_window_up, 30.0, f"project window for {PROJECT_NAME}")
+
+    # --- Palette → web tab -------------------------------------------------
+    # `.invalid` is reserved by RFC 6761 and never resolves, so the tab is
+    # created and tracked without this scenario reaching the network.
+    d.cmd("setPalette", visible=True, query="dreamux.invalid")
+
+    def url_row_offered():
+        state = d.cmd("paletteState")
+        return any(s["kind"] == "url" and "Open dreamux.invalid" in s["items"]
+                   for s in state.get("sections", []))
+    d.wait_until(url_row_offered, 10.0, "palette offers the typed host")
+    d.screenshot("palette-url-row")
+
+    d.cmd("executePalette", title="Open dreamux.invalid")
+    d.cmd("setPalette", visible=False)
+
+    def web_tab_open():
+        tabs = [t for w in d.state()["workspaces"] for t in w.get("webTabs", [])]
+        return "https://dreamux.invalid" in tabs
+    d.wait_until(web_tab_open, 10.0, "web tab at the typed address")
+    log("palette opened a web tab at https://dreamux.invalid")
+
+    # --- Prose must NOT be offered as a URL --------------------------------
+    d.cmd("setPalette", visible=True, query="open the thing")
+
+    def prose_query_applied():
+        return d.cmd("paletteState").get("query") == "open the thing"
+    d.wait_until(prose_query_applied, 10.0, "prose query applied")
+    kinds = [s["kind"] for s in d.cmd("paletteState").get("sections", [])]
+    require("url" not in kinds, f"prose must never offer to google it: {kinds}")
+    d.cmd("setPalette", visible=False)
+
+    # --- Two ideas, back to back -------------------------------------------
+    def main_workspace():
+        for w in d.state()["workspaces"]:
+            if w.get("isMain"):
+                return w
+        return None
+
+    before = main_workspace()
+    require(before is None or not before.get("intakeTabs"),
+            "this scenario expects no intake sessions yet")
+
+    d.cmd("sendComposer", text="browser tile hover states", target="idea")
+
+    def one_intake():
+        w = main_workspace()
+        return w is not None and len(w.get("intakeTabs", [])) == 1
+    d.wait_until(one_intake, 30.0, "first intake session in main")
+
+    d.cmd("sendComposer", text="sidebar section spacing", target="idea")
+
+    def two_intakes():
+        w = main_workspace()
+        return w is not None and len(w.get("intakeTabs", [])) == 2
+    d.wait_until(two_intakes, 30.0, "second intake session in main")
+
+    w = main_workspace()
+    require(len(set(w["intakeTabs"])) == 2,
+            f"the two sessions must be distinct tabs: {w['intakeTabs']}")
+    d.screenshot("two-intake-sessions")
+    log(f"two live intake sessions in main: {w['intakeTabs']}")
+
+
 SCENARIOS = [
     ("boot", scenario_boot),
     ("repos-and-feature", scenario_repos_and_feature),
@@ -1993,6 +2072,7 @@ SCENARIOS = [
     ("plan-gate", scenario_plan_gate),
     ("overview", scenario_overview),
     ("palette", scenario_palette),
+    ("idea-intake", scenario_idea_intake),
     ("applets", scenario_applets),
     ("connections", scenario_connections),
     ("quit", scenario_quit),

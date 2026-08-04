@@ -26,6 +26,11 @@ final class ProjectSession {
     let fileTree: FileTreeStore
     let docStore: DocStore
     let planRunner: PlanRunCoordinator
+    /// The one intake door — ⌘P, the Overview's Mode B kickoff, the
+    /// spec→plan kickoff, and the composer's Idea target all fire through
+    /// this instance so they can't drift. Lives on the bundle (like
+    /// `planRunner`) because it carries an injectable `sendPrompt` seam.
+    let ideaLauncher = IdeaIntakeLauncher()
     let planQueue: PlanQueueController
     let nudgeCenter: PlanNudgeCenter
     let flows: FlowStore
@@ -281,7 +286,13 @@ final class ProjectSession {
         }
         nudgeCenter.send = { [weak self] path, prompt in
             guard let tab = self?.agentTab(forPlan: path) else { return }
-            ClaudePromptDriver.type(prompt, into: tab)
+            if !ClaudePromptDriver.type(prompt, into: tab) {
+                // Unbound: dreamux-hook never fired on this tab's PTY, so we
+                // can't tell a live REPL from a bare shell — and a bare shell
+                // would EXECUTE this line. Dropping it is the safe half of
+                // the trade (spec: Strand 3 "Known limit").
+                NSLog("PlanNudgeCenter: dropped a nudge for %@ — its agent tab is unbound", path)
+            }
         }
         // Retry parked nudges on the queue's existing poll cadence — an
         // additive hook, no state-machine change.

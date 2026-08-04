@@ -1,17 +1,58 @@
 import AppKit
 import SwiftUI
 
-/// The window-bottom prompt bar — "Message Claude…" from any page of a
-/// project. Sends into the target workspace's composer claude tab (see
-/// `WorkspaceSession.reuseOrOpenComposerTab`); the target pill defaults
-/// to **Auto** (active workspace, else `main`) and opens a menu to pin a
-/// specific workspace. Hideable via the chevron; `ContentView` persists
-/// that and shows a slim reopen chip instead.
+/// Where the bottom prompt bar's text goes. **Idea** is the default and is
+/// a different job from the other two: it runs the intake router (the same
+/// one ⌘P runs), which reasons about every plan in flight and picks a
+/// disposition. `auto`/`workspace` type into one workspace's claude tab.
+///
+/// Before this existed the bar had a nil-is-Auto `UUID?`, so the two idea
+/// boxes in the app looked identical and disagreed: ⌘P routed, the bar
+/// didn't.
+enum ComposerTarget: Equatable {
+    case idea
+    case auto
+    case workspace(UUID)
+
+    /// The pill's text.
+    func label(workspaces: [Workspace]) -> String {
+        switch self {
+        case .idea: return "Idea"
+        case .auto: return "Auto"
+        case .workspace(let id):
+            // A pinned workspace can be closed out from under the pill.
+            return workspaces.first { $0.id == id }?.name ?? "Auto"
+        }
+    }
+
+    /// The field's placeholder — so the bar says which job it will do.
+    func placeholder(workspaces: [Workspace]) -> String {
+        switch self {
+        case .idea: return "Describe an idea…"
+        case .auto: return "Message Claude…"
+        case .workspace(let id):
+            guard let name = workspaces.first(where: { $0.id == id })?.name else {
+                return "Message Claude…"
+            }
+            return "Message \(name)'s claude…"
+        }
+    }
+}
+
+/// The window-bottom prompt bar. Its target pill picks one of two jobs:
+/// **Idea** (the default) fires the intake router — the same path ⌘P takes,
+/// which reads a digest of every plan in flight and dispositions the idea
+/// against it — while Auto / a named workspace type into that workspace's
+/// composer claude tab (see `WorkspaceSession.reuseOrOpenComposerTab`).
+/// Hideable via the chevron; `ContentView` persists that and shows a slim
+/// reopen chip instead.
 struct PromptComposer: View {
     @Binding var text: String
-    /// Explicit target workspace id; nil is Auto.
-    @Binding var targetID: UUID?
+    @Binding var target: ComposerTarget
     let workspaces: [Workspace]
+    /// One-line feedback under the bar — set when a delivery was refused so
+    /// the text is never silently dropped. Cleared by the next send.
+    let note: String?
     let onSend: () -> Void
     let onHide: () -> Void
 
@@ -23,13 +64,6 @@ struct PromptComposer: View {
     /// without replacing the field with a custom NSTextView.
     @State private var shiftReturnMonitor: Any?
 
-    private var targetLabel: String {
-        guard let targetID,
-              let workspace = workspaces.first(where: { $0.id == targetID })
-        else { return "Auto" }
-        return workspace.name
-    }
-
     private var canSend: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -37,7 +71,8 @@ struct PromptComposer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 8) {
-                TextField("Message Claude…", text: $text, axis: .vertical)
+                TextField(target.placeholder(workspaces: workspaces),
+                          text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     // Reserve a roomy three lines even when empty — the
@@ -81,6 +116,13 @@ struct PromptComposer: View {
                 .disabled(!canSend)
                 .keyboardShortcut(.return, modifiers: .command)
                 .help("Send to Claude (⌘↩)")
+            }
+
+            if let note {
+                Text(note)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 14)
@@ -127,13 +169,23 @@ struct PromptComposer: View {
         }
     }
 
-    /// Target selector: Auto (default) or a pinned workspace.
+    /// Target selector: Idea (default), Auto, or a pinned workspace.
     private var targetPill: some View {
         Menu {
             Button {
-                targetID = nil
+                target = .idea
             } label: {
-                if targetID == nil {
+                if target == .idea {
+                    Label("Idea", systemImage: "checkmark")
+                } else {
+                    Text("Idea")
+                }
+            }
+            Divider()
+            Button {
+                target = .auto
+            } label: {
+                if target == .auto {
                     Label("Auto", systemImage: "checkmark")
                 } else {
                     Text("Auto")
@@ -143,9 +195,9 @@ struct PromptComposer: View {
                 Divider()
                 ForEach(workspaces) { workspace in
                     Button {
-                        targetID = workspace.id
+                        target = .workspace(workspace.id)
                     } label: {
-                        if targetID == workspace.id {
+                        if target == .workspace(workspace.id) {
                             Label(workspace.name, systemImage: "checkmark")
                         } else {
                             Text(workspace.name)
@@ -158,7 +210,7 @@ struct PromptComposer: View {
                 Circle()
                     .fill(Color.green)
                     .frame(width: 7, height: 7)
-                Text(targetLabel)
+                Text(target.label(workspaces: workspaces))
                     .font(.system(size: 12, weight: .medium))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
@@ -171,7 +223,7 @@ struct PromptComposer: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Where the prompt goes — Auto targets the active workspace (or main)")
+        .help("What the bar does — Idea routes a new idea; Auto messages the active workspace's claude")
     }
 }
 

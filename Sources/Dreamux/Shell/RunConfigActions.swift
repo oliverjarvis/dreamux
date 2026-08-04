@@ -36,14 +36,21 @@ enum RunConfigActions {
     }
 
     /// cwd is the project root: run.toml is project-level and the
-    /// prompts reference repos/<name>/ paths.
+    /// prompts reference repos/<name>/ paths. The tab is REUSED across
+    /// clicks (see `reuseOrOpenRunConfigTab`), so the second Detect must
+    /// type into the live agent rather than trying to launch a second
+    /// claude inside it.
     private static func send(
         _ prompt: String, project: Project, session: WorkspaceSession
     ) {
         guard let terminal = session.reuseOrOpenRunConfigTab(at: project.rootPath.path)
         else { return }
         terminal.startIfNeeded()
-        ClaudePromptDriver.send(prompt, into: terminal)
+        if terminal.binding.isBound {
+            _ = ClaudePromptDriver.type(prompt, into: terminal)
+        } else {
+            _ = ClaudePromptDriver.send(prompt, into: terminal)
+        }
     }
 
     /// Branch a runner is anchored to within `scope` — the workspace's

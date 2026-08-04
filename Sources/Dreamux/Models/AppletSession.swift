@@ -164,7 +164,16 @@ final class AppletSession: @MainActor Identifiable {
             agentTab = tab
             tab.startIfNeeded()
         }
-        ClaudePromptDriver.send(kickoff ?? Self.editPrompt, into: agentTab!)
+        let prompt = kickoff ?? Self.editPrompt
+        // The terminal survives `endEditing`, so re-entry finds a live
+        // claude: type into it rather than launching a second one inside it.
+        if let tab = agentTab {
+            if tab.binding.isBound {
+                _ = ClaudePromptDriver.type(prompt, into: tab)
+            } else {
+                _ = ClaudePromptDriver.send(prompt, into: tab)
+            }
+        }
         isEditing = true
     }
 

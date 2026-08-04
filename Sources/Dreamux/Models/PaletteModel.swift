@@ -15,12 +15,16 @@ struct PaletteCandidate: Identifiable {
 
 /// The palette's result groups, in display order.
 enum PaletteSectionKind: String, CaseIterable, Identifiable {
+    /// A typed URL or bare host. Leads the list: when the query IS an
+    /// address, that is almost certainly what the user meant.
+    case url
     case projects, workspaces, commands, files
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .url: "Open URL"
         case .projects: "Projects"
         case .workspaces: "Workspaces & Plans"
         case .commands: "Commands"
@@ -29,15 +33,38 @@ enum PaletteSectionKind: String, CaseIterable, Identifiable {
     }
 }
 
-/// A section's candidate feed. `candidates` is pulled fresh on every
-/// `refresh()` (each palette open) so results reflect the live stores.
-/// Sections with `showsOnEmptyQuery == false` (files, workspaces)
-/// contribute rows only once the user types.
+/// A section's candidate feed. Ordinary sources are pulled fresh on every
+/// `refresh()` (each palette open) so results reflect the live stores, and
+/// then fuzzy-filtered by the query. Sections with
+/// `showsOnEmptyQuery == false` (files, workspaces) contribute rows only
+/// once the user types.
 struct PaletteSource {
     let kind: PaletteSectionKind
     let cap: Int
     let showsOnEmptyQuery: Bool
-    let candidates: @MainActor () -> [PaletteCandidate]
+    /// True when this source's candidates ARE a function of the live query
+    /// (the URL source). Such a source can't be snapshotted at `refresh()`:
+    /// it is re-pulled on every keystroke, and its rows are taken verbatim
+    /// rather than fuzzy-filtered — it already decided what this query
+    /// yields, and re-scoring "Open github.com" against "github.com" would
+    /// only be able to reject it.
+    let dependsOnQuery: Bool
+    /// Receives the current query; snapshot sources ignore it.
+    let candidates: @MainActor (String) -> [PaletteCandidate]
+
+    init(
+        kind: PaletteSectionKind,
+        cap: Int,
+        showsOnEmptyQuery: Bool,
+        dependsOnQuery: Bool = false,
+        candidates: @escaping @MainActor (String) -> [PaletteCandidate]
+    ) {
+        self.kind = kind
+        self.cap = cap
+        self.showsOnEmptyQuery = showsOnEmptyQuery
+        self.dependsOnQuery = dependsOnQuery
+        self.candidates = candidates
+    }
 }
 
 struct PaletteRow: Identifiable {
@@ -73,11 +100,12 @@ final class PaletteModel {
         self.sources = sources
     }
 
-    /// Re-pull every source's candidates — called once per palette open.
+    /// Re-pull every snapshot source's candidates — called once per palette
+    /// open. Query-dependent sources are skipped here; `rebuild` pulls them.
     func refresh() {
         snapshot = [:]
-        for source in sources {
-            snapshot[source.kind] = source.candidates()
+        for source in sources where !source.dependsOnQuery {
+            snapshot[source.kind] = source.candidates("")
         }
         rebuild()
     }
@@ -112,6 +140,15 @@ final class PaletteModel {
 
     private func rebuild() {
         sections = sources.compactMap { source in
+            if source.dependsOnQuery {
+                guard !query.isEmpty else { return nil }
+                let rows = source.candidates(query).prefix(source.cap).map {
+                    PaletteRow(candidate: $0, match: FuzzyMatch(score: 0, matchedOffsets: []))
+                }
+                return rows.isEmpty
+                    ? nil
+                    : PaletteResultSection(kind: source.kind, rows: Array(rows))
+            }
             let candidates = snapshot[source.kind] ?? []
             let rows: [PaletteRow]
             if query.isEmpty {

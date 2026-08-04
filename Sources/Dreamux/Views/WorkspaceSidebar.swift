@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Work Items column of a project window. Top to bottom: icon+label
-/// tile rows (Signals, Browser, Flows, Context & MCPs), the live Flows
+/// tile rows (Signals, Flows, Context & MCPs), the live Flows
 /// section (plan-backed work reachable from its rows, with a "View all"
 /// jump to the Flows page), and the always-visible, borderless
 /// Repositories list with its Add repository row. Plans, specs, and
@@ -30,6 +30,10 @@ struct WorkspaceSidebar: View {
     /// stores above), so its own property wrapper.
     @ObservedObject var flows: FlowStore
     let planRunner: PlanRunCoordinator
+    /// `ProjectSession.ideaLauncher` — the shared intake door (also used by
+    /// the Overview's Mode B "Plan something here"), so the entry points
+    /// can't drift.
+    let ideaLauncher: IdeaIntakeLauncher
     let planQueue: PlanQueueController
     /// Non-e2e "merge and continue" gate channel — the plan queue's
     /// `requestMerge` closure parks the target workspace id here when
@@ -163,7 +167,7 @@ struct WorkspaceSidebar: View {
                 autoRunParallel: $layout.autoRunParallel,
                 onSubmit: { idea in
                     showNewPlan = false
-                    openPlanningSession { digest in
+                    openIntakeSession(title: IdeaTitle.tabTitle(for: idea)) { digest in
                         PlanPrompts.brainstormKickoff(idea: idea, intakeDigest: digest)
                     }
                 },
@@ -282,9 +286,10 @@ struct WorkspaceSidebar: View {
                 onRunPlan: { runningPlan = $0 },
                 onNewPlan: { showNewPlan = true },
                 onWritePlan: { spec in
-                    openPlanningSession { digest in
+                    let path = docStore.relativePath(of: spec)
+                    openIntakeSession(title: "plan: \(spec.title)") { digest in
                         PlanPrompts.writePlanKickoff(
-                            specRelativePath: docStore.relativePath(of: spec),
+                            specRelativePath: path,
                             intakeDigest: digest)
                     }
                 },
@@ -455,32 +460,15 @@ struct WorkspaceSidebar: View {
             .background(Capsule().fill(color.opacity(0.12)))
     }
 
-    private static let browserHomepage = URL(string: "https://www.google.com")!
-
     private func handleTileTap(_ tile: SidebarTile) {
         switch tile {
         case .signals:
             sidebarMode = .signals
-        case .browser:
-            openBrowserTab()
         case .flows:
             sidebarMode = .flows
         case .library:
             sidebarMode = .library
         }
-    }
-
-    /// Open a browser tab at the hardcoded homepage, switching to it.
-    /// `openWebTab` dedups by the tab's home URL, so a workspace keeps a
-    /// single browser tab that this re-focuses rather than stacking
-    /// duplicates. Web tabs live inside a workspace's Bonsplit pane, so if
-    /// there's no workspace yet we spin up a scratch one (same as ⌘⇧T)
-    /// rather than leaving the tile inert.
-    private func openBrowserTab() {
-        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
-        store.activate(workspace.id)
-        sidebarMode = .workspace
-        store.session(for: workspace).openWebTab(url: Self.browserHomepage, title: "Browser")
     }
 
     private func featureRowBody(_ workspace: Workspace) -> some View {
@@ -875,11 +863,14 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// One planning terminal per project — delegates to the shared
-    /// `PlanningSessionLauncher` (also used by the Overview's Mode B
-    /// "Plan something here") so the two entry points can't drift.
-    private func openPlanningSession(buildPrompt: @escaping (String?) -> String) {
-        PlanningSessionLauncher.open(
+    /// A FRESH intake session per fired idea — delegates to the shared
+    /// `IdeaIntakeLauncher` (also used by the Overview's Mode B "Plan
+    /// something here") so the two entry points can't drift.
+    private func openIntakeSession(
+        title: String, buildPrompt: @escaping (String?) -> String
+    ) {
+        ideaLauncher.fire(
+            title: title,
             store: store,
             repoStore: repoStore,
             docStore: docStore,

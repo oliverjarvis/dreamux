@@ -36,42 +36,59 @@ enum IntakeDigest {
     /// Format the inventory. `plans` render in the given order (never
     /// sorted here); `territories` maps a plan path to its touched
     /// top-level paths (present only for running plans); `queue` is the
-    /// current queue order. Output is plain text with no surrounding
-    /// fence, capped at `maxBytes` with a truncation marker.
+    /// current queue order; `liveIntakeSessions` names the OTHER intake
+    /// conversations open right now (tab titles). Output is plain text with
+    /// no surrounding fence, capped at `maxBytes` with a truncation marker.
     static func render(
         plans: [Entry],
         territories: [String: [String]],
-        queue: [String]
+        queue: [String],
+        liveIntakeSessions: [String] = []
     ) -> String {
-        guard !plans.isEmpty else { return "(no plans on record)" }
-
         var lines: [String] = []
-        for plan in plans {
-            var header = "- \(plan.title) — \(plan.status.label), \(plan.path)"
-            if let feature = plan.feature, !feature.isEmpty {
-                header += ", feature \(feature)"
-            }
-            lines.append(header)
 
-            let shown = plan.remainingTasks.prefix(maxTasksPerPlan)
-            for title in shown {
-                lines.append("    · \(title)")
-            }
-            let overflow = plan.remainingTasks.count - shown.count
-            if overflow > 0 {
-                lines.append("    · … +\(overflow) more")
+        if plans.isEmpty {
+            lines.append("(no plans on record)")
+        } else {
+            for plan in plans {
+                var header = "- \(plan.title) — \(plan.status.label), \(plan.path)"
+                if let feature = plan.feature, !feature.isEmpty {
+                    header += ", feature \(feature)"
+                }
+                lines.append(header)
+
+                let shown = plan.remainingTasks.prefix(maxTasksPerPlan)
+                for title in shown {
+                    lines.append("    · \(title)")
+                }
+                let overflow = plan.remainingTasks.count - shown.count
+                if overflow > 0 {
+                    lines.append("    · … +\(overflow) more")
+                }
+
+                // Territory is populated only for running plans, so its mere
+                // presence is the signal — no need to re-check status here.
+                if let touched = territories[plan.path], !touched.isEmpty {
+                    lines.append("    touches: \(touched.joined(separator: ", "))")
+                }
             }
 
-            // Territory is populated only for running plans, so its mere
-            // presence is the signal — no need to re-check status here.
-            if let touched = territories[plan.path], !touched.isEmpty {
-                lines.append("    touches: \(touched.joined(separator: ", "))")
+            if !queue.isEmpty {
+                lines.append("")
+                lines.append("queue: \(queue.joined(separator: " → "))")
             }
         }
 
-        if !queue.isEmpty {
+        // Conversations being routed RIGHT NOW — no plan file exists for
+        // them yet, so nothing above can mention them. Without this, two
+        // ideas fired seconds apart both read "nothing covers this" and both
+        // mint a competing plan.
+        if !liveIntakeSessions.isEmpty {
             lines.append("")
-            lines.append("queue: \(queue.joined(separator: " → "))")
+            lines.append("Idea sessions in progress (not yet written up):")
+            for title in liveIntakeSessions {
+                lines.append("  · \(title)")
+            }
         }
 
         return capped(lines)
@@ -118,13 +135,16 @@ enum IntakeDigest {
     /// not just uncommitted). Merged plans are dropped — they are noise for
     /// a disposition. The diffstat closure is injected (defaulting to real
     /// git, keyed on the worktree URL and base branch) so tests never spawn
-    /// a process.
+    /// a process. `liveIntakeSessions` names the other intake conversations
+    /// open at build time (their tab titles); the launcher fills it,
+    /// excluding the session the digest is being built for.
     @MainActor
     static func build(
         docStore: DocStore,
         repos: [Repository],
         queue: [String],
         featureExists: (String) -> Bool,
+        liveIntakeSessions: [String] = [],
         diffstat: @Sendable (URL, String) async -> [String] = {
             await GitOperations.changedTopLevelPaths(in: $0, baseBranch: $1)
         }
@@ -159,6 +179,7 @@ enum IntakeDigest {
             }
         }
 
-        return render(plans: entries, territories: territories, queue: queue)
+        return render(plans: entries, territories: territories, queue: queue,
+                      liveIntakeSessions: liveIntakeSessions)
     }
 }
