@@ -26,11 +26,12 @@ enum DropZone: Equatable {
 }
 
 /// Container for a single pane with its tab bar and content area
-struct PaneContainerView<Content: View, EmptyContent: View>: View {
+struct PaneContainerView<Content: View, EmptyContent: View, Accessory: View>: View {
     @Bindable var pane: PaneState
     let controller: SplitViewController
     let contentBuilder: (TabItem, PaneID) -> Content
     let emptyPaneBuilder: (PaneID) -> EmptyContent
+    let tabBarAccessoryBuilder: (PaneID) -> Accessory
     var showSplitButtons: Bool = true
     var contentViewLifecycle: ContentViewLifecycle = .recreateOnSwitch
 
@@ -46,7 +47,8 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
             TabBarView(
                 pane: pane,
                 isFocused: isFocused,
-                showSplitButtons: showSplitButtons
+                showSplitButtons: showSplitButtons,
+                accessory: { tabBarAccessoryBuilder(pane.id) }
             )
 
             // Content area with drop zones

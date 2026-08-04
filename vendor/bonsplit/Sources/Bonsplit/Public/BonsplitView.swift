@@ -13,28 +13,36 @@ import SwiftUI
 ///                 .onTapGesture { controller.focusPane(paneId) }
 ///         } emptyPane: { paneId in
 ///             Text("Empty pane")
+///         } tabBarAccessory: { paneId in
+///             Button("+") { controller.createTab(title: "New", inPane: paneId) }
 ///         }
 ///     }
 /// }
 /// ```
-public struct BonsplitView<Content: View, EmptyContent: View>: View {
+public struct BonsplitView<Content: View, EmptyContent: View, Accessory: View>: View {
     @Bindable private var controller: BonsplitController
     private let contentBuilder: (Tab, PaneID) -> Content
     private let emptyPaneBuilder: (PaneID) -> EmptyContent
+    private let tabBarAccessoryBuilder: (PaneID) -> Accessory
 
-    /// Initialize with a controller, content builder, and empty pane builder
+    /// Initialize with a controller, content builder, empty pane builder, and tab bar accessory
     /// - Parameters:
     ///   - controller: The BonsplitController managing the tab state
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
     ///   - emptyPane: A ViewBuilder closure that provides content for empty panes
+    ///   - tabBarAccessory: A ViewBuilder closure rendered in each pane's tab bar, in the trailing
+    ///     cluster just leading of the split buttons. Receives that pane's ID. Bonsplit places the
+    ///     slot and knows nothing about what goes in it.
     public init(
         controller: BonsplitController,
         @ViewBuilder content: @escaping (Tab, PaneID) -> Content,
-        @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent
+        @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent,
+        @ViewBuilder tabBarAccessory: @escaping (PaneID) -> Accessory
     ) {
         self.controller = controller
         self.contentBuilder = content
         self.emptyPaneBuilder = emptyPane
+        self.tabBarAccessoryBuilder = tabBarAccessory
     }
 
     public var body: some View {
@@ -44,6 +52,9 @@ public struct BonsplitView<Content: View, EmptyContent: View>: View {
             },
             emptyPaneBuilder: { internalPaneId in
                 emptyPaneBuilder(PaneID(id: internalPaneId.id))
+            },
+            tabBarAccessoryBuilder: { internalPaneId in
+                tabBarAccessoryBuilder(PaneID(id: internalPaneId.id))
             },
             showSplitButtons: controller.configuration.allowSplits && controller.configuration.appearance.showSplitButtons,
             contentViewLifecycle: controller.configuration.contentViewLifecycle,
@@ -56,9 +67,28 @@ public struct BonsplitView<Content: View, EmptyContent: View>: View {
     }
 }
 
-// MARK: - Convenience initializer with default empty view
+// MARK: - Convenience initializers
 
-extension BonsplitView where EmptyContent == DefaultEmptyPaneView {
+extension BonsplitView where Accessory == EmptyView {
+    /// Initialize without a tab bar accessory — the tab bar renders as it
+    /// always has (tab strip, then the split buttons).
+    /// - Parameters:
+    ///   - controller: The BonsplitController managing the tab state
+    ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
+    ///   - emptyPane: A ViewBuilder closure that provides content for empty panes
+    public init(
+        controller: BonsplitController,
+        @ViewBuilder content: @escaping (Tab, PaneID) -> Content,
+        @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent
+    ) {
+        self.controller = controller
+        self.contentBuilder = content
+        self.emptyPaneBuilder = emptyPane
+        self.tabBarAccessoryBuilder = { _ in EmptyView() }
+    }
+}
+
+extension BonsplitView where EmptyContent == DefaultEmptyPaneView, Accessory == EmptyView {
     /// Initialize with a controller and content builder, using the default empty pane view
     /// - Parameters:
     ///   - controller: The BonsplitController managing the tab state
@@ -70,6 +100,7 @@ extension BonsplitView where EmptyContent == DefaultEmptyPaneView {
         self.controller = controller
         self.contentBuilder = content
         self.emptyPaneBuilder = { _ in DefaultEmptyPaneView() }
+        self.tabBarAccessoryBuilder = { _ in EmptyView() }
     }
 }
 
