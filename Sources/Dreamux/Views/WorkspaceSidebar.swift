@@ -30,6 +30,10 @@ struct WorkspaceSidebar: View {
     /// stores above), so its own property wrapper.
     @ObservedObject var flows: FlowStore
     let planRunner: PlanRunCoordinator
+    /// `ProjectSession.ideaLauncher` — the shared intake door (also used by
+    /// the Overview's Mode B "Plan something here"), so the entry points
+    /// can't drift.
+    let ideaLauncher: IdeaIntakeLauncher
     let planQueue: PlanQueueController
     /// Non-e2e "merge and continue" gate channel — the plan queue's
     /// `requestMerge` closure parks the target workspace id here when
@@ -163,7 +167,7 @@ struct WorkspaceSidebar: View {
                 autoRunParallel: $layout.autoRunParallel,
                 onSubmit: { idea in
                     showNewPlan = false
-                    openPlanningSession { digest in
+                    openIntakeSession(title: IdeaTitle.tabTitle(for: idea)) { digest in
                         PlanPrompts.brainstormKickoff(idea: idea, intakeDigest: digest)
                     }
                 },
@@ -282,9 +286,10 @@ struct WorkspaceSidebar: View {
                 onRunPlan: { runningPlan = $0 },
                 onNewPlan: { showNewPlan = true },
                 onWritePlan: { spec in
-                    openPlanningSession { digest in
+                    let path = docStore.relativePath(of: spec)
+                    openIntakeSession(title: "plan: \(spec.title)") { digest in
                         PlanPrompts.writePlanKickoff(
-                            specRelativePath: docStore.relativePath(of: spec),
+                            specRelativePath: path,
                             intakeDigest: digest)
                     }
                 },
@@ -858,11 +863,14 @@ struct WorkspaceSidebar: View {
         }
     }
 
-    /// One planning terminal per project — delegates to the shared
-    /// `PlanningSessionLauncher` (also used by the Overview's Mode B
-    /// "Plan something here") so the two entry points can't drift.
-    private func openPlanningSession(buildPrompt: @escaping (String?) -> String) {
-        PlanningSessionLauncher.open(
+    /// A FRESH intake session per fired idea — delegates to the shared
+    /// `IdeaIntakeLauncher` (also used by the Overview's Mode B "Plan
+    /// something here") so the two entry points can't drift.
+    private func openIntakeSession(
+        title: String, buildPrompt: @escaping (String?) -> String
+    ) {
+        ideaLauncher.fire(
+            title: title,
             store: store,
             repoStore: repoStore,
             docStore: docStore,

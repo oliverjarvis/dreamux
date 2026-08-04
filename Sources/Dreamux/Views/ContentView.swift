@@ -208,6 +208,7 @@ struct ContentView: View {
                         docStore: docStore,
                         flows: session.flows,
                         planRunner: planRunner,
+                        ideaLauncher: session.ideaLauncher,
                         planQueue: planQueue,
                         gateMergeWorkspaceID: $session.pendingGateMergeWorkspaceID,
                         gateCloseWorkspaceID: $session.pendingCloseWorkspaceID,
@@ -315,7 +316,7 @@ struct ContentView: View {
                 ),
                 onSubmit: { idea in
                     showNewPlan = false
-                    openOverviewPlanningSession { digest in
+                    openOverviewIntakeSession(title: IdeaTitle.tabTitle(for: idea)) { digest in
                         PlanPrompts.brainstormKickoff(idea: idea, intakeDigest: digest)
                     }
                 },
@@ -1279,10 +1280,13 @@ struct ContentView: View {
     }
 
     /// Mode B's "Plan something here" kickoff — the same shared
-    /// `PlanningSessionLauncher` the rail's `+` uses, so the two entry
+    /// `IdeaIntakeLauncher` the rail's New idea row uses, so the two entry
     /// points can't drift.
-    private func openOverviewPlanningSession(buildPrompt: @escaping (String?) -> String) {
-        PlanningSessionLauncher.open(
+    private func openOverviewIntakeSession(
+        title: String, buildPrompt: @escaping (String?) -> String
+    ) {
+        session.ideaLauncher.fire(
+            title: title,
             store: store,
             repoStore: repoStore,
             docStore: docStore,

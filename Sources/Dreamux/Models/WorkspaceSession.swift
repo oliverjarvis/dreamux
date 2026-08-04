@@ -285,7 +285,7 @@ final class WorkspaceSession {
         fileDirtyObservers.removeValue(forKey: tabId)
         diffTabSessions.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
-        if planningTabID == tabId { planningTabID = nil }
+        intakeTabIDs.remove(tabId)
         if agentTabID == tabId { agentTabID = nil }
         if runConfigTabID == tabId { runConfigTabID = nil }
         if composerTabID == tabId { composerTabID = nil }
@@ -402,7 +402,7 @@ final class WorkspaceSession {
     }
 
     /// Tab id of this feature's plan-execution agent terminal — the tab a
-    /// plan run typed its kickoff into. Tracked like `planningTabID` so the
+    /// plan run typed its kickoff into. Tracked so the
     /// nudge center can reach the live agent to type re-read / course-
     /// correction prompts; cleared when the tab closes.
     private var agentTabID: TabID?
@@ -425,21 +425,29 @@ final class WorkspaceSession {
         return tabSessions[id]
     }
 
-    /// Tab id of this session's planning terminal, if one was opened.
-    /// Cleared when the tab closes (`handleDidCloseTab`).
-    private var planningTabID: TabID?
+    /// Tab ids of the intake (idea-routing) sessions opened in this
+    /// workspace. Unlike the single-slot ids above this is a SET: every
+    /// fired idea gets its own tab, on purpose — ideas can be fired in
+    /// rapid succession and each deserves its own live router. Entries are
+    /// removed in `handleDidCloseTab` like every other tracked id.
+    private var intakeTabIDs: Set<TabID> = []
 
-    /// Re-select the live planning tab, or open a fresh one cwd'd at
-    /// `path`. One planning terminal per session keeps kickoffs from
-    /// stacking tabs.
-    func reuseOrOpenPlanningTab(at path: String) -> TabSession? {
-        if let id = planningTabID, let existing = tabSessions[id] {
-            controller.selectTab(id)
-            return existing
-        }
-        let tab = openAgentTab(at: path, title: "planning", icon: "lightbulb")
-        planningTabID = lastCreatedTabID
-        return tab
+    /// Record a freshly-opened intake tab. Called by `IdeaIntakeLauncher`
+    /// with the id `openAgentTab` just caused to exist.
+    func registerIntakeTab(_ id: TabID) {
+        intakeTabIDs.insert(id)
+    }
+
+    /// Titles of every OPEN intake tab, read live off the controller — the
+    /// sibling list the intake digest carries. Live rather than cached
+    /// because a tab's chip is the user's own name for that conversation;
+    /// note that an OSC title escape from the tab's shell can overwrite it
+    /// (`TitleObserver`), in which case the sibling reads as whatever the
+    /// shell last set. That is a legibility degradation, not a correctness
+    /// one — the count and the fact of a live sibling are what the digest
+    /// needs.
+    var intakeTabTitles: [String] {
+        intakeTabIDs.compactMap { controller.tab($0)?.title }
     }
 
     /// Tab id of this workspace's run-config agent terminal — the tab the
@@ -449,7 +457,7 @@ final class WorkspaceSession {
     private var runConfigTabID: TabID?
 
     /// Re-select the live run-config terminal, or open a fresh one cwd'd
-    /// at `path`. Mirrors `reuseOrOpenPlanningTab`.
+    /// at `path`. Mirrors `reuseOrOpenComposerTab`.
     func reuseOrOpenRunConfigTab(at path: String) -> TabSession? {
         if let id = runConfigTabID, let existing = tabSessions[id] {
             controller.selectTab(id)

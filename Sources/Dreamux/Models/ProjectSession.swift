@@ -26,6 +26,11 @@ final class ProjectSession {
     let fileTree: FileTreeStore
     let docStore: DocStore
     let planRunner: PlanRunCoordinator
+    /// The one intake door — ⌘P, the Overview's Mode B kickoff, the
+    /// spec→plan kickoff, and the composer's Idea target all fire through
+    /// this instance so they can't drift. Lives on the bundle (like
+    /// `planRunner`) because it carries an injectable `sendPrompt` seam.
+    let ideaLauncher = IdeaIntakeLauncher()
     let planQueue: PlanQueueController
     let nudgeCenter: PlanNudgeCenter
     let flows: FlowStore
