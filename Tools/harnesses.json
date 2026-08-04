@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "harnesses": [
+    {
+      "id": "claude",
+      "displayName": "Claude Code",
+      "binaryNames": ["claude"],
+      "strategy": "processInjection",
+      "events": {
+        "Notification:permission_prompt": { "state": "blocked", "reason": "permission" },
+        "Notification:idle_prompt": { "state": "blocked", "reason": "question" },
+        "Notification:agent_needs_input": { "state": "blocked", "reason": "subagentInput" },
+        "Notification:elicitation_dialog": { "state": "blocked", "reason": "elicitation" },
+        "Notification:agent_completed": { "state": "done" },
+        "PermissionRequest": { "state": "blocked", "reason": "permission" },
+        "Stop": { "state": "done", "messageField": "last_assistant_message" },
+        "UserPromptSubmit": { "state": "working" },
+        "PreToolUse": { "state": "working" },
+        "SessionEnd": { "state": "none" }
+      }
+    }
+  ]
+}

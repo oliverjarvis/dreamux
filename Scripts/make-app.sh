@@ -91,6 +91,11 @@ for tool in dreamux-hook claude; do
     chmod +x "$APP/Contents/Resources/bin/$tool"
 done
 
+# The harness catalog lives beside the shims so `dreamux-hook` and the
+# Swift registry resolve it by the same rule in a checkout and in the
+# bundle: "<my own directory>/harnesses.json".
+cp "$ROOT/Tools/harnesses.json" "$APP/Contents/Resources/bin/harnesses.json"
+
 # Bundle our ZDOTDIR shim. PTYShellSession sets ZDOTDIR to this folder
 # when spawning zsh so the user's normal rc files load *first* (via
 # `source $HOME/...`) and we re-prepend Dreamux/bin afterward — the
