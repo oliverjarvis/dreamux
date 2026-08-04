@@ -54,21 +54,47 @@ final class SidebarLayoutStoreTests: XCTestCase {
 
     @MainActor func testTileOrderPersistsAcrossReload() {
         let first = SidebarLayoutStore(project: project)
-        first.tiles = [.browser, .signals]
+        first.tiles = [.library, .signals]
         first.persistTiles()
         let reloaded = SidebarLayoutStore(project: project)
-        XCTAssertEqual(reloaded.tiles, [.browser, .signals, .flows, .library])
+        XCTAssertEqual(reloaded.tiles, [.library, .signals, .flows])
     }
 
-    @MainActor func testMissingTilesAreReconciledOnLoad() {
+    @MainActor func testMissingTilesAreReconciledOnLoad() throws {
         // Simulate an old file that only pinned Signals.
         let dir = project.rootPath.appendingPathComponent(".dreamux", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let json = #"{"features":[],"tiles":["signals"]}"#
-        try? json.write(to: dir.appendingPathComponent("sidebar.json"), atomically: true, encoding: .utf8)
+        try json.write(to: dir.appendingPathComponent("sidebar.json"),
+                       atomically: true, encoding: .utf8)
 
         let store = SidebarLayoutStore(project: project)
-        XCTAssertEqual(store.tiles, [.signals, .browser, .flows, .library])
+        XCTAssertEqual(store.tiles, [.signals, .flows, .library])
+    }
+
+    /// A file written by the pre-retirement app names `"browser"`. Decoding
+    /// `tiles` as `[SidebarTile]` would throw on it and fail the WHOLE
+    /// payload, silently resetting features / plansExpanded / appsExpanded /
+    /// autoRunParallel to defaults. Retired raw values must drop out and
+    /// leave every other field intact (spec: "Lenient tile decode").
+    @MainActor func testRetiredTileNameDropsWithoutLosingOtherFields() throws {
+        let dir = project.rootPath.appendingPathComponent(".dreamux", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json = """
+        {"appsExpanded":false,"autoRunParallel":true,\
+        "features":["alpha","beta"],"plansExpanded":false,\
+        "tiles":["signals","browser","flows","library"]}
+        """
+        try json.write(to: dir.appendingPathComponent("sidebar.json"),
+                       atomically: true, encoding: .utf8)
+
+        let store = SidebarLayoutStore(project: project)
+        XCTAssertEqual(store.tiles, [.signals, .flows, .library],
+                       "retired names drop; saved order survives")
+        XCTAssertEqual(store.featureOrder, ["alpha", "beta"])
+        XCTAssertFalse(store.plansExpanded)
+        XCTAssertFalse(store.appsExpanded)
+        XCTAssertTrue(store.autoRunParallel)
     }
 
     /// sidebar.json written before a tile case existed must still show
@@ -77,12 +103,13 @@ final class SidebarLayoutStoreTests: XCTestCase {
     @MainActor func testTilesUnionInMissingCases() throws {
         let dir = project.rootPath.appendingPathComponent(".dreamux", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let json = #"{"features":[],"tiles":["signals","browser"]}"#
-        try json.write(to: dir.appendingPathComponent("sidebar.json"), atomically: true, encoding: .utf8)
+        let json = #"{"features":[],"tiles":["flows","signals"]}"#
+        try json.write(to: dir.appendingPathComponent("sidebar.json"),
+                       atomically: true, encoding: .utf8)
 
         let store = SidebarLayoutStore(project: project)
         XCTAssertTrue(store.tiles.contains(.library))
-        XCTAssertEqual(Array(store.tiles.prefix(2)), [.signals, .browser],
+        XCTAssertEqual(Array(store.tiles.prefix(2)), [.flows, .signals],
                        "saved order preserved; new cases appended")
     }
 

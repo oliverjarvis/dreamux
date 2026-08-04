@@ -32,7 +32,9 @@ final class SidebarLayoutStore {
             .appendingPathComponent(".dreamux", isDirectory: true)
             .appendingPathComponent("sidebar.json")
         let loaded = Self.load(from: configURL)
-        tiles = Self.reconcile(loaded?.tiles ?? SidebarTile.allCases)
+        tiles = Self.reconcile(
+            loaded.map { $0.tiles.compactMap(SidebarTile.init(rawValue:)) }
+                ?? SidebarTile.allCases)
         featureOrder = loaded?.features ?? []
         plansExpanded = loaded?.plansExpanded ?? true
         appsExpanded = loaded?.appsExpanded ?? true
@@ -69,7 +71,14 @@ final class SidebarLayoutStore {
     // MARK: - Persistence
 
     private struct Payload: Codable {
-        var tiles: [SidebarTile]
+        /// Raw tile names, NOT `[SidebarTile]`. Decoding straight into the
+        /// enum makes one retired name (`"browser"`, retired 2026-08-04)
+        /// throw and fail the WHOLE payload — `load` would return nil and
+        /// `features`, `plansExpanded`, `appsExpanded` and `autoRunParallel`
+        /// would all silently reset to defaults. Strings decode, unknown
+        /// names are dropped by `compactMap` in `init`, everything else
+        /// survives.
+        var tiles: [String]
         var features: [String]
         var plansExpanded: Bool?
         var appsExpanded: Bool?
@@ -92,7 +101,7 @@ final class SidebarLayoutStore {
     }
 
     private func save() {
-        let payload = Payload(tiles: tiles, features: featureOrder,
+        let payload = Payload(tiles: tiles.map(\.rawValue), features: featureOrder,
                               plansExpanded: plansExpanded,
                               appsExpanded: appsExpanded,
                               autoRunParallel: autoRunParallel)

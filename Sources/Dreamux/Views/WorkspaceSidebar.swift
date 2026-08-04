@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Work Items column of a project window. Top to bottom: icon+label
-/// tile rows (Signals, Browser, Flows, Context & MCPs), the live Flows
+/// tile rows (Signals, Flows, Context & MCPs), the live Flows
 /// section (plan-backed work reachable from its rows, with a "View all"
 /// jump to the Flows page), and the always-visible, borderless
 /// Repositories list with its Add repository row. Plans, specs, and
@@ -455,32 +455,15 @@ struct WorkspaceSidebar: View {
             .background(Capsule().fill(color.opacity(0.12)))
     }
 
-    private static let browserHomepage = URL(string: "https://www.google.com")!
-
     private func handleTileTap(_ tile: SidebarTile) {
         switch tile {
         case .signals:
             sidebarMode = .signals
-        case .browser:
-            openBrowserTab()
         case .flows:
             sidebarMode = .flows
         case .library:
             sidebarMode = .library
         }
-    }
-
-    /// Open a browser tab at the hardcoded homepage, switching to it.
-    /// `openWebTab` dedups by the tab's home URL, so a workspace keeps a
-    /// single browser tab that this re-focuses rather than stacking
-    /// duplicates. Web tabs live inside a workspace's Bonsplit pane, so if
-    /// there's no workspace yet we spin up a scratch one (same as ⌘⇧T)
-    /// rather than leaving the tile inert.
-    private func openBrowserTab() {
-        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
-        store.activate(workspace.id)
-        sidebarMode = .workspace
-        store.session(for: workspace).openWebTab(url: Self.browserHomepage, title: "Browser")
     }
 
     private func featureRowBody(_ workspace: Workspace) -> some View {
