@@ -287,6 +287,7 @@ private struct ProjectCommands: Commands {
     @FocusedBinding(\.createProjectPresented) private var createProjectPresented: Bool?
     @FocusedBinding(\.newPlanPresented) private var newPlanPresented: Bool?
     @FocusedBinding(\.newAppletPresented) private var newAppletPresented: Bool?
+    @FocusedBinding(\.openBrowserRequested) private var openBrowserRequested: Bool?
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -325,6 +326,12 @@ private struct ProjectCommands: Commands {
             }
             .keyboardShortcut("t", modifiers: [.command])
             .disabled(store == nil)
+
+            Button("Open Browser") {
+                openBrowserRequested = true
+            }
+            .keyboardShortcut("b", modifiers: [.command, .shift])
+            .disabled(openBrowserRequested == nil)
 
             Button("New Workspace") {
                 store?.addWorkspace()

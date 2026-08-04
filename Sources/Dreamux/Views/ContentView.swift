@@ -54,6 +54,11 @@ struct ContentView: View {
     @State private var appletActionError: String?
     /// ⌘K command palette visibility (also opened by the rail's search bar).
     @State private var showPalette = false
+    /// ⌘⇧B trigger, published as a focused value so the File-menu item
+    /// fires it while a Ghostty terminal is first responder. Consumed and
+    /// reset in the `.onChange` below — the same one-shot pattern the
+    /// e2e bridge's `pending*` channels use.
+    @State private var openBrowserRequested = false
 
     // MARK: Bottom prompt composer
     /// Collapsed state persists across launches — reopened via the chip.
@@ -398,6 +403,12 @@ struct ContentView: View {
         .focusedSceneValue(\.createProjectPresented, $showCreateProject)
         .focusedSceneValue(\.newPlanPresented, $showNewPlan)
         .focusedSceneValue(\.newAppletPresented, $showNewApplet)
+        .focusedSceneValue(\.openBrowserRequested, $openBrowserRequested)
+        .onChange(of: openBrowserRequested) { _, requested in
+            guard requested else { return }
+            openBrowserRequested = false
+            openBlankBrowserTab()
+        }
         .onAppear {
             // e2e only (no-op otherwise): sync the bridge with this
             // window's starting mode. (Store registration and the plan
@@ -1404,6 +1415,28 @@ struct ContentView: View {
         store.session(for: workspace).openFileTab(at: url, revealingLine: line)
     }
 
+    /// The workspace a browser tab should land in: whatever is active,
+    /// else the first, else a fresh scratch one — the same fallback
+    /// `openFile` uses, so a browser shortcut is never inert. Flips to the
+    /// terminal/tab view so the new tab is visible.
+    private func browserHostSession() -> WorkspaceSession {
+        let workspace = store.activeWorkspace ?? store.workspaces.first ?? store.addWorkspace()
+        store.activate(workspace.id)
+        sidebarMode = .workspace
+        return store.session(for: workspace)
+    }
+
+    /// ⌘⇧B / palette "Open Browser" / ＋ ▸ Browser: an empty tab with a
+    /// focused address bar. No homepage, by design (spec: Decisions §2).
+    private func openBlankBrowserTab() {
+        browserHostSession().openBlankWebTab()
+    }
+
+    /// The ⌘K URL row: a web tab at an address the user typed.
+    private func openWebTab(at url: URL) {
+        browserHostSession().openWebTab(url: url, title: url.host ?? "Browser")
+    }
+
     /// Mirrors `WorkspaceSidebar.handleCreateApp` for the ⌘L / palette path:
     /// scaffold a local-born applet, spawn its builder agent, open its host.
     private func createProjectApplet(name: String, description: String) {
@@ -1433,7 +1466,22 @@ struct ContentView: View {
 
     private func paletteSources() -> [PaletteSource] {
         [
-            PaletteSource(kind: .projects, cap: 5, showsOnEmptyQuery: true) {
+            // Ranks first: when the query IS an address, that is what the
+            // user meant. `directURL` (not `resolveNavigation`) so prose
+            // never turns into an offer to google it.
+            PaletteSource(kind: .url, cap: 1, showsOnEmptyQuery: false,
+                          dependsOnQuery: true) { query in
+                guard let url = WebTabSession.directURL(query) else { return [] }
+                return [PaletteCandidate(
+                    id: "url-\(url.absoluteString)",
+                    title: "Open \(url.host ?? url.absoluteString)",
+                    subtitle: url.absoluteString,
+                    icon: "globe"
+                ) {
+                    openWebTab(at: url)
+                }]
+            },
+            PaletteSource(kind: .projects, cap: 5, showsOnEmptyQuery: true) { _ in
                 projects.projects.map { project in
                     PaletteCandidate(
                         id: "project-\(project.id)",
@@ -1445,7 +1493,7 @@ struct ContentView: View {
                     }
                 }
             },
-            PaletteSource(kind: .workspaces, cap: 5, showsOnEmptyQuery: false) {
+            PaletteSource(kind: .workspaces, cap: 5, showsOnEmptyQuery: false) { _ in
                 let workspaceItems = store.workspaces.map { workspace in
                     PaletteCandidate(
                         id: "workspace-\(workspace.id)",
@@ -1470,10 +1518,10 @@ struct ContentView: View {
                 }
                 return workspaceItems + docItems
             },
-            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) {
+            PaletteSource(kind: .commands, cap: 5, showsOnEmptyQuery: true) { _ in
                 paletteCommandCandidates()
             },
-            PaletteSource(kind: .files, cap: 8, showsOnEmptyQuery: false) {
+            PaletteSource(kind: .files, cap: 8, showsOnEmptyQuery: false) { _ in
                 paletteFileCandidates()
             },
         ]
@@ -1500,6 +1548,8 @@ struct ContentView: View {
                              subtitle: nil, icon: "plus.square") { _ = store.addWorkspace() },
             PaletteCandidate(id: "command-new-tab", title: "New Tab",
                              subtitle: nil, icon: "plus.rectangle") { store.activeSession?.createTab() },
+            PaletteCandidate(id: "command-open-browser", title: "Open Browser",
+                             subtitle: nil, icon: "globe") { openBlankBrowserTab() },
             PaletteCandidate(id: "command-toggle-file-explorer", title: "Toggle File Explorer",
                              subtitle: nil, icon: "sidebar.right") { showFileTree.toggle() },
             PaletteCandidate(id: "command-go-signals", title: "Go to Signals",
@@ -1801,6 +1851,10 @@ private struct NewAppletPresentedKey: FocusedValueKey {
     typealias Value = Binding<Bool>
 }
 
+private struct OpenBrowserRequestedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
 extension FocusedValues {
     var createProjectPresented: Binding<Bool>? {
         get { self[CreateProjectPresentedKey.self] }
@@ -1820,6 +1874,13 @@ extension FocusedValues {
     var newAppletPresented: Binding<Bool>? {
         get { self[NewAppletPresentedKey.self] }
         set { self[NewAppletPresentedKey.self] = newValue }
+    }
+
+    /// One-shot ⌘⇧B trigger: the File-menu item flips it true, the focused
+    /// project window opens a blank web tab and flips it back.
+    var openBrowserRequested: Binding<Bool>? {
+        get { self[OpenBrowserRequestedKey.self] }
+        set { self[OpenBrowserRequestedKey.self] = newValue }
     }
 }
 
