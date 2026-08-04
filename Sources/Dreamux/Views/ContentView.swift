@@ -421,6 +421,7 @@ struct ContentView: View {
             e2eBridge?.currentSidebarMode = sidebarMode
             consumePendingSidebarModeIfAny()
             consumePendingPaletteIfAny()
+            consumePendingComposerIfAny()
 
             // `store.workspaces` is empty until the async `reloadFeatures`
             // (fired from `ProjectWindowContents.onAppear`) completes —
@@ -484,6 +485,9 @@ struct ContentView: View {
         }
         .onChange(of: e2eBridge?.pendingPalette) { _, _ in
             consumePendingPaletteIfAny()
+        }
+        .onChange(of: e2eBridge?.pendingComposer) { _, _ in
+            consumePendingComposerIfAny()
         }
         .focusedSceneValue(\.palettePresented, $showPalette)
         .onChange(of: showPalette) { _, visible in
@@ -1684,6 +1688,26 @@ struct ContentView: View {
             showPalette = false
             bridge.paletteModel = nil
         }
+    }
+
+    /// Same consume-and-clear shape as `consumePendingPaletteIfAny`: set the
+    /// bar's target and text, then press its own send button, so an
+    /// automated send takes the exact path a typed one does.
+    private func consumePendingComposerIfAny() {
+        guard let bridge = e2eBridge, let request = bridge.pendingComposer else { return }
+        bridge.pendingComposer = nil
+        switch request.target {
+        case "idea":
+            composerTarget = .idea
+        case "auto":
+            composerTarget = .auto
+        default:
+            guard let workspace = store.workspaces.first(where: { $0.name == request.target })
+            else { return }
+            composerTarget = .workspace(workspace.id)
+        }
+        composerText = request.text
+        sendComposerPrompt()
     }
 
     /// Same consume-and-clear shape as `consumePendingSidebarModeIfAny`,

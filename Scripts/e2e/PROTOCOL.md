@@ -116,6 +116,7 @@ Snapshot of everything a scenario typically asserts on.
     "activeProject": {"id":"4B5C…","name":"demo","path":"…/demo"},
     "workspaces": [
       {"name":"feature-x","linkedRepoIDs":["webapp"],"isActive":true,
+       "isMain":false,"intakeTabs":[],
        "webTabs":["http://localhost:4600/"],
        "tabs":[{"title":"Overview","isOverview":true},
                {"title":"shell","isOverview":false}]}
@@ -606,6 +607,42 @@ Snapshot the open palette. Reply when open: `{"ok": true, "visible": true, "quer
 
 → {"cmd":"setPalette","visible":false}
 ← {"ok":true}
+```
+
+### `executePalette`
+
+Run a palette row — the Return the user would press.
+`{"cmd": "executePalette", "title"?: "Open github.com"}` — `title` picks the
+row by exact title; omit it to run whatever is currently selected. Reply:
+`{"ok": true, "executed": "<title>"}`. Errors when the palette is closed or
+no row matches (the error names the available titles).
+
+```
+→ {"cmd":"setPalette","visible":true,"query":"github.com"}
+← {"ok":true}
+
+→ {"cmd":"executePalette","title":"Open github.com"}
+← {"ok":true,"executed":"Open github.com"}
+```
+
+### `sendComposer`
+
+Type into the window's bottom prompt bar and send.
+`{"cmd": "sendComposer", "text": "...", "target"?: "idea"}` — `target` is
+`"idea"` (the default; fires the intake router into a fresh session in
+`main`), `"auto"`, or a workspace name. Reply: `{"ok": true}`. Parked on the
+project bridge and consumed by ContentView, like `setPalette`, so the send
+runs through the app's own `sendComposerPrompt`. Assert the result via
+`state`'s per-workspace `intakeTabs`.
+
+```
+→ {"cmd":"sendComposer","text":"browser tile hover states","target":"idea"}
+← {"ok":true}
+
+→ {"cmd":"state"}
+← {"ok":true,"workspaces":[
+    {"name":"main","isMain":true,"intakeTabs":["idea: browser tile hover"],...}
+  ],...}
 ```
 
 ### `listDocs`
