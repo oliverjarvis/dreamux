@@ -64,8 +64,12 @@ struct ContentView: View {
     /// Collapsed state persists across launches — reopened via the chip.
     @AppStorage("promptComposerHidden") private var composerHidden = false
     @State private var composerText = ""
-    /// Explicit composer target; nil is Auto (active workspace, else main).
-    @State private var composerTargetID: UUID?
+    /// Which of the bar's two jobs the next send does. Idea by default —
+    /// the bar's primary job is now routing an idea, not messaging one
+    /// workspace's claude.
+    @State private var composerTarget: ComposerTarget = .idea
+    /// One-line feedback under the bar after a refused delivery.
+    @State private var composerNote: String?
     /// Rebuilt fresh on every palette open so results reflect live stores.
     @State private var paletteModel: PaletteModel?
     /// Run-the-plan sheet fired from a workspace's Overview (Mode A's lime
@@ -520,8 +524,9 @@ struct ContentView: View {
             } else {
                 PromptComposer(
                     text: $composerText,
-                    targetID: $composerTargetID,
+                    target: $composerTarget,
                     workspaces: store.workspaces,
+                    note: composerNote,
                     onSend: { sendComposerPrompt() },
                     onHide: {
                         withAnimation(Self.composerSpring) { composerHidden = true }
@@ -542,33 +547,57 @@ struct ContentView: View {
 
     private static let composerSpring: Animation = .snappy(duration: 0.28, extraBounce: 0.12)
 
-    /// Send the composer's prompt to its target workspace's claude tab.
-    /// Auto (no explicit target) resolves to the active workspace when
-    /// one is showing, else `main`, else the first workspace. A fresh
-    /// tab launches claude seeded with the prompt; an existing one gets
-    /// the text typed into its live REPL.
+    /// Send the composer's prompt. **Idea** (the default) fires the intake
+    /// router — byte-identical to what ⌘P sends — into a brand-new session
+    /// in `main`. Auto (no explicit target) resolves to the active workspace
+    /// when one is showing, else `main`, else the first workspace; that path
+    /// asks the tab's binding whether a claude is live (type into it) or not
+    /// (launch one seeded with the prompt), rather than presuming from a
+    /// stale reuse flag.
     private func sendComposerPrompt() {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        let explicit = composerTargetID.flatMap { id in
-            store.workspaces.first { $0.id == id }
+        composerNote = nil
+
+        if composerTarget == .idea {
+            composerText = ""
+            session.ideaLauncher.fire(
+                title: IdeaTitle.tabTitle(for: text),
+                store: store,
+                repoStore: repoStore,
+                docStore: docStore,
+                planQueue: planQueue,
+                sidebarMode: $sidebarMode
+            ) { digest in
+                PlanPrompts.brainstormKickoff(idea: text, intakeDigest: digest)
+            }
+            return
         }
+
+        let explicit: Workspace? = {
+            guard case .workspace(let id) = composerTarget else { return nil }
+            return store.workspaces.first { $0.id == id }
+        }()
         let auto = (sidebarMode == .workspace ? store.activeWorkspace : nil)
             ?? store.workspaces.first(where: \.isMain)
             ?? store.workspaces.first
         guard let workspace = explicit ?? auto else { return }
-        composerText = ""
         store.activate(workspace.id)
         sidebarMode = .workspace
-        let session = store.session(for: workspace)
+        let workspaceSession = store.session(for: workspace)
         let cwd = workspace.workingDirectory ?? repoStore.project.rootPath.path
-        guard let (tab, reused) = session.reuseOrOpenComposerTab(at: cwd)
-        else { return }
+        guard let tab = workspaceSession.reuseOrOpenComposerTab(at: cwd) else { return }
         tab.startIfNeeded()
-        if reused {
-            ClaudePromptDriver.type(text, into: tab)
+        // The binding is checked immediately before delivering, so a refusal
+        // here is the narrow race where claude exited in between. Keep the
+        // text in the field and say so rather than dropping it.
+        let delivered = tab.binding.isBound
+            ? ClaudePromptDriver.type(text, into: tab)
+            : ClaudePromptDriver.send(text, into: tab)
+        if delivered {
+            composerText = ""
         } else {
-            ClaudePromptDriver.send(text, into: tab)
+            composerNote = "Couldn't deliver — that tab's claude session just changed. Send again."
         }
     }
 

@@ -474,17 +474,20 @@ final class WorkspaceSession {
     private var composerTabID: TabID?
 
     /// Re-select the live composer claude terminal, or open a fresh one
-    /// cwd'd at `path`. `reused` tells the caller whether a claude REPL
-    /// is presumed live in it (type into it) or the tab is fresh (launch
-    /// claude seeded with the prompt).
-    func reuseOrOpenComposerTab(at path: String) -> (tab: TabSession, reused: Bool)? {
+    /// cwd'd at `path`. Returns just the tab: whether a claude is live in it
+    /// is not something this method can know — it used to return
+    /// `reused: true` whenever `composerTabID` was still set, and the caller
+    /// took that as "a claude REPL is presumed live". Quit claude in that
+    /// tab and the next composer message was typed at a bare `zsh` prompt —
+    /// and executed. The caller asks `tab.binding` instead.
+    func reuseOrOpenComposerTab(at path: String) -> TabSession? {
         if let id = composerTabID, let existing = tabSessions[id] {
             controller.selectTab(id)
-            return (existing, true)
+            return existing
         }
         guard let tab = openAgentTab(at: path, title: "claude", icon: "sparkles") else { return nil }
         composerTabID = lastCreatedTabID
-        return (tab, false)
+        return tab
     }
 
     /// URL claimed by the next created tab — the web analog of
