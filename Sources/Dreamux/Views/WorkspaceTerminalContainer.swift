@@ -68,7 +68,24 @@ private struct WorkspaceBonsplitPane: View {
     let overview: WorkspaceOverviewDependencies
 
     var body: some View {
-        BonsplitView(controller: session.controller) { tab, paneId in
+        BonsplitView(
+            controller: session.controller,
+            tabContextMenu: { tab, _ in
+                let target = PipTarget.tab(workspaceID: session.workspace.id, tabID: tab.id)
+                return AnyView(
+                    Button(pips.isPipped(target)
+                           ? "Bring Back from Picture in Picture"
+                           : "Open in Picture in Picture") {
+                        if pips.isPipped(target) {
+                            pips.close(target)
+                        } else {
+                            pips.open(target, frame: PipLayout.initialFrame(
+                                index: pips.items.count, screen: pipScreen()))
+                        }
+                    }
+                )
+            }
+        ) { tab, paneId in
             // The pipped check lives HERE, not inside `TabContentView`: a
             // pip renders that same view, so a self-check there would make
             // a pip render its own placeholder forever.
@@ -97,6 +114,16 @@ private struct WorkspaceBonsplitPane: View {
             }
         }
         .onAppear { session.bootstrapIfNeeded() }
+    }
+
+    /// Where a new pip opens: the screen holding the project window,
+    /// falling back to the main screen. `NSApp.mainWindow` stays the
+    /// project window even while a pip panel is key — an `NSPanel` never
+    /// becomes the main window.
+    private func pipScreen() -> CGRect {
+        NSApp.mainWindow?.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? NSScreen.screens[0].visibleFrame
     }
 
     /// The `＋ ⌄` menu's three destinations. "File…" routes through the same

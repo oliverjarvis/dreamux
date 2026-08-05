@@ -87,6 +87,7 @@ private struct ProjectWindowContents: View {
         }
         .focusedSceneValue(\.activeStore, session.store)
         .focusedSceneValue(\.activeProject, session.project)
+        .focusedSceneValue(\.activePips, session.pips)
     }
 }
 
@@ -100,6 +101,10 @@ private struct ActiveProjectKey: FocusedValueKey {
     typealias Value = Project
 }
 
+private struct ActivePipsKey: FocusedValueKey {
+    typealias Value = PipController
+}
+
 extension FocusedValues {
     var activeStore: WorkspaceStore? {
         get { self[ActiveStoreKey.self] }
@@ -109,5 +114,10 @@ extension FocusedValues {
     var activeProject: Project? {
         get { self[ActiveProjectKey.self] }
         set { self[ActiveProjectKey.self] = newValue }
+    }
+
+    var activePips: PipController? {
+        get { self[ActivePipsKey.self] }
+        set { self[ActivePipsKey.self] = newValue }
     }
 }

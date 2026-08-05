@@ -8,6 +8,9 @@ import WebKit
 /// applet hot-reload as the agent works its folder.
 struct AppletHostView: View {
     @Bindable var session: AppletSession
+    /// Supplied by a project window; nil in Applet Studio, which has no
+    /// pips. The button is absent rather than disabled when nil.
+    var onPip: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -107,6 +110,11 @@ struct AppletHostView: View {
                     .help(error)
             }
             Spacer(minLength: 0)
+            if let onPip {
+                Button("Pip", action: onPip)
+                    .buttonStyle(.soft)
+                    .help("Open in Picture in Picture")
+            }
             Button(session.isEditing ? "Done" : "Edit") {
                 if session.isEditing {
                     session.endEditing()

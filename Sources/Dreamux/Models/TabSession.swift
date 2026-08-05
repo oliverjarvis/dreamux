@@ -64,7 +64,11 @@ final class TabSession: Identifiable {
             // returns false — letting the event flow up the responder
             // chain to AppKit's menu. `=ignore` keeps the binding alive
             // as a no-op which still gets consumed.
-            for key in ["t", "n", "d", "w", "q"] {
+            //
+            // `p` and `g` joined the list for the pip shortcuts (⌥⌘P,
+            // ⌥⌘G) — defensively, since a future ghostty release binding
+            // them would silently swallow the menu items.
+            for key in ["t", "n", "d", "w", "q", "p", "g"] {
                 builder.withCustom("keybind", "super+\(key)=unbind")
                 builder.withCustom("keybind", "shift+super+\(key)=unbind")
                 builder.withCustom("keybind", "alt+super+\(key)=unbind")

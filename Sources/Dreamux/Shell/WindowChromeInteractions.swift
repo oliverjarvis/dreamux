@@ -22,6 +22,11 @@ enum TitlebarDoubleClickAction: Equatable {
 /// drag handlers — the projects rail is a native List whose empty body
 /// swallows clicks, so no view-level handler can cover it, and
 /// representable hit-testing has burned this app before (see spec).
+///
+/// Pip panels are exempt: this monitor claims the top-left 210 × 30 of any
+/// titled window as draggable chrome and double-click-zooms it, which on a
+/// 420pt-wide pip would swallow most of the content and fight
+/// `PipChromeView`'s own drag.
 @MainActor
 enum WindowChromeInteractions {
     private static var installed = false
@@ -42,6 +47,7 @@ enum WindowChromeInteractions {
     /// True when the event was consumed as a chrome interaction.
     private static func handle(_ event: NSEvent) -> Bool {
         guard let window = event.window,
+              !(window is PipPanel),
               window.styleMask.contains(.titled),
               !window.isSheet,
               let frameView = window.contentView?.superview else { return false }

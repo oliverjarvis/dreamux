@@ -752,8 +752,12 @@ struct ContentView: View {
                 // the old session's WKWebView stays parented and only the
                 // header updates (the "content doesn't change until I visit a
                 // workspace" bug).
-                AppletHostView(session: session.appletSession(for: applet))
-                    .id(id)
+                AppletHostView(session: session.appletSession(for: applet)) {
+                    session.pips.open(.applet(id: id), frame: PipLayout.initialFrame(
+                        index: session.pips.items.count,
+                        screen: NSScreen.main?.visibleFrame ?? NSScreen.screens[0].visibleFrame))
+                }
+                .id(id)
             } else {
                 appletMissingState
             }
@@ -1657,6 +1661,22 @@ struct ContentView: View {
                              subtitle: nil, icon: "point.3.connected.trianglepath.dotted") { sidebarMode = .flows },
             PaletteCandidate(id: "command-go-library", title: "Go to Library",
                              subtitle: nil, icon: "books.vertical") { sidebarMode = .library },
+            PaletteCandidate(id: "command-pip-tab", title: "Open in Picture in Picture",
+                             subtitle: nil, icon: "pip.enter") {
+                guard let workspace = store.activeWorkspace,
+                      let pane = store.activeSession?.controller.focusedPaneId,
+                      let tab = store.activeSession?.controller.selectedTab(inPane: pane)
+                else { return }
+                let target = PipTarget.tab(workspaceID: workspace.id, tabID: tab.id)
+                guard !session.pips.isPipped(target) else { return }
+                session.pips.open(target, frame: PipLayout.initialFrame(
+                    index: session.pips.items.count,
+                    screen: NSScreen.main?.visibleFrame ?? NSScreen.screens[0].visibleFrame))
+            },
+            PaletteCandidate(id: "command-pip-bring-all-back", title: "Bring All Pips Back",
+                             subtitle: nil, icon: "pip.exit") { session.pips.closeAll() },
+            PaletteCandidate(id: "command-pip-tidy", title: "Tidy Pips",
+                             subtitle: nil, icon: "rectangle.3.group") { tidyPips() },
         ]
         commands += docStore.plans.map { plan in
             PaletteCandidate(
