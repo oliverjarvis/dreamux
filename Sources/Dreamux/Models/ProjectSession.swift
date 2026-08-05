@@ -122,6 +122,9 @@ final class ProjectSession {
         store.layout = layout
         let repoStore = RepoStore(project: project)
         self.syncStatus = SyncStatusStore(repos: { repoStore.repositories })
+        // Same live-provider shape as SyncStatusStore above: every new
+        // user shell asks this for the worktree it should start in.
+        store.repositories = { [weak repoStore] in repoStore?.repositories ?? [] }
 
         let runConfig = RunConfigStore(project: project)
         let signals = SignalStore()
