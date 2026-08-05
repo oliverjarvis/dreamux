@@ -312,29 +312,15 @@ private struct WebTabView: View {
 
 private struct WebViewRepresentable: NSViewRepresentable {
     let webView: WKWebView
-    /// Set only while this web view is hosted in a pip — see
-    /// `PipContentScale`. Nil in the main window, which is what restores
-    /// 1:1 rendering when a tab comes home: the pane remounts this
-    /// representable with the default environment.
-    @Environment(\.pipDesktopZoom) private var pipDesktopZoom
 
     func makeNSView(context: Context) -> WKWebView {
-        apply(to: webView)
+        // A tab coming home from a pip brings this web view back with a
+        // scaled bounds still on it; the pane renders at true size.
+        PipScaledWebView.resetToNaturalScale(webView)
         return webView
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {
-        apply(to: nsView)
-    }
-
-    /// `pageZoom` is the whole mechanism: WebKit lays the page out in a
-    /// CSS viewport of `viewWidth / pageZoom`, so a zoom below 1 buys the
-    /// page a desktop-width layout drawn small. Guarded because assigning
-    /// it unconditionally on every update pass forces a relayout.
-    private func apply(to webView: WKWebView) {
-        let target = pipDesktopZoom ?? 1
-        if webView.pageZoom != target { webView.pageZoom = target }
-    }
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
 /// Dispatch a file tab to its kind's viewer. Monaco-backed kinds can

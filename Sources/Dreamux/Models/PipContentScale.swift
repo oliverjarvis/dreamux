@@ -1,31 +1,50 @@
 import CoreGraphics
 import Foundation
 
-/// How much to shrink desktop-shaped web content so a whole page fits a
-/// pip. Pure arithmetic, no WebKit — so the rule is unit-testable.
+/// Geometry for rendering a pipped web page as a uniform miniature of its
+/// desktop self. Pure arithmetic, no WebKit — so the rule is testable.
 ///
-/// The lever this feeds is `WKWebView.pageZoom`, where the CSS viewport a
-/// page lays out in is `viewWidth / pageZoom`. Setting zoom to
-/// `panelWidth / 1920` therefore makes a 420pt panel report ~1920 CSS px
-/// to the page: it renders its full desktop layout, drawn small, instead
-/// of collapsing into the narrow/mobile layout a genuinely 420pt-wide
-/// browser would trigger.
+/// This deliberately does NOT use `WKWebView.pageZoom`. Zoom changes the
+/// viewport the page is told it has, so the page re-runs its responsive
+/// breakpoints and *re-lays-out* — a pipped YouTube came back with the
+/// mini-guide sidebar and body text that never shrank with it. A stream
+/// does not reflow, and neither should this.
+///
+/// Instead the web view is laid out at `referenceWidth` and drawn scaled,
+/// via AppKit's `frame`-vs-`bounds` transform. That scales rendering AND
+/// maps mouse coordinates through the same transform, so a shrunk pip
+/// stays clickable without hand-transforming events — which a raw
+/// `CALayer` transform would have required.
 enum PipContentScale {
-    /// The layout width a pipped page is asked to pretend it has.
+    /// The width a pipped page is laid out at, whatever the panel's size.
     static let referenceWidth: CGFloat = 1920
 
-    /// Below this, shrinking stops. Sub-pixel text reads as a smear and
-    /// WebKit still pays to lay out and paint every element.
-    static let minimumZoom: CGFloat = 0.15
+    /// Below this, shrinking stops: the render becomes a smear and WebKit
+    /// still pays to lay out and paint every element.
+    static let minimumScale: CGFloat = 0.15
 
-    /// Page zoom for a panel `width` points wide. Never exceeds 1 — a
-    /// pip shows a page small or true-size, never magnified.
-    static func zoom(forPanelWidth width: CGFloat,
-                     referenceWidth: CGFloat = referenceWidth) -> CGFloat {
+    /// How much the reference-width render is shrunk to fit a panel
+    /// `width` points wide. Never above 1 — a pip shows a page small or
+    /// true-size, never magnified.
+    static func scale(forPanelWidth width: CGFloat,
+                      referenceWidth: CGFloat = referenceWidth) -> CGFloat {
         // A zero-width panel is one real layout pass on a freshly opened
         // panel, before SwiftUI has measured it. Render unscaled rather
         // than dividing by nothing.
         guard width > 0, referenceWidth > 0, width < referenceWidth else { return 1 }
-        return max(minimumZoom, width / referenceWidth)
+        return max(minimumScale, width / referenceWidth)
+    }
+
+    /// The coordinate space to lay the page out in so that, once scaled
+    /// down, it fills `panel` exactly.
+    ///
+    /// Width is always `referenceWidth`; height follows the *panel's*
+    /// aspect rather than a fixed 1080, so a tall pip shows more page
+    /// instead of letterboxing a 16:9 render into it.
+    static func layoutBounds(forPanel panel: CGSize,
+                             referenceWidth: CGFloat = referenceWidth) -> CGSize {
+        let scale = scale(forPanelWidth: panel.width, referenceWidth: referenceWidth)
+        guard scale < 1, scale > 0 else { return panel }
+        return CGSize(width: panel.width / scale, height: panel.height / scale)
     }
 }
