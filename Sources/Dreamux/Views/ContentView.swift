@@ -608,6 +608,7 @@ struct ContentView: View {
     @ViewBuilder
     private var mainPane: some View {
         mainPaneContent
+            .background(pipHost)
             // Always-mounted consumer for run-config handoffs (e2e
             // detect, the isolate alert) — they must work whether or not
             // the services popover is open.
@@ -622,6 +623,64 @@ struct ContentView: View {
                     guard let ws = store.activeWorkspace ?? store.workspaces.first else { return }
                     RunConfigActions.isolate(runner, project: repoStore.project, session: store.session(for: ws))
                 }))
+    }
+
+    /// Owns the live pip panels. The content closure is defined here so
+    /// each panel captures this render's `overviewDependencies` and can
+    /// drive `sidebarMode` when the user reveals a pipped tab.
+    private var pipHost: some View {
+        PipHost(
+            items: session.pips.items,
+            pips: session.pips,
+            makeContent: { item, frame, onDragTo in
+                AnyView(
+                    PipContentView(
+                        target: item.target,
+                        store: store,
+                        projectSession: session,
+                        overview: overviewDependencies,
+                        pips: session.pips,
+                        onReveal: { reveal(item.target) },
+                        frame: frame,
+                        onDragTo: onDragTo,
+                        onTidy: { tidyPips() }
+                    )
+                    .environment(projects)
+                    .dynamicTypeSize(.xLarge)
+                )
+            }
+        )
+    }
+
+    /// Double-clicking a pip's bar: come to the front, go to what it was
+    /// showing, and put it back in the window.
+    private func reveal(_ target: PipTarget) {
+        switch target {
+        case .tab(let workspaceID, let tabID):
+            sidebarMode = .workspace
+            store.activate(workspaceID)
+            if let workspace = store.workspaces.first(where: { $0.id == workspaceID }) {
+                store.session(for: workspace).controller.selectTab(tabID)
+            }
+        case .applet(let id):
+            sidebarMode = .app(id)
+        }
+        session.pips.close(target)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Pack every pip into a column at the corner nearest their centroid.
+    private func tidyPips() {
+        let centroid = session.pips.centroid
+        let screen = (NSScreen.screens.first { $0.frame.contains(centroid) }
+                      ?? NSScreen.main
+                      ?? NSScreen.screens[0]).visibleFrame
+        session.pips.applyTidy(PipLayout.tidy(
+            count: session.pips.items.count,
+            size: PipLayout.defaultSize,
+            screen: screen,
+            centroid: centroid
+        ))
     }
 
     @ViewBuilder
