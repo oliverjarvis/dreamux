@@ -10,6 +10,9 @@ import Bonsplit
 /// active workspace is visible and accepts input.
 struct WorkspaceTerminalContainer: View {
     @Bindable var store: WorkspaceStore
+    /// This window's open pips, so a pane whose tab is out in a panel can
+    /// render the placeholder instead of the content.
+    let pips: PipController
     /// The Overview's Mode A dependencies (Group 2) — threaded down to
     /// whichever workspace's Overview tab renders. See
     /// `WorkspaceOverviewView` for what each closure/store does.
@@ -21,7 +24,8 @@ struct WorkspaceTerminalContainer: View {
                 noWorkspacesState
             }
             ForEach(store.workspaces) { workspace in
-                WorkspaceBonsplitPane(session: store.session(for: workspace), overview: overview)
+                WorkspaceBonsplitPane(
+                    session: store.session(for: workspace), pips: pips, overview: overview)
                     .opacity(workspace.id == store.activeID ? 1 : 0)
                     .allowsHitTesting(workspace.id == store.activeID)
                     // Force the active workspace to the top of the ZStack
@@ -60,11 +64,20 @@ struct WorkspaceTerminalContainer: View {
 
 private struct WorkspaceBonsplitPane: View {
     @Bindable var session: WorkspaceSession
+    let pips: PipController
     let overview: WorkspaceOverviewDependencies
 
     var body: some View {
         BonsplitView(controller: session.controller) { tab, paneId in
-            TabContentView(session: session, tabId: tab.id, overview: overview)
+            // The pipped check lives HERE, not inside `TabContentView`: a
+            // pip renders that same view, so a self-check there would make
+            // a pip render its own placeholder forever.
+            let target = PipTarget.tab(workspaceID: session.workspace.id, tabID: tab.id)
+            if pips.isPipped(target) {
+                PipPlaceholderView { pips.close(target) }
+            } else {
+                TabContentView(session: session, tabId: tab.id, overview: overview)
+            }
         } emptyPane: { paneId in
             EmptyPaneView {
                 session.controller.createTab(

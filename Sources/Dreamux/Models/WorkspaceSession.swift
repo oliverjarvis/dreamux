@@ -49,6 +49,10 @@ final class WorkspaceSession {
     /// already see them).
     var isVisible: Bool = false
 
+    /// Fired after a tab is closed, so the owner can tear down anything
+    /// keyed to it — today, its pip. Set by `ProjectSession`.
+    var onTabClosed: ((TabID) -> Void)?
+
     /// Most recent agent-emitted notification body, surfaced under the
     /// workspace's name in the Work Items rail. Cleared when the user
     /// switches into this workspace (re-entering "reads" the message).
@@ -289,6 +293,7 @@ final class WorkspaceSession {
         if agentTabID == tabId { agentTabID = nil }
         if runConfigTabID == tabId { runConfigTabID = nil }
         if composerTabID == tabId { composerTabID = nil }
+        onTabClosed?(tabId)
     }
 
     private func handleDidSplitPane(newPane: PaneID) {

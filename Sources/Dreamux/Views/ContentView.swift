@@ -628,7 +628,8 @@ struct ContentView: View {
     private var mainPaneContent: some View {
         switch sidebarMode {
         case .workspace:
-            WorkspaceTerminalContainer(store: store, overview: overviewDependencies)
+            WorkspaceTerminalContainer(
+                store: store, pips: session.pips, overview: overviewDependencies)
         case .signals:
             SignalsView(signals: signals, runners: runners, projectDir: repoStore.project.rootPath.path)
         case .flows:
@@ -683,7 +684,9 @@ struct ContentView: View {
             // The applet's folder is the source of truth: a removed applet
             // resolves to nil here and shows the missing state; the Applets
             // section auto-heals on its next refresh.
-            if let applet = session.applets.applet(id: id) {
+            if session.pips.isPipped(.applet(id: id)) {
+                PipPlaceholderView { session.pips.close(.applet(id: id)) }
+            } else if let applet = session.applets.applet(id: id) {
                 // Key on the applet id so switching from one applet to another
                 // rebuilds the host — the preview is an NSViewRepresentable
                 // whose updateNSView is a no-op, so without a fresh identity
