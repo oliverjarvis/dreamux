@@ -13,6 +13,11 @@ enum AppearanceSettings {
     static let cardColorKey = "appearanceCardColor"        // hex, "" = system
     static let cardOpacityKey = "appearanceCardOpacity"    // 0.5...1
 
+    /// JSON-encoded `TerminalThemeSpec` — the embedded terminal's colors,
+    /// font, and cursor. One blob rather than a key per swatch: a partial
+    /// read must never produce a half-applied theme.
+    static let terminalThemeKey = "appearanceTerminalTheme"
+
     /// "#RRGGBB" → Color (sRGB). Empty/garbage → nil.
     static func color(fromHex hex: String) -> Color? {
         var raw = hex.trimmingCharacters(in: .whitespaces)
