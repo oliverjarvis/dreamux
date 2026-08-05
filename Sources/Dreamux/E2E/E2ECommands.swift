@@ -147,6 +147,16 @@ enum E2ECommands {
             return connectionsState()
         case "chatFaceState":
             return try chatFaceState()
+        case "pipOpen":
+            return try pipOpen(request: request)
+        case "pipClose":
+            return try pipClose(request: request)
+        case "pipTidy":
+            return try pipTidy()
+        case "setWindowMiniaturized":
+            return try setWindowMiniaturized(request: request)
+        case "closeTab":
+            return try closeTab(request: request)
         case "quit":
             return ["ok": true]
         default:
@@ -221,6 +231,36 @@ enum E2ECommands {
             }
         } else {
             payload["workspaces"] = [Any]()
+        }
+
+        if let session = handles.session, let store = handles.workspaceStore {
+            payload["pips"] = session.pips.items.map { item -> [String: Any] in
+                var entry: [String: Any] = [
+                    "frame": [
+                        "x": item.frame.origin.x, "y": item.frame.origin.y,
+                        "width": item.frame.width, "height": item.frame.height,
+                    ],
+                    // A panel that has been ordered out reports false —
+                    // how the minimize/hide scenario asserts without a
+                    // screenshot.
+                    "isVisible": PipPanelRegistry.shared.isVisible(item.id),
+                ]
+                switch item.target {
+                case .tab(let workspaceID, let tabID):
+                    entry["kind"] = "tab"
+                    entry["workspaceID"] = workspaceID.uuidString
+                    let workspace = store.workspaces.first { $0.id == workspaceID }
+                    entry["title"] = workspace
+                        .map { store.session(for: $0).controller.tab(tabID)?.title ?? "" } ?? ""
+                case .applet(let id):
+                    entry["kind"] = "applet"
+                    entry["appletID"] = id.uuidString
+                    entry["title"] = session.applets.applet(id: id)?.manifest.name ?? ""
+                }
+                return entry
+            }
+        } else {
+            payload["pips"] = [Any]()
         }
 
         if let runners = handles.runners {
@@ -1015,6 +1055,106 @@ enum E2ECommands {
                 ["slug": applet.slug, "name": applet.manifest.name]
             },
         ]
+    }
+
+    // MARK: - Pips
+
+    /// Pip a tab by its chip title in the active workspace — the same
+    /// `PipController.open` the chip's context menu calls, with the frame
+    /// `PipLayout` would have chosen.
+    private static func pipOpen(request: [String: Any]) throws -> [String: Any] {
+        let title = try string("title", in: request)
+        let (handles, session) = try activeSession()
+        guard let store = handles.workspaceStore,
+              let workspace = store.activeWorkspace ?? store.workspaces.first
+        else { throw CommandError(message: "no workspace to pip from") }
+        let controller = store.session(for: workspace).controller
+        guard let tabID = controller.allTabIds.first(where: {
+            controller.tab($0)?.title == title
+        }) else {
+            throw CommandError(message: "no tab titled \"\(title)\" in the active workspace")
+        }
+        let screen = NSScreen.main?.visibleFrame ?? NSScreen.screens[0].visibleFrame
+        session.pips.open(
+            .tab(workspaceID: workspace.id, tabID: tabID),
+            frame: PipLayout.initialFrame(index: session.pips.items.count, screen: screen))
+        return ["ok": true]
+    }
+
+    /// Bring one pip home, by the same tab title `pipOpen` takes.
+    private static func pipClose(request: [String: Any]) throws -> [String: Any] {
+        let title = try string("title", in: request)
+        let (handles, session) = try activeSession()
+        guard let store = handles.workspaceStore else {
+            throw CommandError(message: "no workspace store")
+        }
+        for item in session.pips.items {
+            guard case .tab(let workspaceID, let tabID) = item.target,
+                  let workspace = store.workspaces.first(where: { $0.id == workspaceID }),
+                  store.session(for: workspace).controller.tab(tabID)?.title == title
+            else { continue }
+            session.pips.close(item.target)
+            return ["ok": true]
+        }
+        throw CommandError(message: "no pip for a tab titled \"\(title)\"")
+    }
+
+    private static func pipTidy() throws -> [String: Any] {
+        let (_, session) = try activeSession()
+        let centroid = session.pips.centroid
+        let screen = (NSScreen.screens.first { $0.frame.contains(centroid) }
+                      ?? NSScreen.main
+                      ?? NSScreen.screens[0]).visibleFrame
+        session.pips.applyTidy(PipLayout.tidy(
+            count: session.pips.items.count, size: PipLayout.defaultSize,
+            screen: screen, centroid: centroid))
+        return ["ok": true]
+    }
+
+    /// Minimize or restore the project window — the only way a driver can
+    /// exercise the pip visibility policy.
+    private static func setWindowMiniaturized(request: [String: Any]) throws -> [String: Any] {
+        let miniaturized = (request["miniaturized"] as? Bool) ?? false
+        let window = try projectWindow()
+        if miniaturized { window.miniaturize(nil) } else { window.deminiaturize(nil) }
+        return ["ok": true]
+    }
+
+    /// The project window, miniaturized or not. Deliberately NOT
+    /// `resolveWindow()`: that filters `$0.isVisible` because it exists to
+    /// pick a screenshot target, and a miniaturized window is not visible
+    /// — so restoring one could never find it. While minimized the pips
+    /// are ordered out too, so there is genuinely nothing visible left.
+    private static func projectWindow() throws -> NSWindow {
+        let candidates = NSApp.windows.filter { !($0 is NSPanel) }
+        if let projectID = E2ERegistry.shared.activeProjectID,
+           let project = E2ERegistry.shared.handlesByProject[projectID]?.repoStore?.project,
+           let match = candidates.first(where: { $0.title.contains(project.name) }) {
+            return match
+        }
+        guard let first = candidates.first else {
+            throw CommandError(message: "no project window")
+        }
+        return first
+    }
+
+    /// Close a tab by its chip title in the active workspace — the same
+    /// `BonsplitController.closeTab` the chip's ✕ calls, so the pip
+    /// cascade takes the real path.
+    private static func closeTab(request: [String: Any]) throws -> [String: Any] {
+        let title = try string("title", in: request)
+        let handles = try activeHandles()
+        guard let store = handles.workspaceStore,
+              let workspace = store.activeWorkspace ?? store.workspaces.first
+        else { throw CommandError(message: "no workspace") }
+        let controller = store.session(for: workspace).controller
+        guard let tabID = controller.allTabIds.first(where: {
+            controller.tab($0)?.title == title
+        }) else {
+            throw CommandError(message: "no tab titled \"\(title)\"")
+        }
+        _ = controller.closeTab(tabID)
+        return ["ok": true]
     }
 
     // MARK: - Connections

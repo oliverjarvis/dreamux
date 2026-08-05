@@ -1243,6 +1243,95 @@ plan's `state` entry.
 Errors (`{"ok":false,"error":…}`): unknown `plan`, empty `text`, an
 invalid `priority` token, and an ambiguous or unmatched `task`.
 
+### Picture in picture
+
+Pips are floating `NSPanel`s that host a tab's live content. A pip is a
+*move*, never a copy or a close: the tab's chip stays in the tab bar and
+its session keeps running, and bringing a pip back never ends the tab.
+
+#### `pipOpen`
+
+Open a pip for the tab whose chip title is `title`, in the active
+workspace. Frame comes from `PipLayout.initialFrame` — the same
+bottom-right cascade the chip's context menu uses.
+
+```
+→ {"cmd":"pipOpen","title":"shell"}
+← {"ok":true}
+```
+
+Errors: no workspace to pip from; no tab titled `title` in the active
+workspace. Opening a tab that is already pipped is a no-op.
+
+#### `pipClose`
+
+Bring one pip home, addressed by the same tab title. The tab survives.
+
+```
+→ {"cmd":"pipClose","title":"shell"}
+← {"ok":true}
+```
+
+Errors: no workspace store; no pip for a tab titled `title`.
+
+#### `pipTidy`
+
+Pack every open pip into a column at the screen corner nearest their
+centroid — the ⌥⌘G command.
+
+```
+→ {"cmd":"pipTidy"}
+← {"ok":true}
+```
+
+#### `setWindowMiniaturized`
+
+Minimize or restore the project window. The only way a driver can
+exercise the pip visibility policy (pips hide with their window and with
+⌘H, but never merely because Dreamux went to the background).
+
+```
+→ {"cmd":"setWindowMiniaturized","miniaturized":true}
+← {"ok":true}
+```
+
+`miniaturized` defaults to `false` when absent.
+
+#### `closeTab`
+
+Close a tab by its chip title in the active workspace, through the same
+`BonsplitController.closeTab` the chip's ✕ calls — so the pip cascade
+takes the real path.
+
+```
+→ {"cmd":"closeTab","title":"shell"}
+← {"ok":true}
+```
+
+Errors: no workspace; no tab titled `title`.
+
+#### `pips` (on `state`)
+
+`state` carries a `pips` array, in creation order — the order Tidy lays
+them out in. Empty when nothing is pipped or no project is active.
+
+```json
+"pips": [
+  {
+    "kind": "tab",
+    "title": "shell",
+    "workspaceID": "…",
+    "frame": {"x": 556, "y": 24, "width": 420, "height": 280},
+    "isVisible": true
+  }
+]
+```
+
+`kind` is `"tab"` or `"applet"`; a tab entry carries `workspaceID`, an
+applet entry `appletID`. `isVisible` reports whether the panel is
+actually on screen, so minimize/hide can be asserted without a
+screenshot (screenshots can't capture window contents in-process).
+
 ### `quit`
 
 Reply, then terminate the app (`NSApp.terminate`, with a forced

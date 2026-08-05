@@ -121,6 +121,7 @@ struct PipHost: NSViewRepresentable {
             let live = Set(items.map(\.id))
             for (id, panel) in panels where !live.contains(id) {
                 panel.orderOut(nil)
+                PipPanelRegistry.shared.forget(id)
                 panels.removeValue(forKey: id)
             }
 
@@ -151,6 +152,7 @@ struct PipHost: NSViewRepresentable {
                         appHidden: appHidden
                     ) {
                         panel.orderFront(nil)
+                        PipPanelRegistry.shared.record(item.id, isVisible: true)
                     }
                 }
             }
@@ -176,8 +178,9 @@ struct PipHost: NSViewRepresentable {
                 windowMiniaturized: hostWindow?.isMiniaturized ?? false,
                 appHidden: appHidden
             )
-            for panel in panels.values {
+            for (id, panel) in panels {
                 if show { panel.orderFront(nil) } else { panel.orderOut(nil) }
+                PipPanelRegistry.shared.record(id, isVisible: show)
             }
         }
 
@@ -206,7 +209,10 @@ struct PipHost: NSViewRepresentable {
         /// without it a switched-away project keeps pip glyphs on its
         /// chips and placeholder panes for panels that no longer exist.
         func tearDown() {
-            for panel in panels.values { panel.orderOut(nil) }
+            for (id, panel) in panels {
+                panel.orderOut(nil)
+                PipPanelRegistry.shared.forget(id)
+            }
             panels.removeAll()
             pips.closeAll()
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
