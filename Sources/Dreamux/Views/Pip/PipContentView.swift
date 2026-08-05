@@ -20,7 +20,14 @@ struct PipContentView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            content
+            // `GeometryReader` rather than the `frame()` closure: this has
+            // to re-measure as the user resizes the panel, and a closure
+            // is not something SwiftUI can observe.
+            GeometryReader { geometry in
+                content
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .environment(\.pipDesktopZoom, desktopZoom(forWidth: geometry.size.width))
+            }
             PipChromeView(
                 title: title,
                 onBringBack: { pips.close(target) },
@@ -32,6 +39,25 @@ struct PipContentView: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Browser tabs render their full desktop layout, shrunk to fit — a
+    /// pipped site should look like the site, not like the narrow layout
+    /// a genuinely 420pt-wide browser would trigger.
+    ///
+    /// Deliberately browser-only. A pipped editor, diff or Overview wants
+    /// readable text at its real size, not a 22% thumbnail, and an applet
+    /// is authored for the panel it is drawn in rather than for 1920.
+    private func desktopZoom(forWidth width: CGFloat) -> CGFloat? {
+        guard isBrowserTab else { return nil }
+        return PipContentScale.zoom(forPanelWidth: width)
+    }
+
+    private var isBrowserTab: Bool {
+        guard case .tab(let workspaceID, let tabID) = target,
+              let workspace = store.workspaces.first(where: { $0.id == workspaceID })
+        else { return false }
+        return store.session(for: workspace).webTabSession(for: tabID) != nil
     }
 
     @ViewBuilder
