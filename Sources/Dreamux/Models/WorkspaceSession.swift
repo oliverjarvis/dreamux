@@ -278,6 +278,11 @@ final class WorkspaceSession {
         )
         attentionObservers[tab.id] = TabAttentionObserver(
             tabId: tab.id,
+            workspaceName: workspace.name,
+            workspaceID: workspace.id,
+            // Per-harness display name lands in Task 14, when a tab can
+            // report which harness is actually running in it.
+            harnessDisplayName: HarnessRegistry.shared.adapter(id: "claude")?.displayName ?? "Agent",
             session: session,
             controller: controller
         )
@@ -729,11 +734,24 @@ extension TabAttention {
 @MainActor
 private final class TabAttentionObserver {
     private let tabId: TabID
+    private let workspaceName: String
+    private let workspaceID: UUID
+    private let harnessDisplayName: String
     private weak var session: TabSession?
     private weak var controller: BonsplitController?
 
-    init(tabId: TabID, session: TabSession, controller: BonsplitController) {
+    init(
+        tabId: TabID,
+        workspaceName: String,
+        workspaceID: UUID,
+        harnessDisplayName: String,
+        session: TabSession,
+        controller: BonsplitController
+    ) {
         self.tabId = tabId
+        self.workspaceName = workspaceName
+        self.workspaceID = workspaceID
+        self.harnessDisplayName = harnessDisplayName
         self.session = session
         self.controller = controller
         arm()
@@ -751,6 +769,16 @@ private final class TabAttentionObserver {
     private func fire() {
         guard let session, let controller else { return }
         controller.updateTab(tabId, attention: TabAttention(session.attention))
+        NotificationManager.shared.notify(
+            workspaceName: workspaceName,
+            workspaceID: workspaceID,
+            tabID: session.id,
+            tabTitle: session.title,
+            harnessDisplayName: harnessDisplayName,
+            attention: session.attention,
+            hasVerifiedPermissionRecipe: PromptKeystrokeRecipes
+                .permissionRecipe(forNotification: session.attention.message ?? "") != nil
+        )
         arm()
     }
 }

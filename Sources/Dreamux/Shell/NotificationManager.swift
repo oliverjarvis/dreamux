@@ -3,15 +3,65 @@ import UserNotifications
 import AppKit
 import os
 
-/// Posts macOS notifications when a tab signals activity (e.g. a coding
-/// agent finishes or asks a question — the convention is to ring the
-/// terminal bell). Per-tab debounce keeps a runaway shell from flooding
-/// Notification Center.
+/// The narrow slice of `UNUserNotificationCenter` the manager uses.
+/// A protocol so tests can assert what would have been posted without a
+/// real notification centre — which is unavailable under the e2e
+/// harness anyway, since it deliberately skips the permission prompt.
+@MainActor
+protocol NotificationPosting: AnyObject {
+    func setCategories(_ categories: Set<UNNotificationCategory>)
+    func post(_ notification: AttentionNotification)
+    func withdraw(identifiers: [String])
+}
+
+@MainActor
+final class SystemNotificationPoster: NotificationPosting {
+    func setCategories(_ categories: Set<UNNotificationCategory>) {
+        UNUserNotificationCenter.current().setNotificationCategories(categories)
+    }
+
+    func post(_ notification: AttentionNotification) {
+        let content = UNMutableNotificationContent()
+        content.title = notification.title
+        content.subtitle = notification.subtitle
+        content.body = notification.body
+        content.sound = .default
+        content.threadIdentifier = notification.threadIdentifier
+        content.categoryIdentifier = notification.categoryIdentifier
+        content.targetContentIdentifier = notification.identifier
+        content.userInfo = notification.userInfo
+        content.interruptionLevel = notification.urgency == .timeSensitive ? .timeSensitive : .active
+
+        let request = UNNotificationRequest(
+            identifier: notification.identifier,
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { NotificationManager.reportPostFailure(error) }
+        }
+    }
+
+    func withdraw(identifiers: [String]) {
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(withIdentifiers: identifiers)
+    }
+}
+
+/// Posts macOS notifications when a tab's agent wants the user —
+/// blocked on a decision, or finished a turn. Per-tab debounce keeps a
+/// runaway shell from flooding Notification Center.
 @MainActor
 final class NotificationManager: NSObject {
     static let shared = NotificationManager()
 
-    private var lastNotification: [UUID: Date] = [:]
+    var poster: NotificationPosting = SystemNotificationPoster()
+
+    /// Debounce per tab AND per state rank: a runaway shell cannot
+    /// flood, but a `working → blocked` transition is never eaten by a
+    /// banner posted moments earlier for a different state.
+    private struct DebounceKey: Hashable { let tabID: UUID; let rank: Int }
+    private var lastNotification: [DebounceKey: Date] = [:]
     private let debounceInterval: TimeInterval = 2.0
 
     private override init() {
@@ -20,6 +70,30 @@ final class NotificationManager: NSObject {
         // where macOS suppresses notifications while our app is frontmost
         // (see `userNotificationCenter(_:willPresent:withCompletionHandler:)`).
         UNUserNotificationCenter.current().delegate = self
+        registerCategories()
+    }
+
+    private func registerCategories() {
+        let open = UNNotificationAction(
+            identifier: NotificationActionID.open, title: "Open", options: [.foreground]
+        )
+        let dismiss = UNNotificationAction(
+            identifier: NotificationActionID.dismiss, title: "Dismiss", options: []
+        )
+        let approve = UNNotificationAction(
+            identifier: NotificationActionID.approve, title: "Approve", options: []
+        )
+        let deny = UNNotificationAction(
+            identifier: NotificationActionID.deny, title: "Deny", options: []
+        )
+        poster.setCategories([
+            UNNotificationCategory(identifier: NotificationCategoryID.blockedPermission,
+                                   actions: [approve, deny, open], intentIdentifiers: []),
+            UNNotificationCategory(identifier: NotificationCategoryID.blocked,
+                                   actions: [open, dismiss], intentIdentifiers: []),
+            UNNotificationCategory(identifier: NotificationCategoryID.done,
+                                   actions: [open], intentIdentifiers: []),
+        ])
     }
 
     /// Open System Settings on the per-app Notifications pane. Useful
@@ -50,44 +124,42 @@ final class NotificationManager: NSObject {
         }
     }
 
-    func notifyActivity(
+    /// Post (or replace) the banner for one tab's attention state.
+    /// Returns the notification that was posted, or nil when the state
+    /// does not warrant one — the return value exists so callers and
+    /// tests can see the decision.
+    @discardableResult
+    func notify(
         workspaceName: String,
-        tabId: UUID,
+        workspaceID: UUID,
+        tabID: UUID,
         tabTitle: String,
-        message: String? = nil
-    ) {
+        harnessDisplayName: String,
+        attention: AgentAttention,
+        hasVerifiedPermissionRecipe: Bool
+    ) -> AttentionNotification? {
+        guard let notification = AttentionNotification.make(
+            workspaceName: workspaceName,
+            workspaceID: workspaceID,
+            tabID: tabID,
+            tabTitle: tabTitle,
+            harnessDisplayName: harnessDisplayName,
+            attention: attention,
+            hasVerifiedPermissionRecipe: hasVerifiedPermissionRecipe
+        ) else {
+            // Nothing waiting: retract any banner still on screen for
+            // this tab rather than leaving a stale one up.
+            poster.withdraw(identifiers: ["dreamux.attention.\(tabID.uuidString)"])
+            return nil
+        }
         let now = Date()
-        if let last = lastNotification[tabId], now.timeIntervalSince(last) < debounceInterval {
-            return
+        let key = DebounceKey(tabID: tabID, rank: attention.rank)
+        if let last = lastNotification[key], now.timeIntervalSince(last) < debounceInterval {
+            return nil
         }
-        lastNotification[tabId] = now
-
-        let content = UNMutableNotificationContent()
-        content.title = workspaceName
-
-        let trimmedTitle = tabTitle.trimmingCharacters(in: .whitespaces)
-        let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let trimmedMessage, !trimmedMessage.isEmpty {
-            content.subtitle = trimmedTitle.isEmpty ? "shell" : trimmedTitle
-            content.body = trimmedMessage
-        } else {
-            content.body = trimmedTitle.isEmpty
-                ? "Agent activity in shell"
-                : "Agent activity in \(trimmedTitle)"
-        }
-        content.sound = .default
-        content.interruptionLevel = .timeSensitive
-
-        let request = UNNotificationRequest(
-            identifier: "dreamux.activity.\(tabId.uuidString)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                Self.log("post failed for \(workspaceName) / \(trimmedTitle): \(error)")
-            }
-        }
+        lastNotification[key] = now
+        poster.post(notification)
+        return notification
     }
 
     /// One-shot generic notification (no per-tab debounce) — used for
@@ -113,6 +185,13 @@ final class NotificationManager: NSObject {
         subsystem: "com.dreamux.Dreamux",
         category: "Notifications"
     )
+
+    /// `nonisolated` because every caller is a `UNUserNotificationCenter`
+    /// completion handler, which runs off the main actor.
+    nonisolated static func reportPostFailure(_ error: Error) {
+        let description = error.localizedDescription
+        Task { @MainActor in log("post failed: \(description)") }
+    }
 
     private static func log(_ message: String) {
         // Use unified logging so the user can grep with:
