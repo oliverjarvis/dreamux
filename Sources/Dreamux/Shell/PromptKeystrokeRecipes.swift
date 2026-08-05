@@ -48,5 +48,15 @@ enum PromptKeystrokeRecipes {
         nil
     }
 
+    /// The reject half of a permission dialog. Ships EMPTY for the same
+    /// reason `permissionRecipe` does — a recipe that has not been
+    /// verified against a real payload is a keystroke fired blind. Add
+    /// entries here only with a matching smoke-checklist run, and only
+    /// in the same commit as the matching approve entry: a banner that
+    /// can approve but not deny is worse than one that can do neither.
+    static func permissionDenyRecipe(forNotification message: String) -> String? {
+        nil
+    }
+
     static let interrupt = esc
 }

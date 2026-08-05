@@ -13,11 +13,16 @@ final class TabSession: Identifiable {
     /// open a tab (e.g. `WorkspaceSession.openAgentTab`) can confirm where
     /// it landed.
     let cwd: String?
-    /// True when this tab has had agent activity (terminal bell) since the
-    /// user last looked at it. Drives the badge on the workspace tile.
-    var hasUnread: Bool = false
-
     let binding = ClaudeSessionBinding()
+    let attentionState = AttentionState()
+
+    /// What this tab wants from the user. Replaces the old `hasUnread`
+    /// boolean, which could not tell a finished turn from a prompt
+    /// blocking all progress.
+    var attention: AgentAttention { attentionState.value }
+
+    func acknowledgeIfDone() { attentionState.acknowledgeIfDone() }
+    func dismissAttention() { attentionState.dismiss() }
 
     // MARK: - Face state
 
@@ -47,11 +52,15 @@ final class TabSession: Identifiable {
     ) {
         self.cwd = cwd
         let binding = self.binding
+        let attentionState = self.attentionState
         self.shell = PTYShellSession(
             cwd: cwd,
             onActivity: onActivity,
             onControl: { verb, json in
-                Task { @MainActor in binding.handleControl(verb: verb, json: json) }
+                Task { @MainActor in
+                    attentionState.handleControl(verb: verb, json: json)
+                    binding.handleControl(verb: verb, json: json)
+                }
             }
         )
 

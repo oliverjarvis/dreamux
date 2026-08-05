@@ -91,6 +91,11 @@ for tool in dreamux-hook claude; do
     chmod +x "$APP/Contents/Resources/bin/$tool"
 done
 
+# The harness catalog lives beside the shims so `dreamux-hook` and the
+# Swift registry resolve it by the same rule in a checkout and in the
+# bundle: "<my own directory>/harnesses.json".
+cp "$ROOT/Tools/harnesses.json" "$APP/Contents/Resources/bin/harnesses.json"
+
 # Bundle our ZDOTDIR shim. PTYShellSession sets ZDOTDIR to this folder
 # when spawning zsh so the user's normal rc files load *first* (via
 # `source $HOME/...`) and we re-prepend Dreamux/bin afterward — the
@@ -132,6 +137,19 @@ if [[ -f "$ROOT/mcp/dreamux-signals-mcp.ts" ]]; then
 fi
 
 # Ad-hoc sign so launchd is willing to run it.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+#
+# --identifier pins the signing identity to the bundle id from the
+# COPIED plist (tagged builds get com.dreamux.Dreamux.<tag>). Without
+# it, every rebuild produces a fresh ad-hoc identity and macOS treats
+# the result as a different app — which is why notification
+# authorization would not stick.
+#
+# A failure here is fatal: a silently unsigned bundle looks fine until
+# notifications never arrive.
+BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")"
+if ! codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"; then
+    echo "error: codesign failed for $APP" >&2
+    exit 1
+fi
 
 echo "Built $APP"

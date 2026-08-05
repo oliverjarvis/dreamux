@@ -1974,6 +1974,80 @@ def scenario_connections(d):
     d.screenshot("connections-probe")
 
 
+def scenario_attention(d):
+    """Agent attention end to end: hook → OSC → tab state → workspace state.
+
+    Drives the real `dreamux-hook` inside a real terminal tab, so this
+    covers the tty write, the PTY parse, and the aggregation together —
+    none of which the unit tests can reach. The rule it exists to pin
+    down: visiting a workspace acknowledges a finished turn but never a
+    live block.
+
+    Self-contained: launches the app when nothing is connected."""
+    if d.sock is None:
+        d.launch_app()
+
+        def project_window_up():
+            state = d.state()
+            active = state.get("activeProject")
+            return active and active.get("name") == PROJECT_NAME
+        d.wait_until(project_window_up, 30.0, f"project window for {PROJECT_NAME}")
+
+    d.cmd("openMainWorkspace")
+
+    def main_ws(state):
+        return next(w for w in state["workspaces"] if w["isMain"])
+
+    def fire(payload_json):
+        # `sendTerminalText` fails until the shell has been quiescent for
+        # ~0.8 s, so retry the way the other scenarios do.
+        cmd = ("printf '%s' '" + payload_json
+               + "' | \"$DREAMUX_BIN/dreamux-hook\" event --harness claude")
+
+        def sent():
+            resp = d.cmd("sendTerminalText", text=cmd, submit=True, expect_ok=False)
+            return resp.get("ok") is True
+        d.wait_until(sent, 20.0, "shell ready for input")
+
+    def attention_is(expected):
+        def check():
+            return main_ws(d.state())["attention"] == expected
+        return check
+
+    # 1. A permission prompt blocks the tab and the workspace.
+    fire('{\"hook_event_name\":\"Notification\",'
+         '\"notification_type\":\"permission_prompt\",'
+         '\"message\":\"Claude wants to run: npm test\",\"session_id\":\"s1\"}')
+    d.wait_until(attention_is("blocked"), 15.0, "workspace reports blocked")
+    d.screenshot("attention-blocked")
+
+    # 2. Visiting must NOT clear a block. This is the rule the whole
+    #    feature exists for.
+    d.cmd("openMainWorkspace")
+    require(main_ws(d.state())["attention"] == "blocked",
+            "visiting a workspace must not clear a live block")
+
+    # 3. The harness moving on is what clears it.
+    fire('{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s1\"}')
+    d.wait_until(attention_is("working"), 15.0,
+                 "workspace follows the harness back to working")
+
+    # 4. A finished turn is `done`, and visiting DOES acknowledge that.
+    fire('{\"hook_event_name\":\"Stop\",'
+         '\"last_assistant_message\":\"All tests pass\",\"session_id\":\"s1\"}')
+    d.wait_until(attention_is("done"), 15.0, "a finished turn reports done")
+    d.cmd("openMainWorkspace")
+    d.wait_until(attention_is("none"), 15.0,
+                 "visiting acknowledges a finished turn")
+
+    # 5. An interrupted turn says nothing at all.
+    fire('{\"hook_event_name\":\"Stop\",'
+         '\"last_assistant_message\":\"[Request interrupted by user]\",'
+         '\"session_id\":\"s1\"}')
+    require(main_ws(d.state())["attention"] == "none",
+            "an interrupted turn must not produce attention")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -2137,6 +2211,7 @@ SCENARIOS = [
     ("applets", scenario_applets),
     ("connections", scenario_connections),
     ("shell-cwd", scenario_shell_cwd),
+    ("attention", scenario_attention),
     ("quit", scenario_quit),
 ]
 

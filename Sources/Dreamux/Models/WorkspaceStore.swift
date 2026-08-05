@@ -57,6 +57,7 @@ final class WorkspaceStore {
         // default work item under it).
         self.workspaces = []
         self.activeID = nil
+        Self.liveStores.append(WeakStore(self))
     }
 
     func session(for workspace: Workspace) -> WorkspaceSession {
@@ -72,8 +73,41 @@ final class WorkspaceStore {
         return session
     }
 
-    func hasUnread(for workspace: Workspace) -> Bool {
-        sessions[workspace.id]?.anyTabHasUnread ?? false
+    func attention(for workspace: Workspace) -> AgentAttention {
+        sessions[workspace.id]?.attention ?? .none
+    }
+
+    /// Bring a workspace and tab to the front and apply a banner action.
+    func focusTab(workspaceID: UUID, tabID: UUID, route: NotificationRoute) {
+        activate(workspaceID)
+        sessions[workspaceID]?.applyNotificationRoute(route)
+    }
+
+    // MARK: - Notification routing
+
+    private final class WeakStore {
+        weak var value: WorkspaceStore?
+        init(_ value: WorkspaceStore) { self.value = value }
+    }
+
+    /// Every live store, so a banner click can find the window that owns
+    /// the workspace it names. Weak, so a closed window's store is not
+    /// kept alive by this list — `WorkspaceStore` is created per project
+    /// per window (`ProjectSession`), and there is no singleton to ask.
+    private static var liveStores: [WeakStore] = []
+
+    /// Deliver a decoded banner interaction to whichever store owns the
+    /// workspace. A workspace id is globally unique, so at most one
+    /// store matches; nothing happens if that window has since closed.
+    static func routeNotification(_ route: NotificationRoute) {
+        liveStores.removeAll { $0.value == nil }
+        for box in liveStores {
+            guard let store = box.value,
+                  store.workspaces.contains(where: { $0.id == route.workspaceID })
+            else { continue }
+            store.focusTab(workspaceID: route.workspaceID, tabID: route.tabID, route: route)
+            return
+        }
     }
 
     func lastActivityMessage(for workspace: Workspace) -> String? {

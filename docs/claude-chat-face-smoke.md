@@ -106,3 +106,27 @@ The Overview tab is selected by default and there is no tab-selection
 e2e command, so the screenshots document window chrome; `chatFaceState`
 (which falls back to the shell `TabSession`) is the authoritative
 assertion.
+
+## Diagnosing an unexplained desktop banner
+
+Dreamux posts every banner through `UNUserNotificationCenter` and ships
+no `osascript` notification code, so a banner that looks like it came
+from Script Editor was posted by the harness, not by Dreamux. To find
+out which:
+
+1. Launch Dreamux with `DREAMUX_NOTIFY_DEBUG=1` in its environment.
+2. Reproduce the banner.
+3. Read the provenance log:
+
+   ```sh
+   log show --predicate 'subsystem == "com.dreamux.Dreamux"' --info --last 10m \
+     | grep NotificationProvenance
+   ```
+
+   A line for the banner means it arrived as a terminal escape and
+   Dreamux saw it. No line means the harness posted it out-of-band —
+   check for an `osascript` process under the agent:
+
+   ```sh
+   pgrep -lf osascript
+   ```

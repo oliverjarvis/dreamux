@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 import GhosttyTerminal
 import DreamuxPTY
+import os
 
 /// One attention/control event extracted from the PTY byte stream.
 enum ActivitySignal: Equatable, Sendable {
@@ -278,6 +279,7 @@ final class PTYShellSession: @unchecked Sendable {
                 // actual message that we surface in the notification.
                 let signals = Self.extractActivitySignals(buffer.prefix(n))
                 for signal in signals {
+                    Self.logProvenance(signal)
                     switch signal {
                     case .ping: activityHandler?(nil)
                     case .notification(let message): activityHandler?(message)
@@ -357,6 +359,37 @@ final class PTYShellSession: @unchecked Sendable {
     /// iTerm2 (`OSC 9`) or rxvt (`OSC 777 ; notify`) notification is
     /// `.notification`; the tail of a `OSC 777 ; dreamux ; …` control
     /// escape is `.control`.
+    /// Opt-in provenance logging for "an ugly banner appears and we do
+    /// not know who posted it". Off by default — this sits on the PTY
+    /// read path, and the question it answers is asked once per fresh
+    /// machine, not continuously.
+    static func provenanceLoggingEnabled(
+        env: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        env["DREAMUX_NOTIFY_DEBUG"] == "1"
+    }
+
+    private static let provenanceLogger = Logger(
+        subsystem: "com.dreamux.Dreamux",
+        category: "NotificationProvenance"
+    )
+
+    /// Record a notification-bearing escape verbatim so the emitter can
+    /// be identified. Dreamux itself posts no AppleScript notifications,
+    /// so anything the user sees that Dreamux did not post came through
+    /// here or from a process spawned in this tab.
+    static func logProvenance(_ signal: ActivitySignal) {
+        guard provenanceLoggingEnabled() else { return }
+        switch signal {
+        case .ping:
+            provenanceLogger.info("osc: bare BEL")
+        case .notification(let body):
+            provenanceLogger.info("osc: notification body=\(body, privacy: .public)")
+        case .control(let verb, _):
+            provenanceLogger.info("osc: control verb=\(verb, privacy: .public)")
+        }
+    }
+
     static func extractActivitySignals(_ data: ArraySlice<UInt8>) -> [ActivitySignal] {
         var signals: [ActivitySignal] = []
         var i = data.startIndex

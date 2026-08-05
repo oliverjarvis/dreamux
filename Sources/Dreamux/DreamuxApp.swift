@@ -60,6 +60,14 @@ struct DreamuxApp: App {
             // Ask once at launch — the user can revoke later in System Settings.
             NotificationManager.shared.requestAuthorizationIfNeeded()
         }
+
+        // Clicking a banner raises Dreamux and lands on the exact tab the
+        // agent is waiting in — installed unconditionally so the e2e
+        // harness exercises the same path.
+        NotificationManager.shared.onRoute = { route in
+            NSApp.activate(ignoringOtherApps: true)
+            WorkspaceStore.routeNotification(route)
+        }
     }
 
     var body: some Scene {
@@ -275,6 +283,9 @@ private struct NotificationCommands: Commands {
         CommandGroup(after: .appInfo) {
             Button("Notification Settings…") {
                 NotificationManager.shared.openSystemNotificationSettings()
+            }
+            Button("Run Notification Diagnostic") {
+                NotificationManager.shared.runDiagnostic()
             }
         }
     }

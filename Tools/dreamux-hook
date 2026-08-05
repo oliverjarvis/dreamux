@@ -8,12 +8,10 @@ Claude Code can call it directly from their hook config — no install
 step on the user's machine.
 
 Subcommands:
-  stop       — fired on assistant-turn completion. Reads the transcript
-               path from stdin (Claude Code passes it as JSON) and only
-               emits a notification if the last assistant message is
-               substantive — i.e., not empty and not the
-               "[Request interrupted by user]" placeholder. This keeps
-               Ctrl+C-style cancellations silent.
+  event      — `--harness <id>`; the one normalizer. Maps a harness's
+               hook payload to an attention state via harnesses.json and
+               emits it as an `agent-state` control OSC, plus the legacy
+               stop/notify verbs the chat-face binding reads.
   notify     — fired when the agent wants user attention. Uses arg 2 if
                given, else $CLAUDE_NOTIFICATION_MESSAGE, else a default.
   idle       — explicit "agent is waiting" hook variant.
@@ -31,7 +29,7 @@ import json
 import os
 import sys
 import time
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 
 # When DREAMUX_HOOK_DEBUG=1 is set in the agent's env, every hook
@@ -182,6 +180,71 @@ HOOK_EVENT_KINDS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Harness catalog — the event → attention-state table shared with Swift.
+#
+# Lives beside this script (Tools/ in a checkout, Contents/Resources/bin/
+# in the bundle) so one rule resolves it in both layouts.
+# DREAMUX_HARNESSES_JSON overrides, for tests.
+# ---------------------------------------------------------------------------
+
+CLAUDE_FALLBACK_EVENTS = {
+    "Notification:permission_prompt": {"state": "blocked", "reason": "permission"},
+    "Notification:idle_prompt": {"state": "blocked", "reason": "question"},
+    "Notification:agent_needs_input": {"state": "blocked", "reason": "subagentInput"},
+    "Notification:elicitation_dialog": {"state": "blocked", "reason": "elicitation"},
+    "Notification:agent_completed": {"state": "done"},
+    "PermissionRequest": {"state": "blocked", "reason": "permission"},
+    "Stop": {"state": "done", "messageField": "last_assistant_message"},
+    "UserPromptSubmit": {"state": "working"},
+    "PreToolUse": {"state": "working"},
+    "SessionEnd": {"state": "none"},
+}
+
+
+def _catalog_path() -> str:
+    override = os.environ.get("DREAMUX_HARNESSES_JSON", "")
+    if override:
+        return override
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "harnesses.json")
+
+
+def load_events(harness: str) -> Optional[dict]:
+    """Event table for one harness. A missing or corrupt catalog degrades
+    to the compiled-in Claude table rather than to silence — but an
+    unknown harness is still unknown, and returns None."""
+    try:
+        with open(_catalog_path(), encoding="utf-8") as f:
+            catalog = json.load(f)
+        for entry in catalog.get("harnesses") or []:
+            if entry.get("id") == harness:
+                events = entry.get("events")
+                if isinstance(events, dict) and events:
+                    return events
+        log("catalog_no_harness", harness=harness)
+        return CLAUDE_FALLBACK_EVENTS if harness == "claude" else None
+    except Exception as exc:
+        log("catalog_fail", error=str(exc))
+        return CLAUDE_FALLBACK_EVENTS if harness == "claude" else None
+
+
+INTERRUPT_MARKERS = (
+    "[request interrupted by user]",
+    "[interrupted by user]",
+)
+
+
+def clip(text: Optional[str]) -> str:
+    """One line, at most 200 characters plus an ellipsis — a banner body,
+    not a transcript."""
+    if not text:
+        return ""
+    collapsed = " ".join(text.split())
+    if len(collapsed) > 200:
+        return collapsed[:200].rstrip() + "…"
+    return collapsed
+
+
 def emit_signal(kind: str, stdin_payload: Optional[dict], message: Optional[str] = None) -> None:
     sock_path = os.environ.get("DREAMUX_EMIT_SOCKET", "")
     if not sock_path:
@@ -271,121 +334,79 @@ def session_start_handler() -> None:
     })
 
 
-def scan_transcript(
-    transcript_path: str,
-) -> Tuple[int, Optional[dict], int]:
-    """Walk the JSONL transcript and return (last_user_idx,
-    last_assistant_entry, last_assistant_idx). Indices are -1 if the
-    corresponding entry doesn't exist; the assistant entry is None when
-    the transcript has no assistant turns."""
-    last_user_idx = -1
-    last_assistant_idx = -1
-    last_assistant: Optional[dict] = None
-    try:
-        with open(transcript_path, encoding="utf-8") as f:
-            for i, line in enumerate(f):
-                try:
-                    entry = json.loads(line)
-                except Exception:
-                    continue
-                kind = entry.get("type")
-                if kind == "user":
-                    last_user_idx = i
-                elif kind == "assistant":
-                    last_assistant_idx = i
-                    last_assistant = entry
-    except Exception:
-        pass
-    return last_user_idx, last_assistant, last_assistant_idx
+def _flag_value(name: str) -> Optional[str]:
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg == name and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith(name + "="):
+            return arg.split("=", 1)[1]
+    return None
 
 
-def extract_text(entry: dict) -> str:
-    """Pull the text out of an assistant transcript entry — Claude Code
-    uses a list of `{type, text}` content blocks; fall back to a plain
-    string for older or simpler shapes."""
-    msg = entry.get("message", entry)
-    content = msg.get("content", "")
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, dict):
-                if block.get("type") == "text":
-                    parts.append(block.get("text") or "")
-                elif "text" in block and isinstance(block["text"], str):
-                    parts.append(block["text"])
-        text = "\n".join(p for p in parts if p)
-    elif isinstance(content, str):
-        text = content
-    else:
-        text = ""
-    return text.strip()
+def event_handler() -> None:
+    """`dreamux-hook event --harness <id>` — the one normalizer.
 
-
-def stop_handler() -> None:
-    payload = read_stdin_json()
-    log("stop_in", payload_keys=list(payload.keys()) if payload else None)
-    if payload is None:
-        # No JSON input — be conservative and skip rather than spamming.
-        log("stop_skip", reason="no_stdin_json")
-        return
-    control_emit("stop", {"session_id": payload.get("session_id") or ""})
-
-    # Note: session.stopped is emitted from the SessionEnd hook (see
-    # flow_handler / HOOK_EVENT_KINDS), not here — Stop fires at the end
-    # of every assistant turn, not just at session end, so emitting the
-    # signal here would mark every lane permanently done on each turn.
-
-    transcript_path = payload.get("transcript_path") or ""
-    if not transcript_path or not os.path.exists(transcript_path):
-        log("stop_skip", reason="no_transcript", path=transcript_path)
+    Turns any harness's hook payload into a single `agent-state` control
+    OSC using the shared catalog, so Swift never learns a harness's
+    native vocabulary. Also re-emits the legacy `stop` / `notify` verbs
+    ClaudeSessionBinding consumes, so the chat face keeps working."""
+    harness = _flag_value("--harness") or "claude"
+    payload = read_stdin_json() or {}
+    events = load_events(harness)
+    if not events:
+        log("event_skip", reason="unknown_harness", harness=harness)
         return
 
-    # Poll the transcript until the just-completed assistant turn lands.
-    # Claude Code's Stop hook can fire before the turn is flushed to
-    # disk, which is why we'd otherwise emit the *previous* turn's text
-    # (or nothing at all on the first response).
-    #
-    # The signal that the turn has flushed: the file ends with an
-    # assistant entry that comes AFTER the most recent user entry. While
-    # the file ends with a user entry (or nothing), we keep polling.
-    deadline = time.monotonic() + 3.0
-    assistant_entry: Optional[dict] = None
-    while True:
-        user_idx, candidate, candidate_idx = scan_transcript(transcript_path)
-        if candidate is not None and candidate_idx > user_idx:
-            assistant_entry = candidate
-            break
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.05)
-
-    if assistant_entry is None:
-        # Timed out without a fresh assistant entry — likely an
-        # interrupt or a session that ended without a new response.
-        log("stop_skip", reason="poll_timeout")
+    hook = payload.get("hook_event_name") or ""
+    discriminator = payload.get("notification_type") or ""
+    transition = None
+    if discriminator:
+        transition = events.get("%s:%s" % (hook, discriminator))
+    if transition is None:
+        transition = events.get(hook)
+    if not isinstance(transition, dict) or not transition.get("state"):
+        log("event_skip", reason="unmapped", harness=harness,
+            hook=hook, discriminator=discriminator)
         return
 
-    text = extract_text(assistant_entry)
-    if not text:
-        log("stop_skip", reason="empty_text")
-        return
+    field = transition.get("messageField") or "message"
+    raw = payload.get(field)
+    if not isinstance(raw, str):
+        raw = payload.get("message") if isinstance(payload.get("message"), str) else ""
 
-    lowered = text.lower()
-    interrupt_markers = (
-        "[request interrupted by user]",
-        "[interrupted by user]",
-    )
-    if any(marker in lowered for marker in interrupt_markers):
-        log("stop_skip", reason="interrupted")
-        return
+    state = transition["state"]
+    if state == "done" and raw:
+        lowered = raw.lower()
+        if any(marker in lowered for marker in INTERRUPT_MARKERS):
+            # Ctrl+C is not a completed turn. Stay silent.
+            log("event_skip", reason="interrupted")
+            return
 
-    if len(text) > 200:
-        text = text[:200].rstrip() + "…"
-    text = " ".join(text.split())
-    if not text:
-        return
+    session_id = payload.get("session_id") or ""
+    body = {
+        "harness": harness,
+        "state": state,
+        "reason": transition.get("reason") or "",
+        "message": clip(raw),
+        "tool": payload.get("tool_name") or "",
+        "request_id": payload.get("tool_use_id") or "",
+        "session_id": session_id,
+    }
+    control_emit("agent-state", body)
+    emit_signal("agent.attention", payload, message=body["message"] or None)
 
-    emit(text)
+    # Legacy verbs the chat-face binding still reads. Kept here rather
+    # than as a second hook entry so one hook invocation stays one
+    # invocation.
+    if state == "done":
+        control_emit("stop", {"session_id": session_id})
+    elif state == "blocked":
+        control_emit("notify", {
+            "message": body["message"],
+            "session_id": session_id,
+            "cwd": payload.get("cwd") or "",
+        })
 
 
 def notify_handler() -> None:
@@ -419,9 +440,7 @@ def idle_handler() -> None:
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     log("invoke", cmd=cmd, argv=sys.argv[1:])
-    if cmd == "stop":
-        stop_handler()
-    elif cmd == "notify":
+    if cmd == "notify":
         notify_handler()
     elif cmd == "idle":
         idle_handler()
@@ -429,6 +448,8 @@ def main() -> None:
         flow_handler()
     elif cmd == "session-start":
         session_start_handler()
+    elif cmd == "event":
+        event_handler()
     elif cmd:
         emit(" ".join(sys.argv[1:]))
     else:
