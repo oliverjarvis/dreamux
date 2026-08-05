@@ -154,16 +154,8 @@ enum WorktreeEnvironment {
         let settingsURL = worktree.appendingPathComponent(".claude/settings.local.json")
 
         var root: [String: Any] = [:]
-        if fm.fileExists(atPath: settingsURL.path) {
-            // Exclusion only suppresses UNTRACKED files, so a repo that
-            // tracks this one owns it — writing would show up in
-            // `git status` and eventually in someone's commit. Checked
-            // only when the file exists, so the common case (a fresh
-            // worktree) spawns no subprocess at all.
-            if isTracked(".claude/settings.local.json", in: worktree) {
-                report.skipped.append("\(settingsURL.path) (tracked by the repo)")
-                return
-            }
+        let fileExists = fm.fileExists(atPath: settingsURL.path)
+        if fileExists {
             guard let data = try? Data(contentsOf: settingsURL),
                   let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else {
@@ -201,8 +193,26 @@ enum WorktreeEnvironment {
             report.skipped.append("\(settingsURL.path) (failed to encode)")
             return
         }
-        // Byte-compare first so a no-op pass doesn't even touch mtime.
+        // Byte-compare BEFORE anything expensive. `reconcile` is a
+        // whole-project pass and `WorkspaceStore.reloadFeatures` runs one
+        // per discovered feature, so "everything is already correct" is
+        // by far the hottest path and must cost nothing but a read.
         if let existing = try? Data(contentsOf: settingsURL), existing == data { return }
+        // Only now, with a write actually pending, ask git who owns the
+        // file. Exclusion suppresses UNTRACKED files only, so a repo that
+        // tracks this one owns it: writing would show up in `git status`
+        // and eventually in someone's commit.
+        //
+        // Deliberately behind the byte-compare, not in front of it: this
+        // blocks the main actor until git exits, and git can block on
+        // index contention while another part of the app is adding or
+        // removing worktrees in the same repo. Reaching it only when
+        // there is a real change to write keeps a settled pass free of
+        // subprocesses entirely.
+        if fileExists, isTracked(".claude/settings.local.json", in: worktree) {
+            report.skipped.append("\(settingsURL.path) (tracked by the repo)")
+            return
+        }
         do {
             try fm.createDirectory(
                 at: settingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
