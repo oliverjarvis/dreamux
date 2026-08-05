@@ -24,10 +24,15 @@ public struct BonsplitView<Content: View, EmptyContent: View, Accessory: View>: 
     private let contentBuilder: (Tab, PaneID) -> Content
     private let emptyPaneBuilder: (PaneID) -> EmptyContent
     private let tabBarAccessoryBuilder: (PaneID) -> Accessory
+    private let tabContextMenu: TabContextMenuBuilder?
 
     /// Initialize with a controller, content builder, empty pane builder, and tab bar accessory
     /// - Parameters:
     ///   - controller: The BonsplitController managing the tab state
+    ///   - tabContextMenu: Optional per-tab context menu. Receives the tab and
+    ///     its pane; return the menu's content. Nil (the default) attaches no
+    ///     menu at all — an empty `.contextMenu` would still open an empty
+    ///     popup on right-click.
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
     ///   - emptyPane: A ViewBuilder closure that provides content for empty panes
     ///   - tabBarAccessory: A ViewBuilder closure rendered in each pane's tab bar, in the trailing
@@ -35,11 +40,13 @@ public struct BonsplitView<Content: View, EmptyContent: View, Accessory: View>: 
     ///     slot and knows nothing about what goes in it.
     public init(
         controller: BonsplitController,
+        tabContextMenu: TabContextMenuBuilder? = nil,
         @ViewBuilder content: @escaping (Tab, PaneID) -> Content,
         @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent,
         @ViewBuilder tabBarAccessory: @escaping (PaneID) -> Accessory
     ) {
         self.controller = controller
+        self.tabContextMenu = tabContextMenu
         self.contentBuilder = content
         self.emptyPaneBuilder = emptyPane
         self.tabBarAccessoryBuilder = tabBarAccessory
@@ -64,6 +71,7 @@ public struct BonsplitView<Content: View, EmptyContent: View, Accessory: View>: 
         )
         .environment(controller)
         .environment(controller.internalController)
+        .environment(\.tabContextMenu, TabContextMenuBox(tabContextMenu))
     }
 }
 
@@ -76,12 +84,15 @@ extension BonsplitView where Accessory == EmptyView {
     ///   - controller: The BonsplitController managing the tab state
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
     ///   - emptyPane: A ViewBuilder closure that provides content for empty panes
+    ///   - tabContextMenu: Optional per-tab context menu; nil attaches none.
     public init(
         controller: BonsplitController,
+        tabContextMenu: TabContextMenuBuilder? = nil,
         @ViewBuilder content: @escaping (Tab, PaneID) -> Content,
         @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent
     ) {
         self.controller = controller
+        self.tabContextMenu = tabContextMenu
         self.contentBuilder = content
         self.emptyPaneBuilder = emptyPane
         self.tabBarAccessoryBuilder = { _ in EmptyView() }
@@ -93,11 +104,14 @@ extension BonsplitView where EmptyContent == DefaultEmptyPaneView, Accessory == 
     /// - Parameters:
     ///   - controller: The BonsplitController managing the tab state
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
+    ///   - tabContextMenu: Optional per-tab context menu; nil attaches none.
     public init(
         controller: BonsplitController,
+        tabContextMenu: TabContextMenuBuilder? = nil,
         @ViewBuilder content: @escaping (Tab, PaneID) -> Content
     ) {
         self.controller = controller
+        self.tabContextMenu = tabContextMenu
         self.contentBuilder = content
         self.emptyPaneBuilder = { _ in DefaultEmptyPaneView() }
         self.tabBarAccessoryBuilder = { _ in EmptyView() }

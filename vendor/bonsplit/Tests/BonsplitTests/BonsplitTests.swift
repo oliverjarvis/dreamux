@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import Bonsplit
 
@@ -135,6 +136,19 @@ final class BonsplitTests: XCTestCase {
 
         let titles = controller.tabs(inPane: pane).map(\.title)
         XCTAssertEqual(titles, ["Welcome", "First"])
+    }
+
+    /// The tab context-menu hook must be genuinely optional: a host that
+    /// doesn't pass one gets NO menu, not an empty popup on right-click.
+    @MainActor
+    func testTabContextMenuIsAbsentByDefault() {
+        XCTAssertNil(TabContextMenuBox.none.builder)
+    }
+
+    @MainActor
+    func testTabContextMenuBoxCarriesItsBuilder() {
+        let box = TabContextMenuBox { tab, _ in AnyView(Text(tab.title)) }
+        XCTAssertNotNil(box.builder)
     }
 }
 

@@ -14,6 +14,10 @@ enum PipPanelConfiguration {
     /// the instant Dreamux stops being the active app.
     static let hidesOnDeactivate = false
 
+    /// `@MainActor` because every property it sets is; the constants
+    /// above deliberately are not, so the tests can read them without a
+    /// main-actor hop.
+    @MainActor
     static func apply(to panel: NSPanel) {
         panel.level = level
         panel.collectionBehavior = collectionBehavior
@@ -39,6 +43,7 @@ enum PipPanelConfiguration {
 /// be intercepted mid-flight, and magnetism has to happen *during* the
 /// drag. `PipChromeView` runs the drag and `PipHost` snaps it.
 final class PipPanel: NSPanel {
+    @MainActor
     init(frame: NSRect) {
         super.init(
             contentRect: frame,
