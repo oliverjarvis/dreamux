@@ -765,6 +765,11 @@ struct WorkspaceSidebar: View {
                 mainWorktreeIssue = "Couldn't check out "
                     + issues.joined(separator: "; ")
             }
+            // The only place default-branch worktrees are created — and
+            // `main` is the workspace whose shell benefits most from
+            // being equipped. Runs unconditionally: worktrees that
+            // already existed still need the pass, and it is idempotent.
+            WorktreeEnvironment.reconcile(projectRoot: repoStore.project.rootPath)
         }
     }
 

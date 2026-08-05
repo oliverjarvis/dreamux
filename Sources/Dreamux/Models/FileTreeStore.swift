@@ -17,25 +17,18 @@ final class FileTreeStore {
     /// nil/orphan workspace (no linked repos) yields `[]`.
     func roots(for workspace: Workspace?, repositories: [Repository]) -> [FileNode] {
         guard let workspace else { return [] }
-        let byName = Dictionary(repositories.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
-        var result: [FileNode] = []
-        for repoID in workspace.linkedRepoIDs {
-            guard let repo = byName[repoID] else { continue }
-            // Main workspaces browse each repo's own default branch —
-            // display name aside, "main" here can be "master" there.
-            let branchFolder = workspace.isMain ? repo.defaultBranch : workspace.name
-            let worktree = repo.rootURL.appendingPathComponent(branchFolder, isDirectory: true)
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: worktree.path, isDirectory: &isDir),
-                  isDir.boolValue else { continue }
-            result.append(FileNode(
+        return WorkspaceWorktrees.existing(for: workspace, in: repositories).map { worktree in
+            FileNode(
                 url: worktree.resolvingSymlinksInPath(),
-                name: repo.name,
+                // A worktree is `<project>/repos/<repo>/<branch>/`, so its
+                // parent folder name IS `Repository.name`. Taken from the
+                // unresolved URL: symlink resolution can respell ancestors
+                // (/var → /private/var) but never renames a component.
+                name: worktree.deletingLastPathComponent().lastPathComponent,
                 isDirectory: true,
                 isRepoRoot: true
-            ))
+            )
         }
-        return result
     }
 
     /// Immediate children of a directory node — directories first, then

@@ -440,20 +440,25 @@ final class FlowStore: ObservableObject {
 /// store so they're testable without MainActor hops.
 enum FlowWiring {
     /// Match a session cwd to a workspace: the feature aggregation dir
-    /// (`features/<name>/`) or any per-repo worktree
-    /// (`<root>/repos/<repo>/<name>/`), boundary-safe.
-    static func workspaceID(forCwd cwd: String, workspaces: [Workspace], projectRoot: URL) -> UUID? {
+    /// (`features/<name>/`) or any per-repo worktree, boundary-safe.
+    ///
+    /// Worktree candidates come from `WorkspaceWorktrees.worktreeURL`,
+    /// not from composing `repos/<repo>/<workspace.name>`: a main
+    /// workspace's name is only the FIRST repo's default branch, so the
+    /// composed path was wrong for every repo after it.
+    static func workspaceID(
+        forCwd cwd: String,
+        workspaces: [Workspace],
+        repositories: [Repository]
+    ) -> UUID? {
+        let byName = Dictionary(
+            repositories.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
         for workspace in workspaces {
             var candidates: [String] = []
             if let wd = workspace.workingDirectory, !wd.isEmpty { candidates.append(wd) }
-            for repo in workspace.linkedRepoIDs {
-                candidates.append(
-                    projectRoot
-                        .appendingPathComponent("repos", isDirectory: true)
-                        .appendingPathComponent(repo, isDirectory: true)
-                        .appendingPathComponent(workspace.name, isDirectory: true)
-                        .path
-                )
+            for repoID in workspace.linkedRepoIDs {
+                guard let repo = byName[repoID] else { continue }
+                candidates.append(WorkspaceWorktrees.worktreeURL(for: workspace, in: repo).path)
             }
             for candidate in candidates {
                 if cwd == candidate || cwd.hasPrefix(candidate + "/") { return workspace.id }
