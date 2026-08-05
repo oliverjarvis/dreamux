@@ -145,7 +145,7 @@ struct SettingsView: View {
             .formStyle(.grouped)
             .navigationTitle((category ?? .appearance).title)
         }
-        .frame(width: 720, height: 440)
+        .frame(width: 720, height: 520)
     }
 
     /// "Inset card" + "Colors & transparency" — moved unchanged from the
@@ -189,6 +189,12 @@ struct SettingsView: View {
                 HStack(spacing: 10) {
                     Slider(value: $cardOpacity, in: 0.5...1.0)
                         .frame(width: 180)
+                        // background-opacity lives in the terminal's theme
+                        // layer now, so open surfaces pick this up too —
+                        // but only if something asks them to recompile.
+                        .onChange(of: cardOpacity) {
+                            TerminalThemeStore.shared.requestReapply()
+                        }
                     Text("\(Int(cardOpacity * 100))%")
                         .font(.callout.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -215,6 +221,7 @@ struct SettingsView: View {
             Text("Backdrop transparency runs from solid color (0%) to raw desktop glass (100%). Card transparency lets the backdrop show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
                 .foregroundStyle(.secondary)
         }
+        TerminalThemeSection()
     }
 
     @ViewBuilder private var workflowSection: some View {

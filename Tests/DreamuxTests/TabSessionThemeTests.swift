@@ -10,6 +10,13 @@ final class TabSessionThemeTests: XCTestCase {
     private var suiteName: String!
     private var savedStore: TerminalThemeStore!
 
+    // Reaching these @MainActor stored properties (and
+    // TerminalThemeStore.shared) from XCTest's nonisolated
+    // setUp/tearDown overrides warns under Swift 6. Wrapping the bodies
+    // in MainActor.assumeIsolated does NOT help — it sends `self` across
+    // the boundary, which is a hard error. Every @MainActor XCTestCase in
+    // this target carries the same warnings (see
+    // PlanQueueControllerTests); the app target itself builds clean.
     override func setUpWithError() throws {
         sandbox = try TestSandbox()
         suiteName = "TabSessionThemeTests-\(UUID().uuidString)"
