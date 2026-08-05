@@ -26,6 +26,11 @@ final class WorkspaceStore {
     /// isn't tied to a specific repo's worktree.
     let defaultWorkingDirectory: String?
 
+    /// Live repository list for this project, assigned in
+    /// `ProjectSession.init`. Passed down to every `WorkspaceSession` so
+    /// a new user shell can resolve its worktree.
+    var repositories: () -> [Repository] = { [] }
+
     /// Per-workspace session, kept alive for the lifetime of the workspace
     /// so the shell process and scrollback survive sidebar switches.
     private var sessions: [UUID: WorkspaceSession] = [:]
@@ -58,6 +63,9 @@ final class WorkspaceStore {
     func session(for workspace: Workspace) -> WorkspaceSession {
         if let existing = sessions[workspace.id] { return existing }
         let session = WorkspaceSession(workspace: workspace)
+        // Weak: this store OWNS its sessions, so a strong capture of
+        // `self` here would be a retain cycle.
+        session.repositories = { [weak self] in self?.repositories() ?? [] }
         sessions[workspace.id] = session
         if workspace.id == activeID {
             session.didBecomeVisible()

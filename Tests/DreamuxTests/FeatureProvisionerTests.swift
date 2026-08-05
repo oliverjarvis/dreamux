@@ -277,6 +277,35 @@ final class FeatureProvisionerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: featureDir.path))
     }
 
+    /// Provisioning a feature equips its brand-new worktree, so the very
+    /// first shell opened there already has the signals MCP, the project
+    /// docs link, and the orientation hook — and none of it is git noise.
+    func testProvisionEquipsTheNewWorktree() async throws {
+        let (alpha, _) = try await makeTwoRepos()
+        // Pin the MCP runner so `.mcp.json` lands regardless of this
+        // machine's dev-checkout layout (as MCPInstallerTests does).
+        let script = sandbox.root.appendingPathComponent("dreamux-signals-mcp.ts")
+        try "// stub".write(to: script, atomically: true, encoding: .utf8)
+        UserDefaults.standard.set(script.path, forKey: MCPInstaller.scriptPathDefaultsKey)
+        defer { UserDefaults.standard.removeObject(forKey: MCPInstaller.scriptPathDefaultsKey) }
+
+        _ = try await FeatureProvisioner.provision(
+            featureName: "equip-me", in: project, across: [alpha])
+
+        let worktree = alpha.rootURL.appendingPathComponent("equip-me", isDirectory: true)
+        let fm = FileManager.default
+        XCTAssertTrue(fm.fileExists(atPath: worktree.appendingPathComponent(".mcp.json").path))
+        XCTAssertEqual(
+            try fm.destinationOfSymbolicLink(
+                atPath: worktree.appendingPathComponent("project-docs").path),
+            "../../../docs")
+        XCTAssertTrue(fm.fileExists(
+            atPath: worktree.appendingPathComponent(".claude/settings.local.json").path))
+
+        let status = try await git(["status", "--porcelain"], in: worktree)
+        XCTAssertEqual(status, "")
+    }
+
     // MARK: - Helpers
 
     /// Two independent bare-layout repos, each with one distinct fixture

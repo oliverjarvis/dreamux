@@ -2134,6 +2134,67 @@ def scenario_idea_intake(d):
     log(f"two live intake sessions in main: {w['intakeTabs']}")
 
 
+def scenario_shell_cwd(d):
+    """A new user shell in a SINGLE-repo workspace starts inside that
+    repo's worktree, not at the feature aggregation directory -- and the
+    worktree it lands in is equipped and still git-clean. A workspace
+    spanning two repos keeps the aggregation directory (main, here)."""
+    d.cmd("createFeature", name="solo-shell", repos=["portenv-server"])
+    d.cmd("setSidebarMode", mode="workspace", workspace="solo-shell")
+
+    expected = worktree("portenv-server", "solo-shell")
+    aggregation = feature_dir("solo-shell")
+
+    # A workspace's Bonsplit pane only mounts (and bootstraps its shell
+    # tab) once it's actually rendered -- an onAppear this driver can't
+    # force, only wait out.
+    def shell_tabs():
+        state = d.state()
+        ws = next((w for w in state.get("workspaces", [])
+                   if w["name"] == "solo-shell"), None)
+        if not ws:
+            return None
+        shells = [t for t in ws.get("tabs", []) if t.get("cwd")]
+        return shells or None
+
+    shells = d.wait_until(shell_tabs, 20.0,
+                          "solo-shell workspace to bootstrap a terminal tab")
+    for tab in shells:
+        require(os.path.realpath(tab["cwd"]) == os.path.realpath(expected),
+                f"shell tab cwd is {tab['cwd']!r}, expected the worktree {expected!r}")
+        require(os.path.realpath(tab["cwd"]) != os.path.realpath(aggregation),
+                "shell tab must not land on the aggregation directory")
+
+    # The worktree is equipped: project-docs resolves to the PROJECT docs
+    # home (three levels up), and the orientation hook is in place.
+    docs_link = os.path.join(expected, "project-docs")
+    require(os.path.islink(docs_link), f"{docs_link} is not a symlink")
+    require(os.path.isdir(os.path.join(docs_link, "plans")),
+            f"{docs_link} does not resolve to the project docs home")
+    require(os.path.isfile(os.path.join(expected, ".claude", "settings.local.json")),
+            "orientation hook settings file missing")
+
+    # And none of it is git noise. (.mcp.json is deliberately not
+    # asserted: MCPInstaller skips when no runner resolves on the build
+    # machine, which is not a product failure.)
+    status = git("status", "--porcelain", cwd=expected)
+    require(status == "", f"worktree should stay git-clean, got {status!r}")
+
+    # The other arm of the matrix: main spans BOTH seed repos, so there
+    # is no non-arbitrary choice and it stays at the project root.
+    # Skipped when running this scenario standalone, where main was
+    # never opened.
+    state = d.state()
+    main_ws = next((w for w in state.get("workspaces", []) if w.get("isMain")), None)
+    if main_ws:
+        for tab in [t for t in main_ws.get("tabs", []) if t.get("cwd")]:
+            require(os.path.realpath(tab["cwd"]) == os.path.realpath(PROJECT_DIR),
+                    f"multi-repo main shell cwd is {tab['cwd']!r}, "
+                    f"expected the project root {PROJECT_DIR!r}")
+
+    d.screenshot("shell-cwd-worktree")
+
+
 SCENARIOS = [
     ("boot", scenario_boot),
     ("repos-and-feature", scenario_repos_and_feature),
@@ -2149,6 +2210,7 @@ SCENARIOS = [
     ("idea-intake", scenario_idea_intake),
     ("applets", scenario_applets),
     ("connections", scenario_connections),
+    ("shell-cwd", scenario_shell_cwd),
     ("attention", scenario_attention),
     ("quit", scenario_quit),
 ]

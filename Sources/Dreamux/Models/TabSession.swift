@@ -42,6 +42,10 @@ final class TabSession: Identifiable {
     private let shell: PTYShellSession
     private var didStart = false
 
+    /// Held for this session's lifetime: dropping it removes the
+    /// `.terminalThemeDidChange` observer.
+    @ObservationIgnored private var themeObserver: TerminalThemeObserver?
+
     init(
         cwd: String? = nil,
         onActivity: @escaping @Sendable (String?) -> Void = { _ in }
@@ -60,69 +64,30 @@ final class TabSession: Identifiable {
             }
         )
 
-        // Ghostty ships with default `super+<letter>` keybinds (super+t,
-        // super+d, super+w, …) for actions its own app shell implements.
-        // We embed the surface in our own multi-pane manager, so those
-        // actions are no-ops here — but Ghostty's `performKeyEquivalent`
-        // still *consumes* the events, blocking our SwiftUI command menu
-        // from receiving them. Mark them `ignore` so the events bubble up
-        // to AppKit and fire our shortcuts (Cmd+T, Cmd+D, Cmd+W, …).
-        let releaseGhosttyShortcuts: (inout TerminalConfiguration.Builder) -> Void = { builder in
-            // Ghostty's keybind grammar is `<trigger>=<action>`. The
-            // `unbind` action removes the binding so `keyIsBinding`
-            // returns false — letting the event flow up the responder
-            // chain to AppKit's menu. `=ignore` keeps the binding alive
-            // as a no-op which still gets consumed.
-            for key in ["t", "n", "d", "w", "q"] {
-                builder.withCustom("keybind", "super+\(key)=unbind")
-                builder.withCustom("keybind", "shift+super+\(key)=unbind")
-                builder.withCustom("keybind", "alt+super+\(key)=unbind")
-                builder.withCustom("keybind", "shift+alt+super+\(key)=unbind")
-            }
-            builder.withCustom("keybind", "alt+super+left=unbind")
-            builder.withCustom("keybind", "alt+super+right=unbind")
-            builder.withCustom("keybind", "alt+super+up=unbind")
-            builder.withCustom("keybind", "alt+super+down=unbind")
-        }
-
-        // Card transparency (appearance setting): Ghostty paints its own
-        // background, so a translucent card needs the surface itself to
-        // go translucent too. Read at tab creation — existing surfaces
-        // keep the opacity they were born with.
-        let cardOpacity = UserDefaults.standard
-            .object(forKey: "appearanceCardOpacity") as? Double ?? 1.0
-        let applyOpacity: (inout TerminalConfiguration.Builder) -> Void = { builder in
-            if cardOpacity < 1 {
-                builder.withCustom(
-                    "background-opacity", String(format: "%.2f", cardOpacity))
-            }
-        }
-
-        let theme = TerminalTheme(
-            light: TerminalConfiguration { builder in
-                builder.withFontSize(14)
-                builder.withCursorStyle(.bar)
-                builder.withCursorStyleBlink(true)
-                builder.withWindowPaddingX(8)
-                builder.withWindowPaddingY(8)
-                applyOpacity(&builder)
-                releaseGhosttyShortcuts(&builder)
-            },
-            dark: TerminalConfiguration { builder in
-                builder.withFontSize(14)
-                builder.withCursorStyle(.bar)
-                builder.withCursorStyleBlink(true)
-                builder.withWindowPaddingX(8)
-                builder.withWindowPaddingY(8)
-                applyOpacity(&builder)
-                releaseGhosttyShortcuts(&builder)
-            }
+        // Colors, font, cursor, padding and the ghostty keybind unbinds
+        // all come from the app-wide theme store now — one compile, two
+        // layers, identical for every session. See
+        // TerminalThemeCompiler for the precedence rule.
+        let compiled = TerminalThemeStore.shared.compiled()
+        self.viewState = TerminalViewState(
+            theme: compiled.theme,
+            terminalConfiguration: compiled.configuration
         )
-
-        self.viewState = TerminalViewState(theme: theme)
         self.viewState.configuration = TerminalSurfaceOptions(
             backend: .inMemory(shell.terminalSession)
         )
+
+        // The controller resolved and pushed that config during its own
+        // init. If ghostty rejected it (a bad hand-edited ghostty.conf is
+        // the usual cause) it silently kept the base config — including
+        // NO keybind unbinds — so run the ladder to recover.
+        if viewState.controller.lastConfigurationIssue != nil {
+            applyThemeFromStore(force: true)
+        }
+
+        themeObserver = TerminalThemeObserver { [weak self] in
+            self?.applyThemeFromStore()
+        }
     }
 
     var title: String {
@@ -166,6 +131,76 @@ final class TabSession: Identifiable {
         if view.controller !== viewState.controller {
             view.controller = viewState.controller
         }
+    }
+
+    // MARK: - Theme
+
+    /// Recompile from the store and push, degrading rather than losing
+    /// the theme if ghostty rejects something.
+    ///
+    /// `prepareConfig` treats ANY diagnostic as fatal for the ENTIRE
+    /// config, so one stale key would otherwise throw away every color
+    /// the user chose, with an NSLog as the only trace. Two ordered
+    /// steps, cheapest loss first.
+    func applyThemeFromStore(force: Bool = false) {
+        let store = TerminalThemeStore.shared
+
+        guard let issue = apply(store.compiled(), force: force) else { return }
+
+        // 1. Drop the hand-edited conf: the least-validated input, and
+        //    the likeliest culprit. Losing it costs the escape hatch
+        //    rather than the theme. The app invariants stay — dropping
+        //    the whole configuration layer would break Cmd+T/Cmd+W,
+        //    which is worse than a wrong background.
+        guard let degradedIssue = apply(
+            store.compiled(includingAdvancedConf: false), force: force
+        ) else {
+            store.reportIssue(issue)
+            return
+        }
+
+        // 2. background + foreground only — the two keys least likely
+        //    to ever drift.
+        if let minimalIssue = apply(
+            TerminalThemeCompiler.minimal(spec: store.spec), force: force
+        ) {
+            store.reportIssue(minimalIssue)
+        } else {
+            store.reportIssue(degradedIssue)
+        }
+    }
+
+    /// Push a compiled pair and return ghostty's complaint, or nil.
+    ///
+    /// Two rules, both learned from the wrapper's source:
+    /// `setTheme`/`setTerminalConfiguration` return `false` for BOTH
+    /// rejection and "unchanged", so their return value is useless —
+    /// and `lastConfigurationIssue` is only meaningful right after a
+    /// push that actually happened, since a successful second push
+    /// clears a failed first one's issue.
+    private func apply(_ compiled: CompiledTerminalTheme, force: Bool) -> String? {
+        let configurationChanged = compiled.configuration != viewState.terminalConfiguration
+        let themeChanged = compiled.theme != viewState.theme
+
+        guard configurationChanged || themeChanged else {
+            // Nothing to push. On the normal path that's success; on the
+            // recovery path it means this rung of the ladder is
+            // identical to the config that just failed, so keep falling.
+            return force
+                ? (viewState.controller.lastConfigurationIssue
+                    ?? "ghostty rejected the terminal configuration")
+                : nil
+        }
+
+        if configurationChanged {
+            viewState.setTerminalConfiguration(compiled.configuration)
+            if let issue = viewState.controller.lastConfigurationIssue { return issue }
+        }
+        if themeChanged {
+            viewState.setTheme(compiled.theme)
+            if let issue = viewState.controller.lastConfigurationIssue { return issue }
+        }
+        return nil
     }
 
     /// Visible-viewport text of this tab's terminal, or `nil` when no

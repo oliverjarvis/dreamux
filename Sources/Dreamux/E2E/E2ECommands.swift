@@ -211,14 +211,22 @@ enum E2ECommands {
                     "attention": attentionName(session.attention),
                     // Bonsplit tab bar summary, in tab-bar order — how a
                     // scenario asserts the pinned Overview tab exists and
-                    // sits first (Task 7) without a screenshot.
+                    // sits first (Task 7) without a screenshot, and where
+                    // each shell actually started.
                     "tabs": session.controller.allTabIds.compactMap { id -> [String: Any]? in
                         guard let tab = session.controller.tab(id) else { return nil }
-                        return [
+                        var entry: [String: Any] = [
                             "title": tab.title,
                             "isOverview": session.isOverviewTab(id),
                             "attention": attentionName(session.attention(forTab: id)),
                         ]
+                        // Only terminal tabs have a TabSession; Overview,
+                        // web, file and diff tabs leave the key absent,
+                        // which is how a scenario picks the shells out.
+                        if let cwd = session.tabSession(for: id)?.cwd {
+                            entry["cwd"] = cwd
+                        }
+                        return entry
                     },
                 ] as [String: Any]
             }

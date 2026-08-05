@@ -122,6 +122,9 @@ final class ProjectSession {
         store.layout = layout
         let repoStore = RepoStore(project: project)
         self.syncStatus = SyncStatusStore(repos: { repoStore.repositories })
+        // Same live-provider shape as SyncStatusStore above: every new
+        // user shell asks this for the worktree it should start in.
+        store.repositories = { [weak repoStore] in repoStore?.repositories ?? [] }
 
         let runConfig = RunConfigStore(project: project)
         let signals = SignalStore()
@@ -222,11 +225,14 @@ final class ProjectSession {
         // Flows spine: cwd→workspace lookup goes through `store` (weakly
         // captured — the store outlives this closure for the bundle's
         // whole life, but the closure must not be what keeps it alive).
-        let projectRoot = project.rootPath
-        let flows = FlowStore(workspaceForCwd: { [weak store] cwd in
+        // `repoStore` is captured the same way and read per call, so a
+        // repo added later resolves without a rewire.
+        let flows = FlowStore(workspaceForCwd: { [weak store, weak repoStore] cwd in
             guard let store else { return nil }
             return FlowWiring.workspaceID(
-                forCwd: cwd, workspaces: store.workspaces, projectRoot: projectRoot
+                forCwd: cwd,
+                workspaces: store.workspaces,
+                repositories: repoStore?.repositories ?? []
             )
         })
 
@@ -438,7 +444,9 @@ final class ProjectSession {
         let isInProject: (String) -> Bool = { [weak self] cwd in
             guard let self else { return false }
             if FlowWiring.workspaceID(
-                forCwd: cwd, workspaces: self.store.workspaces, projectRoot: self.project.rootPath
+                forCwd: cwd,
+                workspaces: self.store.workspaces,
+                repositories: self.repoStore.repositories
             ) != nil { return true }
             let root = self.project.rootPath.path
             return cwd == root || cwd.hasPrefix(root + "/")

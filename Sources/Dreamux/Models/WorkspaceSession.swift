@@ -50,6 +50,22 @@ final class WorkspaceSession {
     /// already see them).
     var isVisible: Bool = false
 
+    /// Live repository list for this workspace's project, injected by
+    /// `WorkspaceStore.session(for:)`. A closure rather than a snapshot
+    /// because it is read at every tab creation: a worktree that appears
+    /// after the workspace was registered is picked up with no refresh
+    /// step. Defaults to empty so a session nobody wired up keeps
+    /// today's behaviour.
+    var repositories: () -> [Repository] = { [] }
+
+    /// Where a new *user* shell starts — the workspace's sole worktree
+    /// when it has exactly one, otherwise `workspace.workingDirectory`.
+    /// See `WorkspaceWorktrees.shellHome` for why the count comes from
+    /// `linkedRepoIDs` and not from disk.
+    private var shellHome: String? {
+        WorkspaceWorktrees.shellHome(for: workspace, in: repositories())
+    }
+
     /// Most recent agent-emitted notification body, surfaced under the
     /// workspace's name in the Work Items rail. Cleared when the user
     /// switches into this workspace (re-entering "reads" the message).
@@ -260,7 +276,12 @@ final class WorkspaceSession {
             return
         }
 
-        let cwd = nextTabCwdOverride ?? workspace.workingDirectory
+        // Agent tabs (plan runs, composer, run-config, idea intake, the
+        // merge UI's conflicted-worktree tab) all set an explicit
+        // override before calling createTab, so they are covered by the
+        // first arm by construction. Everything reaching the second arm
+        // is a shell the USER opened.
+        let cwd = nextTabCwdOverride ?? shellHome
         nextTabCwdOverride = nil
         let session = TabSession(
             cwd: cwd,
