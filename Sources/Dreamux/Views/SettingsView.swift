@@ -218,7 +218,7 @@ struct SettingsView: View {
         } header: {
             Text("Colors & transparency")
         } footer: {
-            Text("Backdrop transparency runs from solid color (0%) to raw desktop glass (100%). Card transparency lets the backdrop show through the content itself — terminal surfaces pick it up when newly opened. Everything else applies immediately.")
+            Text("Backdrop transparency runs from solid color (0%) to raw desktop glass (100%). Card transparency lets the backdrop show through the content itself, terminal surfaces included. Everything applies immediately.")
                 .foregroundStyle(.secondary)
         }
         TerminalThemeSection()
