@@ -18,6 +18,17 @@
         "PreToolUse": { "state": "working" },
         "SessionEnd": { "state": "none" }
       }
+    },
+    {
+      "id": "cursor",
+      "displayName": "Cursor CLI",
+      "binaryNames": ["cursor-agent"],
+      "strategy": "userConfigBlock",
+      "events": {
+        "beforeShellExecution": { "state": "blocked", "reason": "permission" },
+        "stop": { "state": "done" },
+        "start": { "state": "working" }
+      }
     }
   ]
 }

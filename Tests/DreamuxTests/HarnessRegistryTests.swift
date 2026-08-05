@@ -57,6 +57,15 @@ final class HarnessRegistryTests: XCTestCase {
         XCTAssertEqual(HarnessRegistry.load(from: empty).harnesses.map(\.id), ["claude"])
     }
 
+    func testCursorAdapterUsesTheConfigBlockStrategy() throws {
+        let url = repoRoot.appendingPathComponent("Tools/harnesses.json")
+        let catalog = HarnessRegistry.load(from: url)
+        let cursor = try XCTUnwrap(catalog.harnesses.first { $0.id == "cursor" })
+        XCTAssertEqual(cursor.strategy, .userConfigBlock)
+        XCTAssertEqual(cursor.binaryNames, ["cursor-agent"])
+        XCTAssertEqual(cursor.events["beforeShellExecution"]?.state, "blocked")
+    }
+
     /// `@MainActor` because `HarnessRegistry` is: Swift 6 will not let a
     /// nonisolated test call its init or `adapter(id:)`.
     @MainActor

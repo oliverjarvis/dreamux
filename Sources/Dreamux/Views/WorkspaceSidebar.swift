@@ -283,6 +283,10 @@ struct WorkspaceSidebar: View {
                 onPublish: { handlePublishApp($0) }
             )
 
+            // Coding harnesses found on PATH, and the consent toggle for
+            // the ones that need Dreamux to write into their own config.
+            HarnessSection()
+
             // Hairline between the navigation group above (tiles, Applets)
             // and the work sections below — the one deliberate rule in
             // the sidebar.
