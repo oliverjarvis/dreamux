@@ -608,6 +608,7 @@ struct ContentView: View {
     @ViewBuilder
     private var mainPane: some View {
         mainPaneContent
+            .background(pipHost)
             // Always-mounted consumer for run-config handoffs (e2e
             // detect, the isolate alert) — they must work whether or not
             // the services popover is open.
@@ -624,11 +625,70 @@ struct ContentView: View {
                 }))
     }
 
+    /// Owns the live pip panels. The content closure is defined here so
+    /// each panel captures this render's `overviewDependencies` and can
+    /// drive `sidebarMode` when the user reveals a pipped tab.
+    private var pipHost: some View {
+        PipHost(
+            items: session.pips.items,
+            pips: session.pips,
+            makeContent: { item, frame, onDragTo in
+                AnyView(
+                    PipContentView(
+                        target: item.target,
+                        store: store,
+                        projectSession: session,
+                        overview: overviewDependencies,
+                        pips: session.pips,
+                        onReveal: { reveal(item.target) },
+                        frame: frame,
+                        onDragTo: onDragTo,
+                        onTidy: { tidyPips() }
+                    )
+                    .environment(projects)
+                    .dynamicTypeSize(.xLarge)
+                )
+            }
+        )
+    }
+
+    /// Double-clicking a pip's bar: come to the front, go to what it was
+    /// showing, and put it back in the window.
+    private func reveal(_ target: PipTarget) {
+        switch target {
+        case .tab(let workspaceID, let tabID):
+            sidebarMode = .workspace
+            store.activate(workspaceID)
+            if let workspace = store.workspaces.first(where: { $0.id == workspaceID }) {
+                store.session(for: workspace).controller.selectTab(tabID)
+            }
+        case .applet(let id):
+            sidebarMode = .app(id)
+        }
+        session.pips.close(target)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Pack every pip into a column at the corner nearest their centroid.
+    private func tidyPips() {
+        let centroid = session.pips.centroid
+        let screen = (NSScreen.screens.first { $0.frame.contains(centroid) }
+                      ?? NSScreen.main
+                      ?? NSScreen.screens[0]).visibleFrame
+        session.pips.applyTidy(PipLayout.tidy(
+            count: session.pips.items.count,
+            size: PipLayout.defaultSize,
+            screen: screen,
+            centroid: centroid
+        ))
+    }
+
     @ViewBuilder
     private var mainPaneContent: some View {
         switch sidebarMode {
         case .workspace:
-            WorkspaceTerminalContainer(store: store, overview: overviewDependencies)
+            WorkspaceTerminalContainer(
+                store: store, pips: session.pips, overview: overviewDependencies)
         case .signals:
             SignalsView(signals: signals, runners: runners, projectDir: repoStore.project.rootPath.path)
         case .flows:
@@ -683,15 +743,21 @@ struct ContentView: View {
             // The applet's folder is the source of truth: a removed applet
             // resolves to nil here and shows the missing state; the Applets
             // section auto-heals on its next refresh.
-            if let applet = session.applets.applet(id: id) {
+            if session.pips.isPipped(.applet(id: id)) {
+                PipPlaceholderView { session.pips.close(.applet(id: id)) }
+            } else if let applet = session.applets.applet(id: id) {
                 // Key on the applet id so switching from one applet to another
                 // rebuilds the host — the preview is an NSViewRepresentable
                 // whose updateNSView is a no-op, so without a fresh identity
                 // the old session's WKWebView stays parented and only the
                 // header updates (the "content doesn't change until I visit a
                 // workspace" bug).
-                AppletHostView(session: session.appletSession(for: applet))
-                    .id(id)
+                AppletHostView(session: session.appletSession(for: applet)) {
+                    session.pips.open(.applet(id: id), frame: PipLayout.initialFrame(
+                        index: session.pips.items.count,
+                        screen: NSScreen.main?.visibleFrame ?? NSScreen.screens[0].visibleFrame))
+                }
+                .id(id)
             } else {
                 appletMissingState
             }
@@ -1595,6 +1661,22 @@ struct ContentView: View {
                              subtitle: nil, icon: "point.3.connected.trianglepath.dotted") { sidebarMode = .flows },
             PaletteCandidate(id: "command-go-library", title: "Go to Library",
                              subtitle: nil, icon: "books.vertical") { sidebarMode = .library },
+            PaletteCandidate(id: "command-pip-tab", title: "Open in Picture in Picture",
+                             subtitle: nil, icon: "pip.enter") {
+                guard let workspace = store.activeWorkspace,
+                      let pane = store.activeSession?.controller.focusedPaneId,
+                      let tab = store.activeSession?.controller.selectedTab(inPane: pane)
+                else { return }
+                let target = PipTarget.tab(workspaceID: workspace.id, tabID: tab.id)
+                guard !session.pips.isPipped(target) else { return }
+                session.pips.open(target, frame: PipLayout.initialFrame(
+                    index: session.pips.items.count,
+                    screen: NSScreen.main?.visibleFrame ?? NSScreen.screens[0].visibleFrame))
+            },
+            PaletteCandidate(id: "command-pip-bring-all-back", title: "Bring All Pips Back",
+                             subtitle: nil, icon: "pip.exit") { session.pips.closeAll() },
+            PaletteCandidate(id: "command-pip-tidy", title: "Tidy Pips",
+                             subtitle: nil, icon: "rectangle.3.group") { tidyPips() },
         ]
         commands += docStore.plans.map { plan in
             PaletteCandidate(

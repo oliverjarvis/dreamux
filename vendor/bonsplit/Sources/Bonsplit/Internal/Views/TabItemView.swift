@@ -3,9 +3,12 @@ import SwiftUI
 /// Individual tab view with icon, title, close button, and dirty indicator
 struct TabItemView: View {
     let tab: TabItem
+    let paneId: PaneID
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+
+    @Environment(\.tabContextMenu) private var contextMenu
 
     @State private var isHovered = false
     @State private var isCloseHovered = false
@@ -59,6 +62,8 @@ struct TabItemView: View {
                 : tab.isDirty ? "Modified" : ""
         )
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .modifier(TabContextMenuModifier(
+            tab: Tab(from: tab), paneId: paneId, box: contextMenu))
     }
 
     @ViewBuilder
@@ -124,5 +129,21 @@ struct TabItemView: View {
         .frame(width: TabBarMetrics.closeButtonSize, height: TabBarMetrics.closeButtonSize)
         .animation(.easeInOut(duration: TabBarMetrics.hoverDuration), value: isHovered)
         .animation(.easeInOut(duration: TabBarMetrics.hoverDuration), value: isCloseHovered)
+    }
+}
+
+/// Attaches the host's tab context menu, or nothing at all when the host
+/// supplied none.
+private struct TabContextMenuModifier: ViewModifier {
+    let tab: Tab
+    let paneId: PaneID
+    let box: TabContextMenuBox
+
+    func body(content: Content) -> some View {
+        if let builder = box.builder {
+            content.contextMenu { builder(tab, paneId) }
+        } else {
+            content
+        }
     }
 }

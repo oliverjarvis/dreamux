@@ -167,6 +167,7 @@ struct TabBarView<Accessory: View>: View {
     private func tabItem(for tab: TabItem, at index: Int) -> some View {
         TabItemView(
             tab: tab,
+            paneId: PaneID(id: pane.id.id),
             isSelected: pane.selectedTabId == tab.id,
             onSelect: {
                 withAnimation(.easeInOut(duration: TabBarMetrics.selectionDuration)) {

@@ -2134,6 +2134,109 @@ def scenario_idea_intake(d):
     log(f"two live intake sessions in main: {w['intakeTabs']}")
 
 
+def scenario_pips(d):
+    """Picture in picture: a tab moves into a floating panel and keeps
+    running, its chip stays put, minimizing the window hides the panels,
+    tidying lines them up, and closing the tab takes its pip with it.
+
+    Self-contained: launches the app when nothing is connected."""
+    if d.sock is None:
+        d.launch_app()
+
+        def project_window_up():
+            state = d.state()
+            active = state.get("activeProject")
+            return active and active.get("name") == PROJECT_NAME
+        d.wait_until(project_window_up, 30.0, f"project window for {PROJECT_NAME}")
+
+    def active_workspace():
+        for w in d.state()["workspaces"]:
+            if w.get("isActive"):
+                return w
+        return d.state()["workspaces"][0]
+
+    # Bootstrap the workspace panes before asking for a tab by name. Tabs
+    # are created by `WorkspaceSession.bootstrapIfNeeded`, which only runs
+    # from `WorkspaceTerminalContainer`'s `onAppear` — and the scenario
+    # before this one relaunches the app onto a non-workspace surface, so
+    # without this every workspace reports zero tabs.
+    d.cmd("setSidebarMode", mode="workspace")
+
+    def tabs_ready():
+        return "shell" in [t["title"] for t in active_workspace().get("tabs", [])]
+    d.wait_until(tabs_ready, 15.0, "workspace tabs bootstrapped")
+
+    require(not d.state().get("pips"), "this scenario expects no pips yet")
+
+    # --- Pip a shell tab ---------------------------------------------------
+    d.cmd("pipOpen", title="shell")
+
+    def one_pip():
+        return len(d.state().get("pips", [])) == 1
+    d.wait_until(one_pip, 10.0, "one pip open")
+
+    pip = d.state()["pips"][0]
+    require(pip["kind"] == "tab", f"expected a tab pip: {pip}")
+    require(pip["isVisible"], "a freshly opened pip must be on screen")
+
+    # The chip stays in the tab bar — a pip is a move, not a close.
+    titles = [t["title"] for t in active_workspace()["tabs"]]
+    require("shell" in titles, f"the pipped tab's chip must remain: {titles}")
+    log("pipped 'shell'; its chip stayed in the tab bar")
+
+    # --- A pipped terminal is still live -----------------------------------
+    # The Overview tab is pinned and non-closable, so pip it too and
+    # confirm two panels coexist.
+    d.cmd("pipOpen", title="Overview")
+    d.wait_until(lambda: len(d.state().get("pips", [])) == 2, 10.0, "two pips open")
+
+    # --- Tidy lines them up ------------------------------------------------
+    d.cmd("pipTidy")
+
+    def tidied():
+        pips = d.state().get("pips", [])
+        if len(pips) != 2:
+            return False
+        xs = {round(p["frame"]["x"]) for p in pips}
+        return len(xs) == 1
+    d.wait_until(tidied, 10.0, "tidied pips share one column")
+    ys = sorted(round(p["frame"]["y"]) for p in d.state()["pips"])
+    require(ys[0] != ys[1], f"tidied pips must not overlap: {ys}")
+    log(f"tidy produced a single column at y={ys}")
+    d.screenshot("pips-tidied")
+
+    # --- Minimize hides them, restore brings them back ---------------------
+    frames_before = {p["title"]: p["frame"] for p in d.state()["pips"]}
+    d.cmd("setWindowMiniaturized", miniaturized=True)
+    d.wait_until(lambda: all(not p["isVisible"] for p in d.state()["pips"]),
+                 10.0, "pips hidden while minimized")
+
+    d.cmd("setWindowMiniaturized", miniaturized=False)
+    d.wait_until(lambda: all(p["isVisible"] for p in d.state()["pips"]),
+                 10.0, "pips restored after deminiaturize")
+    frames_after = {p["title"]: p["frame"] for p in d.state()["pips"]}
+    require(frames_before == frames_after,
+            f"pips must return to exactly where they were: {frames_before} -> {frames_after}")
+    log("minimize hid the pips and restoring put them back in place")
+
+    # --- Bringing one back leaves the tab alive ----------------------------
+    d.cmd("pipClose", title="shell")
+    d.wait_until(lambda: len(d.state().get("pips", [])) == 1, 10.0, "one pip left")
+    titles = [t["title"] for t in active_workspace()["tabs"]]
+    require("shell" in titles, f"closing a pip must never close its tab: {titles}")
+
+    # --- Closing the tab takes its pip with it -----------------------------
+    d.cmd("pipOpen", title="shell")
+    d.wait_until(lambda: len(d.state().get("pips", [])) == 2, 10.0, "shell pipped again")
+    d.cmd("closeTab", title="shell")
+    d.wait_until(lambda: len(d.state().get("pips", [])) == 1, 15.0,
+                 "closing the tab closed its pip")
+    log("closing a pipped tab closed its pip")
+
+    d.cmd("pipClose", title="Overview")
+    d.wait_until(lambda: not d.state().get("pips"), 10.0, "all pips returned")
+
+
 def scenario_shell_cwd(d):
     """A new user shell in a SINGLE-repo workspace starts inside that
     repo's worktree, not at the feature aggregation directory -- and the
@@ -2210,6 +2313,7 @@ SCENARIOS = [
     ("idea-intake", scenario_idea_intake),
     ("applets", scenario_applets),
     ("connections", scenario_connections),
+    ("pips", scenario_pips),
     ("shell-cwd", scenario_shell_cwd),
     ("attention", scenario_attention),
     ("quit", scenario_quit),

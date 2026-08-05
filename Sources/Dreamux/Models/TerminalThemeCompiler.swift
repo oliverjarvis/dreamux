@@ -31,9 +31,13 @@ enum TerminalThemeCompiler {
     /// SwiftUI command menu. `unbind` removes the binding so the event
     /// bubbles up to AppKit and fires Cmd+T / Cmd+D / Cmd+W (`=ignore`
     /// would keep a no-op binding that still swallows the event).
+    ///
+    /// `p` and `g` joined the list for the pip shortcuts (⌥⌘P, ⌥⌘G) —
+    /// defensively, since a future ghostty release binding them would
+    /// silently swallow the menu items.
     static func invariantLines() -> [(key: String, value: String)] {
         var lines: [(key: String, value: String)] = []
-        for key in ["t", "n", "d", "w", "q"] {
+        for key in ["t", "n", "d", "w", "q", "p", "g"] {
             lines.append(("keybind", "super+\(key)=unbind"))
             lines.append(("keybind", "shift+super+\(key)=unbind"))
             lines.append(("keybind", "alt+super+\(key)=unbind"))

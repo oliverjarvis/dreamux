@@ -88,6 +88,7 @@ struct DreamuxApp: App {
             ProjectCommands()
             FileExplorerCommands()
             PaletteCommands()
+            PipCommands()
             PrintCommandRemoval()
             IntegrationCommands()
             NotificationCommands()
@@ -203,6 +204,58 @@ private struct FileExplorerCommands: Commands {
             }
             .keyboardShortcut("e", modifiers: [.option, .command])
             .disabled(fileTreeVisible == nil)
+        }
+    }
+}
+
+/// Pip actions. Same `.commands` + `@FocusedValue` bridge as
+/// `FileExplorerCommands`: these must fire while a Ghostty terminal is
+/// first responder, and menu key equivalents are resolved ahead of the
+/// responder chain.
+///
+/// Known limit: an `NSPanel` never becomes the MAIN window and pip panels
+/// live outside the SwiftUI scene, so while a pip is key these items may
+/// disable. That is why `PipChromeView` carries the same three actions in
+/// its own right-click menu.
+private struct PipCommands: Commands {
+    @FocusedValue(\.activePips) private var pips: PipController?
+    @FocusedValue(\.activeStore) private var store: WorkspaceStore?
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Button("Open in Picture in Picture") {
+                guard let pips, let session = store?.activeSession,
+                      let workspaceID = store?.activeWorkspace?.id,
+                      let pane = session.controller.focusedPaneId,
+                      let tab = session.controller.selectedTab(inPane: pane) else { return }
+                let target = PipTarget.tab(workspaceID: workspaceID, tabID: tab.id)
+                guard !pips.isPipped(target) else { return }
+                let screen = NSApp.mainWindow?.screen?.visibleFrame
+                    ?? NSScreen.main?.visibleFrame
+                    ?? NSScreen.screens[0].visibleFrame
+                pips.open(target, frame: PipLayout.initialFrame(
+                    index: pips.items.count, screen: screen))
+            }
+            .keyboardShortcut("p", modifiers: [.option, .command])
+            .disabled(pips == nil || store == nil)
+
+            Button("Bring All Pips Back") {
+                pips?.closeAll()
+            }
+            .disabled(pips?.items.isEmpty ?? true)
+
+            Button("Tidy Pips") {
+                guard let pips else { return }
+                let centroid = pips.centroid
+                let screen = (NSScreen.screens.first { $0.frame.contains(centroid) }
+                              ?? NSScreen.main
+                              ?? NSScreen.screens[0]).visibleFrame
+                pips.applyTidy(PipLayout.tidy(
+                    count: pips.items.count, size: PipLayout.defaultSize,
+                    screen: screen, centroid: centroid))
+            }
+            .keyboardShortcut("g", modifiers: [.option, .command])
+            .disabled(pips?.items.isEmpty ?? true)
         }
     }
 }

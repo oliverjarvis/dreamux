@@ -50,6 +50,15 @@ final class WorkspaceStore {
     /// must wait for this rather than racing the async discovery.
     private(set) var didLoadFeatures = false
 
+    /// Fired the first time a workspace's session is built. Sessions are
+    /// created lazily, so this is the only place an owner can reach every
+    /// one of them to attach per-session hooks. Set by `ProjectSession`.
+    var onSessionCreated: ((WorkspaceSession) -> Void)?
+
+    /// Fired after a workspace leaves `workspaces`, so the owner can drop
+    /// anything keyed to it — today, its pips. Set by `ProjectSession`.
+    var onWorkspaceRemoved: ((UUID) -> Void)?
+
     init(defaultWorkingDirectory: String? = nil) {
         self.defaultWorkingDirectory = defaultWorkingDirectory
         // Work items are now created under repos; new projects start
@@ -67,6 +76,7 @@ final class WorkspaceStore {
         // `self` here would be a retain cycle.
         session.repositories = { [weak self] in self?.repositories() ?? [] }
         sessions[workspace.id] = session
+        onSessionCreated?(session)
         if workspace.id == activeID {
             session.didBecomeVisible()
         }
@@ -333,6 +343,7 @@ final class WorkspaceStore {
         sessions[workspace.id]?.stop()
         sessions.removeValue(forKey: workspace.id)
         workspaces.removeAll { $0.id == workspace.id }
+        onWorkspaceRemoved?(workspace.id)
         if activeID == workspace.id {
             // Promote the most recently-added remaining workspace if
             // any; otherwise the window goes empty (handled by the

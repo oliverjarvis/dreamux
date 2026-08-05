@@ -50,6 +50,10 @@ final class WorkspaceSession {
     /// already see them).
     var isVisible: Bool = false
 
+    /// Fired after a tab is closed, so the owner can tear down anything
+    /// keyed to it — today, its pip. Set by `ProjectSession`.
+    var onTabClosed: ((TabID) -> Void)?
+
     /// Live repository list for this workspace's project, injected by
     /// `WorkspaceStore.session(for:)`. A closure rather than a snapshot
     /// because it is read at every tab creation: a worktree that appears
@@ -322,6 +326,7 @@ final class WorkspaceSession {
         if agentTabID == tabId { agentTabID = nil }
         if runConfigTabID == tabId { runConfigTabID = nil }
         if composerTabID == tabId { composerTabID = nil }
+        onTabClosed?(tabId)
     }
 
     private func handleDidSplitPane(newPane: PaneID) {

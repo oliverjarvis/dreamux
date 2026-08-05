@@ -18,6 +18,11 @@ import Observation
 final class ProjectSession {
     let project: Project
     let store: WorkspaceStore
+    /// Open picture-in-picture panels for this project window. Lives here
+    /// (not on `WorkspaceStore`) because pips span both workspaces and
+    /// applets, and because these bundles die with the window — which is
+    /// exactly the pip lifetime we want.
+    let pips: PipController
     let repoStore: RepoStore
     let layout: SidebarLayoutStore
     let runConfig: RunConfigStore
@@ -120,6 +125,16 @@ final class ProjectSession {
         let layout = SidebarLayoutStore(project: project)
         let store = WorkspaceStore(defaultWorkingDirectory: project.rootPath.path)
         store.layout = layout
+        self.pips = PipController(chip: PipChipMarker.make(store: store))
+        // Sessions are built lazily, so this hook is the only place every
+        // one of them can be reached; a tab closing must take its pip with
+        // it, and a removed workspace must take all of its pips.
+        store.onSessionCreated = { [pips] session in
+            session.onTabClosed = { [weak pips] tabID in pips?.close(tabID: tabID) }
+        }
+        store.onWorkspaceRemoved = { [weak pips] workspaceID in
+            pips?.closeAll(inWorkspace: workspaceID)
+        }
         let repoStore = RepoStore(project: project)
         self.syncStatus = SyncStatusStore(repos: { repoStore.repositories })
         // Same live-provider shape as SyncStatusStore above: every new
@@ -796,6 +811,9 @@ final class ProjectSession {
     /// folder is removed so the hot-reload poller and any builder agent stop
     /// first (`AppletSession.stopAgent`).
     func closeAppletSession(id: UUID) {
+        // Close its pip FIRST, so a live panel never outlives the webview
+        // it hosts.
+        pips.close(appletID: id)
         // Resolve any in-flight `connections.request` await first, so the
         // stored CheckedContinuation isn't deallocated unresumed (a runtime
         // "leaked its continuation" warning). No-op when none is pending.
