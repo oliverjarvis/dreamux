@@ -63,7 +63,18 @@ let package = Package(
         // files while preserving exact bytes (CRLF cases, etc.).
         .testTarget(
             name: "DreamuxTests",
-            dependencies: ["Dreamux"],
+            dependencies: [
+                "Dreamux",
+                // The raw C API, TEST-ONLY: GhosttyConfigAcceptanceTests
+                // loads rendered configs through ghostty_config_load_file
+                // and reads ghostty's live defaults with
+                // ghostty_config_get, so a libghostty bump that renames a
+                // key or moves a default color fails CI instead of
+                // silently reverting the user's theme. The app target must
+                // NOT gain this dependency — app code reaches ghostty only
+                // through GhosttyTerminal's typed wrapper.
+                .product(name: "GhosttyKit", package: "libghostty-spm"),
+            ],
             path: "Tests/DreamuxTests",
             exclude: ["Fixtures"]
         ),
