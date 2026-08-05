@@ -22,6 +22,7 @@ final class WorkspaceSession {
     /// so an unsaved file shows the dirty indicator (mirrors how
     /// `titleObservers` propagates terminal titles).
     private var fileDirtyObservers: [TabID: FileTabDirtyObserver] = [:]
+    private var attentionObservers: [TabID: TabAttentionObserver] = [:]
     /// Read-only Monaco diff tabs, keyed by the same Bonsplit tab ids as
     /// the other three maps — a tab id appears in exactly one of the
     /// four maps.
@@ -275,6 +276,11 @@ final class WorkspaceSession {
             tabSession: session,
             controller: controller
         )
+        attentionObservers[tab.id] = TabAttentionObserver(
+            tabId: tab.id,
+            session: session,
+            controller: controller
+        )
     }
 
     private func handleDidCloseTab(_ tabId: TabID) {
@@ -283,6 +289,7 @@ final class WorkspaceSession {
         webTabSessions.removeValue(forKey: tabId)
         fileTabSessions.removeValue(forKey: tabId)
         fileDirtyObservers.removeValue(forKey: tabId)
+        attentionObservers.removeValue(forKey: tabId)
         diffTabSessions.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
         intakeTabIDs.remove(tabId)
@@ -696,6 +703,54 @@ private final class TitleObserver {
     private func fire() {
         guard let tabSession, let controller else { return }
         controller.updateTab(tabId, title: tabSession.title)
+        arm()
+    }
+}
+
+// MARK: - Tab attention
+
+extension TabAttention {
+    /// The chip shows *that* a tab is blocked, not *why* — the reason
+    /// belongs in the banner and the tab itself, where there is room
+    /// for it.
+    init(_ attention: AgentAttention) {
+        switch attention {
+        case .none: self = .none
+        case .working: self = .working
+        case .done: self = .done
+        case .blocked: self = .blocked
+        }
+    }
+}
+
+/// Re-arms `withObservationTracking` so a tab's agent attention flows
+/// back into the Bonsplit controller and lights the chip's dot. Same
+/// shape as `FileTabDirtyObserver`.
+@MainActor
+private final class TabAttentionObserver {
+    private let tabId: TabID
+    private weak var session: TabSession?
+    private weak var controller: BonsplitController?
+
+    init(tabId: TabID, session: TabSession, controller: BonsplitController) {
+        self.tabId = tabId
+        self.session = session
+        self.controller = controller
+        arm()
+    }
+
+    private func arm() {
+        guard let session else { return }
+        withObservationTracking {
+            _ = session.attention
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.fire() }
+        }
+    }
+
+    private func fire() {
+        guard let session, let controller else { return }
+        controller.updateTab(tabId, attention: TabAttention(session.attention))
         arm()
     }
 }
