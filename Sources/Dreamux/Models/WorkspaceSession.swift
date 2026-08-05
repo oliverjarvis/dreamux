@@ -22,6 +22,7 @@ final class WorkspaceSession {
     /// so an unsaved file shows the dirty indicator (mirrors how
     /// `titleObservers` propagates terminal titles).
     private var fileDirtyObservers: [TabID: FileTabDirtyObserver] = [:]
+    private var attentionObservers: [TabID: TabAttentionObserver] = [:]
     /// Read-only Monaco diff tabs, keyed by the same Bonsplit tab ids as
     /// the other three maps — a tab id appears in exactly one of the
     /// four maps.
@@ -52,6 +53,22 @@ final class WorkspaceSession {
     /// Fired after a tab is closed, so the owner can tear down anything
     /// keyed to it — today, its pip. Set by `ProjectSession`.
     var onTabClosed: ((TabID) -> Void)?
+
+    /// Live repository list for this workspace's project, injected by
+    /// `WorkspaceStore.session(for:)`. A closure rather than a snapshot
+    /// because it is read at every tab creation: a worktree that appears
+    /// after the workspace was registered is picked up with no refresh
+    /// step. Defaults to empty so a session nobody wired up keeps
+    /// today's behaviour.
+    var repositories: () -> [Repository] = { [] }
+
+    /// Where a new *user* shell starts — the workspace's sole worktree
+    /// when it has exactly one, otherwise `workspace.workingDirectory`.
+    /// See `WorkspaceWorktrees.shellHome` for why the count comes from
+    /// `linkedRepoIDs` and not from disk.
+    private var shellHome: String? {
+        WorkspaceWorktrees.shellHome(for: workspace, in: repositories())
+    }
 
     /// Most recent agent-emitted notification body, surfaced under the
     /// workspace's name in the Work Items rail. Cleared when the user
@@ -263,7 +280,12 @@ final class WorkspaceSession {
             return
         }
 
-        let cwd = nextTabCwdOverride ?? workspace.workingDirectory
+        // Agent tabs (plan runs, composer, run-config, idea intake, the
+        // merge UI's conflicted-worktree tab) all set an explicit
+        // override before calling createTab, so they are covered by the
+        // first arm by construction. Everything reaching the second arm
+        // is a shell the USER opened.
+        let cwd = nextTabCwdOverride ?? shellHome
         nextTabCwdOverride = nil
         let session = TabSession(
             cwd: cwd,
@@ -279,6 +301,16 @@ final class WorkspaceSession {
             tabSession: session,
             controller: controller
         )
+        attentionObservers[tab.id] = TabAttentionObserver(
+            tabId: tab.id,
+            workspaceName: workspace.name,
+            workspaceID: workspace.id,
+            // Per-harness display name lands in Task 14, when a tab can
+            // report which harness is actually running in it.
+            harnessDisplayName: HarnessRegistry.shared.adapter(id: "claude")?.displayName ?? "Agent",
+            session: session,
+            controller: controller
+        )
     }
 
     private func handleDidCloseTab(_ tabId: TabID) {
@@ -287,6 +319,7 @@ final class WorkspaceSession {
         webTabSessions.removeValue(forKey: tabId)
         fileTabSessions.removeValue(forKey: tabId)
         fileDirtyObservers.removeValue(forKey: tabId)
+        attentionObservers.removeValue(forKey: tabId)
         diffTabSessions.removeValue(forKey: tabId)
         titleObservers.removeValue(forKey: tabId)
         intakeTabIDs.remove(tabId)
@@ -305,10 +338,10 @@ final class WorkspaceSession {
         // attention badge. Other tabs in this workspace, and other
         // workspaces, keep theirs.
         if isVisible {
-            tabSessions[tab.id]?.hasUnread = false
-            // If no other tab in this workspace still has unread, the
+            tabSessions[tab.id]?.acknowledgeIfDone()
+            // If nothing in this workspace still wants the user, the
             // rail subtitle has been "read" too — wipe it.
-            if !anyTabHasUnread {
+            if attention == .none {
                 lastActivityMessage = nil
             }
             // Bonsplit's select doesn't touch AppKit's responder chain —
@@ -359,8 +392,15 @@ final class WorkspaceSession {
 
     // MARK: - Activity / unread
 
-    var anyTabHasUnread: Bool {
-        tabSessions.values.contains { $0.hasUnread }
+    /// The loudest thing any of this workspace's tabs wants.
+    var attention: AgentAttention {
+        AttentionAggregate.combine(tabSessions.values.map(\.attention))
+    }
+
+    /// One tab's attention. Non-terminal tabs (Overview, browser, file,
+    /// diff) have no agent in them and are always quiet. E2E readback.
+    func attention(forTab id: TabID) -> AgentAttention {
+        tabSessions[id]?.attention ?? .none
     }
 
     /// True when every terminal tab's shell has been silent for at
@@ -579,7 +619,7 @@ final class WorkspaceSession {
     /// terminal so the user can start typing immediately.
     func didBecomeVisible() {
         isVisible = true
-        clearActiveTabUnread()
+        acknowledgeWorkspace()
         // Re-entering the workspace counts as "reading" the most recent
         // notification, so wipe the rail subtitle too.
         lastActivityMessage = nil
@@ -590,46 +630,76 @@ final class WorkspaceSession {
         isVisible = false
     }
 
-    private func clearActiveTabUnread() {
-        guard let pane = controller.focusedPaneId,
-              let tab = controller.selectedTab(inPane: pane) else { return }
-        tabSessions[tab.id]?.hasUnread = false
+    /// Visiting the workspace acknowledges every finished turn in it, not
+    /// just the selected tab's. A `done` on a tab you never select would
+    /// otherwise keep the sidebar dot lit forever — the agent tab is
+    /// rarely the selected one, since Overview is pinned leftmost and
+    /// selected by default. Blocks are untouched: `acknowledgeIfDone()`
+    /// only clears `.done`, which is the whole point of the split.
+    private func acknowledgeWorkspace() {
+        for tab in tabSessions.values { tab.acknowledgeIfDone() }
     }
 
     fileprivate func handleActivity(tabId: TabID, message: String?) {
         guard let tab = tabSessions[tabId] else { return }
 
-        // Always badge — the user wants the red dot whenever a
-        // notification arrives, even if they happen to be on this
-        // workspace's active tab. Acknowledgement is explicit: clicking
-        // the workspace row, switching tabs, or switching workspaces.
-        tab.hasUnread = true
-
         // Bare BEL (`\a`) is rung by zsh, tab-completion, error tones, and
         // most CLI agents during normal operation — useless as a "the
-        // agent wants me" signal. Only fire a macOS banner / subtitle
-        // when the agent has *explicitly* sent a notification via OSC 9
-        // or OSC 777 ; notify which carries a real message.
-        guard let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
-        }
+        // agent wants me" signal, and it no longer badges anything.
+        // Adapted harnesses report state through the `agent-state`
+        // control OSC; an OSC 9 body from something we have no adapter
+        // for is still worth a `done`.
+        guard let message,
+              !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
 
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         lastActivityMessage = trimmed
-
-        NotificationManager.shared.notifyActivity(
-            workspaceName: workspace.name,
-            tabId: tab.id,
-            tabTitle: tab.title,
-            message: trimmed
-        )
+        tab.attentionState.noteNotification(trimmed)
     }
 
-    /// Explicit user acknowledgement — clears the badge on the active
-    /// tab and wipes the rail subtitle. Called by the store when the
-    /// user clicks an already-active workspace row.
+    /// Apply a banner interaction to the tab it names. Selects that tab
+    /// either way; the Approve/Deny paths go through
+    /// `NotificationRouter`, which refuses to type when the prompt has
+    /// moved on.
+    func applyNotificationRoute(_ route: NotificationRoute) {
+        guard let entry = tabSessions.first(where: { $0.value.id == route.tabID })
+        else { return }
+        let tab = entry.value
+        let message = tab.attention.message ?? ""
+        let outcome = NotificationRouter.resolve(
+            route: route,
+            attention: tab.attention,
+            approve: PromptKeystrokeRecipes.permissionRecipe(forNotification: message),
+            deny: PromptKeystrokeRecipes.permissionDenyRecipe(forNotification: message)
+        )
+        controller.selectTab(entry.key)
+        switch outcome {
+        case .focus:
+            break
+        case .dismiss:
+            tab.dismissAttention()
+        case .send(let keystroke):
+            // Composes with the binding check that already governs every
+            // programmatic write into a tab.
+            guard tab.binding.isBound else { break }
+            tab.send(keystroke)
+        }
+    }
+
+    /// Explicit user acknowledgement — clicking an already-active
+    /// workspace row. Acknowledges every finished turn in the workspace,
+    /// exactly as arriving at it does, and additionally dismisses the
+    /// tab the user is actually looking at outright, block included:
+    /// that tab is the one the gesture is unambiguously about. A block
+    /// on some other tab survives — only the harness, or a dismiss while
+    /// on that tab, clears it.
     func dismissActivity() {
-        clearActiveTabUnread()
+        acknowledgeWorkspace()
+        if let pane = controller.focusedPaneId,
+           let tab = controller.selectedTab(inPane: pane) {
+            tabSessions[tab.id]?.dismissAttention()
+        }
         lastActivityMessage = nil
     }
 }
@@ -708,6 +778,77 @@ private final class TitleObserver {
     private func fire() {
         guard let tabSession, let controller else { return }
         controller.updateTab(tabId, title: tabSession.title)
+        arm()
+    }
+}
+
+// MARK: - Tab attention
+
+extension TabAttention {
+    /// The chip shows *that* a tab is blocked, not *why* — the reason
+    /// belongs in the banner and the tab itself, where there is room
+    /// for it.
+    init(_ attention: AgentAttention) {
+        switch attention {
+        case .none: self = .none
+        case .working: self = .working
+        case .done: self = .done
+        case .blocked: self = .blocked
+        }
+    }
+}
+
+/// Re-arms `withObservationTracking` so a tab's agent attention flows
+/// back into the Bonsplit controller and lights the chip's dot. Same
+/// shape as `FileTabDirtyObserver`.
+@MainActor
+private final class TabAttentionObserver {
+    private let tabId: TabID
+    private let workspaceName: String
+    private let workspaceID: UUID
+    private let harnessDisplayName: String
+    private weak var session: TabSession?
+    private weak var controller: BonsplitController?
+
+    init(
+        tabId: TabID,
+        workspaceName: String,
+        workspaceID: UUID,
+        harnessDisplayName: String,
+        session: TabSession,
+        controller: BonsplitController
+    ) {
+        self.tabId = tabId
+        self.workspaceName = workspaceName
+        self.workspaceID = workspaceID
+        self.harnessDisplayName = harnessDisplayName
+        self.session = session
+        self.controller = controller
+        arm()
+    }
+
+    private func arm() {
+        guard let session else { return }
+        withObservationTracking {
+            _ = session.attention
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.fire() }
+        }
+    }
+
+    private func fire() {
+        guard let session, let controller else { return }
+        controller.updateTab(tabId, attention: TabAttention(session.attention))
+        NotificationManager.shared.notify(
+            workspaceName: workspaceName,
+            workspaceID: workspaceID,
+            tabID: session.id,
+            tabTitle: session.title,
+            harnessDisplayName: harnessDisplayName,
+            attention: session.attention,
+            hasVerifiedPermissionRecipe: PromptKeystrokeRecipes
+                .permissionRecipe(forNotification: session.attention.message ?? "") != nil
+        )
         arm()
     }
 }

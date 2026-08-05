@@ -244,6 +244,22 @@ struct WorkspaceSidebar: View {
         // original 18pt-plus-2pt-headers rhythm — the padding moved into
         // the rows when headers gained the tile-style hover pill.
         VStack(alignment: .leading, spacing: 6) {
+            // Banners cannot be delivered — say so here rather than in a
+            // log line nobody reads. Tapping opens the System Settings
+            // pane where it gets fixed.
+            if let text = NotificationManager.shared.health.bannerText {
+                Button(action: { NotificationManager.shared.openSystemNotificationSettings() }) {
+                    Text(text)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+            }
+
             // Pinned destinations — roomy, readable rows, not a cramped
             // list.
             VStack(spacing: 3) {
@@ -266,6 +282,10 @@ struct WorkspaceSidebar: View {
                 onRemove: { handleRemoveApp($0) },
                 onPublish: { handlePublishApp($0) }
             )
+
+            // Coding harnesses found on PATH, and the consent toggle for
+            // the ones that need Dreamux to write into their own config.
+            HarnessSection()
 
             // Hairline between the navigation group above (tiles, Applets)
             // and the work sections below — the one deliberate rule in
@@ -307,7 +327,7 @@ struct WorkspaceSidebar: View {
                 hasUnread: { name in
                     guard let workspace = store.featureWorkspace(named: name)
                     else { return false }
-                    return store.hasUnread(for: workspace)
+                    return store.attention(for: workspace).isBlocked
                 },
                 runners: runners,
                 workspaceForFeature: { name in
@@ -575,8 +595,8 @@ struct WorkspaceSidebar: View {
                 .font(.callout.weight(isActive ? .semibold : .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1).truncationMode(.tail)
-            if store.hasUnread(for: workspace) {
-                Circle().fill(Color.red).frame(width: 5, height: 5)
+            if let glyph = AttentionGlyph(store.attention(for: workspace)) {
+                AttentionDot(glyph: glyph)
             }
         }
     }
@@ -765,6 +785,11 @@ struct WorkspaceSidebar: View {
                 mainWorktreeIssue = "Couldn't check out "
                     + issues.joined(separator: "; ")
             }
+            // The only place default-branch worktrees are created — and
+            // `main` is the workspace whose shell benefits most from
+            // being equipped. Runs unconditionally: worktrees that
+            // already existed still need the pass, and it is idempotent.
+            WorktreeEnvironment.reconcile(projectRoot: repoStore.project.rootPath)
         }
     }
 

@@ -150,6 +150,42 @@ final class BonsplitTests: XCTestCase {
         let box = TabContextMenuBox { tab, _ in AnyView(Text(tab.title)) }
         XCTAssertNotNil(box.builder)
     }
+
+    @MainActor
+    func testTabAttentionDefaultsToNoneAndRoundTrips() throws {
+        let controller = BonsplitController()
+        let tabId = try XCTUnwrap(controller.createTab(title: "shell"))
+        // Spelled out: against an Optional, a bare `.none` resolves to
+        // `Optional.none` (nil), not `TabAttention.none`.
+        XCTAssertEqual(controller.tab(tabId)?.attention, TabAttention.none)
+
+        controller.updateTab(tabId, attention: .blocked)
+        XCTAssertEqual(controller.tab(tabId)?.attention, .blocked)
+
+        controller.updateTab(tabId, attention: .done)
+        XCTAssertEqual(controller.tab(tabId)?.attention, .done)
+    }
+
+    @MainActor
+    func testUpdatingAttentionLeavesOtherFieldsAlone() throws {
+        let controller = BonsplitController()
+        let tabId = try XCTUnwrap(
+            controller.createTab(title: "shell", icon: "terminal", isDirty: true)
+        )
+        controller.updateTab(tabId, attention: .blocked)
+        let tab = try XCTUnwrap(controller.tab(tabId))
+        XCTAssertEqual(tab.title, "shell")
+        XCTAssertEqual(tab.icon, "terminal")
+        XCTAssertTrue(tab.isDirty)
+        XCTAssertEqual(tab.attention, .blocked)
+    }
+
+    @MainActor
+    func testCreateTabAcceptsAnInitialAttention() throws {
+        let controller = BonsplitController()
+        let tabId = try XCTUnwrap(controller.createTab(title: "shell", attention: .working))
+        XCTAssertEqual(controller.tab(tabId)?.attention, .working)
+    }
 }
 
 @MainActor

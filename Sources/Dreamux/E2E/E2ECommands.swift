@@ -217,15 +217,26 @@ enum E2ECommands {
                     // port.
                     "webTabs": session.webTabURLs.map(\.absoluteString),
                     "fileTabs": session.fileTabSummaries,
+                    // The loudest thing any tab in this workspace wants.
+                    "attention": attentionName(session.attention),
                     // Bonsplit tab bar summary, in tab-bar order — how a
                     // scenario asserts the pinned Overview tab exists and
-                    // sits first (Task 7) without a screenshot.
+                    // sits first (Task 7) without a screenshot, and where
+                    // each shell actually started.
                     "tabs": session.controller.allTabIds.compactMap { id -> [String: Any]? in
                         guard let tab = session.controller.tab(id) else { return nil }
-                        return [
+                        var entry: [String: Any] = [
                             "title": tab.title,
                             "isOverview": session.isOverviewTab(id),
+                            "attention": attentionName(session.attention(forTab: id)),
                         ]
+                        // Only terminal tabs have a TabSession; Overview,
+                        // web, file and diff tabs leave the key absent,
+                        // which is how a scenario picks the shells out.
+                        if let cwd = session.tabSession(for: id)?.cwd {
+                            entry["cwd"] = cwd
+                        }
+                        return entry
                     },
                 ] as [String: Any]
             }
@@ -351,6 +362,17 @@ enum E2ECommands {
         // observable evidence that play surfaced the right URL.
         payload["openedTargets"] = handles.runners?.openedTargets ?? []
         return payload
+    }
+
+    /// Stable wire names for the e2e snapshot — "none" / "working" /
+    /// "done" / "blocked".
+    private static func attentionName(_ attention: AgentAttention) -> String {
+        switch attention {
+        case .none: return "none"
+        case .working: return "working"
+        case .done: return "done"
+        case .blocked: return "blocked"
+        }
     }
 
     private static func sidebarModeName(_ mode: SidebarMode) -> String {

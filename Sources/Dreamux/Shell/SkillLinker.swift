@@ -62,7 +62,14 @@ enum SkillLinker {
             guard FileManager.default.fileExists(
                 atPath: repoDir.appendingPathComponent(".bare").path)
             else { continue }
-            updateExcludeFile(repoRoot: repoDir, skills: skills)
+            // Leading "/" anchors each pattern to the worktree root.
+            GitExcludeBlock.update(
+                repoRoot: repoDir,
+                startMarker: excludeBlockStart,
+                endMarker: excludeBlockEnd,
+                patterns: skills.flatMap { skill in
+                    ["/.agents/skills/\(skill)", "/.claude/skills/\(skill)"]
+                })
             for worktree in Repository(rootURL: repoDir).worktrees {
                 reconcile(worktree: worktree, projectRoot: projectRoot,
                           skills: skills, report: &report)
@@ -181,46 +188,6 @@ enum SkillLinker {
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? ["x"]
         if contents.isEmpty {
             try? FileManager.default.removeItem(at: dir)
-        }
-    }
-
-    // MARK: - Exclude management
-
-    /// Rewrite the managed block in `<repo>/.bare/info/exclude`. Git
-    /// reads the common dir's info/exclude for every worktree, so one
-    /// file per repo covers them all — and it's local-only, so tracked
-    /// files never change.
-    private static func updateExcludeFile(repoRoot: URL, skills: [String]) {
-        let infoDir = repoRoot.appendingPathComponent(".bare/info", isDirectory: true)
-        let excludeURL = infoDir.appendingPathComponent("exclude")
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: repoRoot.appendingPathComponent(".bare").path) else { return }
-        try? fm.createDirectory(at: infoDir, withIntermediateDirectories: true)
-
-        let existing = (try? String(contentsOf: excludeURL, encoding: .utf8)) ?? ""
-        var kept: [String] = []
-        var inBlock = false
-        for line in existing.components(separatedBy: "\n") {
-            if line == excludeBlockStart { inBlock = true; continue }
-            if line == excludeBlockEnd { inBlock = false; continue }
-            if !inBlock { kept.append(line) }
-        }
-        while kept.last?.isEmpty == true { kept.removeLast() }
-
-        var output = kept
-        if !skills.isEmpty {
-            if !output.isEmpty { output.append("") }
-            output.append(excludeBlockStart)
-            for skill in skills {
-                // Leading "/" anchors the pattern to the worktree root.
-                output.append("/.agents/skills/\(skill)")
-                output.append("/.claude/skills/\(skill)")
-            }
-            output.append(excludeBlockEnd)
-        }
-        let text = output.joined(separator: "\n") + "\n"
-        if text != existing {
-            try? text.write(to: excludeURL, atomically: true, encoding: .utf8)
         }
     }
 

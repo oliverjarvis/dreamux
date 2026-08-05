@@ -1974,6 +1974,80 @@ def scenario_connections(d):
     d.screenshot("connections-probe")
 
 
+def scenario_attention(d):
+    """Agent attention end to end: hook → OSC → tab state → workspace state.
+
+    Drives the real `dreamux-hook` inside a real terminal tab, so this
+    covers the tty write, the PTY parse, and the aggregation together —
+    none of which the unit tests can reach. The rule it exists to pin
+    down: visiting a workspace acknowledges a finished turn but never a
+    live block.
+
+    Self-contained: launches the app when nothing is connected."""
+    if d.sock is None:
+        d.launch_app()
+
+        def project_window_up():
+            state = d.state()
+            active = state.get("activeProject")
+            return active and active.get("name") == PROJECT_NAME
+        d.wait_until(project_window_up, 30.0, f"project window for {PROJECT_NAME}")
+
+    d.cmd("openMainWorkspace")
+
+    def main_ws(state):
+        return next(w for w in state["workspaces"] if w["isMain"])
+
+    def fire(payload_json):
+        # `sendTerminalText` fails until the shell has been quiescent for
+        # ~0.8 s, so retry the way the other scenarios do.
+        cmd = ("printf '%s' '" + payload_json
+               + "' | \"$DREAMUX_BIN/dreamux-hook\" event --harness claude")
+
+        def sent():
+            resp = d.cmd("sendTerminalText", text=cmd, submit=True, expect_ok=False)
+            return resp.get("ok") is True
+        d.wait_until(sent, 20.0, "shell ready for input")
+
+    def attention_is(expected):
+        def check():
+            return main_ws(d.state())["attention"] == expected
+        return check
+
+    # 1. A permission prompt blocks the tab and the workspace.
+    fire('{\"hook_event_name\":\"Notification\",'
+         '\"notification_type\":\"permission_prompt\",'
+         '\"message\":\"Claude wants to run: npm test\",\"session_id\":\"s1\"}')
+    d.wait_until(attention_is("blocked"), 15.0, "workspace reports blocked")
+    d.screenshot("attention-blocked")
+
+    # 2. Visiting must NOT clear a block. This is the rule the whole
+    #    feature exists for.
+    d.cmd("openMainWorkspace")
+    require(main_ws(d.state())["attention"] == "blocked",
+            "visiting a workspace must not clear a live block")
+
+    # 3. The harness moving on is what clears it.
+    fire('{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"s1\"}')
+    d.wait_until(attention_is("working"), 15.0,
+                 "workspace follows the harness back to working")
+
+    # 4. A finished turn is `done`, and visiting DOES acknowledge that.
+    fire('{\"hook_event_name\":\"Stop\",'
+         '\"last_assistant_message\":\"All tests pass\",\"session_id\":\"s1\"}')
+    d.wait_until(attention_is("done"), 15.0, "a finished turn reports done")
+    d.cmd("openMainWorkspace")
+    d.wait_until(attention_is("none"), 15.0,
+                 "visiting acknowledges a finished turn")
+
+    # 5. An interrupted turn says nothing at all.
+    fire('{\"hook_event_name\":\"Stop\",'
+         '\"last_assistant_message\":\"[Request interrupted by user]\",'
+         '\"session_id\":\"s1\"}')
+    require(main_ws(d.state())["attention"] == "none",
+            "an interrupted turn must not produce attention")
+
+
 def scenario_quit(d):
     """The app quits cleanly on command."""
     resp = d.cmd("quit")
@@ -2163,6 +2237,67 @@ def scenario_pips(d):
     d.wait_until(lambda: not d.state().get("pips"), 10.0, "all pips returned")
 
 
+def scenario_shell_cwd(d):
+    """A new user shell in a SINGLE-repo workspace starts inside that
+    repo's worktree, not at the feature aggregation directory -- and the
+    worktree it lands in is equipped and still git-clean. A workspace
+    spanning two repos keeps the aggregation directory (main, here)."""
+    d.cmd("createFeature", name="solo-shell", repos=["portenv-server"])
+    d.cmd("setSidebarMode", mode="workspace", workspace="solo-shell")
+
+    expected = worktree("portenv-server", "solo-shell")
+    aggregation = feature_dir("solo-shell")
+
+    # A workspace's Bonsplit pane only mounts (and bootstraps its shell
+    # tab) once it's actually rendered -- an onAppear this driver can't
+    # force, only wait out.
+    def shell_tabs():
+        state = d.state()
+        ws = next((w for w in state.get("workspaces", [])
+                   if w["name"] == "solo-shell"), None)
+        if not ws:
+            return None
+        shells = [t for t in ws.get("tabs", []) if t.get("cwd")]
+        return shells or None
+
+    shells = d.wait_until(shell_tabs, 20.0,
+                          "solo-shell workspace to bootstrap a terminal tab")
+    for tab in shells:
+        require(os.path.realpath(tab["cwd"]) == os.path.realpath(expected),
+                f"shell tab cwd is {tab['cwd']!r}, expected the worktree {expected!r}")
+        require(os.path.realpath(tab["cwd"]) != os.path.realpath(aggregation),
+                "shell tab must not land on the aggregation directory")
+
+    # The worktree is equipped: project-docs resolves to the PROJECT docs
+    # home (three levels up), and the orientation hook is in place.
+    docs_link = os.path.join(expected, "project-docs")
+    require(os.path.islink(docs_link), f"{docs_link} is not a symlink")
+    require(os.path.isdir(os.path.join(docs_link, "plans")),
+            f"{docs_link} does not resolve to the project docs home")
+    require(os.path.isfile(os.path.join(expected, ".claude", "settings.local.json")),
+            "orientation hook settings file missing")
+
+    # And none of it is git noise. (.mcp.json is deliberately not
+    # asserted: MCPInstaller skips when no runner resolves on the build
+    # machine, which is not a product failure.)
+    status = git("status", "--porcelain", cwd=expected)
+    require(status == "", f"worktree should stay git-clean, got {status!r}")
+
+    # The other arm of the matrix: main spans BOTH seed repos, so there
+    # is no non-arbitrary choice and it stays at the project root.
+    # Skipped when running this scenario standalone, where main was
+    # never opened.
+    state = d.state()
+    main_ws = next((w for w in state.get("workspaces", []) if w.get("isMain")), None)
+    if main_ws:
+        for tab in [t for t in main_ws.get("tabs", []) if t.get("cwd")]:
+            require(os.path.realpath(tab["cwd"]) == os.path.realpath(PROJECT_DIR),
+                    f"multi-repo main shell cwd is {tab['cwd']!r}, "
+                    f"expected the project root {PROJECT_DIR!r}")
+
+    d.screenshot("shell-cwd-worktree")
+
+
 SCENARIOS = [
     ("boot", scenario_boot),
     ("repos-and-feature", scenario_repos_and_feature),
@@ -2179,6 +2314,8 @@ SCENARIOS = [
     ("applets", scenario_applets),
     ("connections", scenario_connections),
     ("pips", scenario_pips),
+    ("shell-cwd", scenario_shell_cwd),
+    ("attention", scenario_attention),
     ("quit", scenario_quit),
 ]
 
