@@ -207,6 +207,8 @@ enum E2ECommands {
                     // port.
                     "webTabs": session.webTabURLs.map(\.absoluteString),
                     "fileTabs": session.fileTabSummaries,
+                    // The loudest thing any tab in this workspace wants.
+                    "attention": attentionName(session.attention),
                     // Bonsplit tab bar summary, in tab-bar order — how a
                     // scenario asserts the pinned Overview tab exists and
                     // sits first (Task 7) without a screenshot.
@@ -215,6 +217,7 @@ enum E2ECommands {
                         return [
                             "title": tab.title,
                             "isOverview": session.isOverviewTab(id),
+                            "attention": attentionName(session.attention(forTab: id)),
                         ]
                     },
                 ] as [String: Any]
@@ -311,6 +314,17 @@ enum E2ECommands {
         // observable evidence that play surfaced the right URL.
         payload["openedTargets"] = handles.runners?.openedTargets ?? []
         return payload
+    }
+
+    /// Stable wire names for the e2e snapshot — "none" / "working" /
+    /// "done" / "blocked".
+    private static func attentionName(_ attention: AgentAttention) -> String {
+        switch attention {
+        case .none: return "none"
+        case .working: return "working"
+        case .done: return "done"
+        case .blocked: return "blocked"
+        }
     }
 
     private static func sidebarModeName(_ mode: SidebarMode) -> String {

@@ -371,6 +371,12 @@ final class WorkspaceSession {
         AttentionAggregate.combine(tabSessions.values.map(\.attention))
     }
 
+    /// One tab's attention. Non-terminal tabs (Overview, browser, file,
+    /// diff) have no agent in them and are always quiet. E2E readback.
+    func attention(forTab id: TabID) -> AgentAttention {
+        tabSessions[id]?.attention ?? .none
+    }
+
     /// True when every terminal tab's shell has been silent for at
     /// least `interval` — the queue's cheap "agent finished or stalled"
     /// probe.
@@ -587,7 +593,7 @@ final class WorkspaceSession {
     /// terminal so the user can start typing immediately.
     func didBecomeVisible() {
         isVisible = true
-        acknowledgeActiveTab()
+        acknowledgeWorkspace()
         // Re-entering the workspace counts as "reading" the most recent
         // notification, so wipe the rail subtitle too.
         lastActivityMessage = nil
@@ -598,10 +604,14 @@ final class WorkspaceSession {
         isVisible = false
     }
 
-    private func acknowledgeActiveTab() {
-        guard let pane = controller.focusedPaneId,
-              let tab = controller.selectedTab(inPane: pane) else { return }
-        tabSessions[tab.id]?.acknowledgeIfDone()
+    /// Visiting the workspace acknowledges every finished turn in it, not
+    /// just the selected tab's. A `done` on a tab you never select would
+    /// otherwise keep the sidebar dot lit forever — the agent tab is
+    /// rarely the selected one, since Overview is pinned leftmost and
+    /// selected by default. Blocks are untouched: `acknowledgeIfDone()`
+    /// only clears `.done`, which is the whole point of the split.
+    private func acknowledgeWorkspace() {
+        for tab in tabSessions.values { tab.acknowledgeIfDone() }
     }
 
     fileprivate func handleActivity(tabId: TabID, message: String?) {
@@ -651,10 +661,15 @@ final class WorkspaceSession {
         }
     }
 
-    /// Explicit user acknowledgement — clears the active tab's attention
-    /// outright, block included, and wipes the rail subtitle. Called by
-    /// the store when the user clicks an already-active workspace row.
+    /// Explicit user acknowledgement — clicking an already-active
+    /// workspace row. Acknowledges every finished turn in the workspace,
+    /// exactly as arriving at it does, and additionally dismisses the
+    /// tab the user is actually looking at outright, block included:
+    /// that tab is the one the gesture is unambiguously about. A block
+    /// on some other tab survives — only the harness, or a dismiss while
+    /// on that tab, clears it.
     func dismissActivity() {
+        acknowledgeWorkspace()
         if let pane = controller.focusedPaneId,
            let tab = controller.selectedTab(inPane: pane) {
             tabSessions[tab.id]?.dismissAttention()

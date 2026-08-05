@@ -116,10 +116,10 @@ Snapshot of everything a scenario typically asserts on.
     "activeProject": {"id":"4B5C…","name":"demo","path":"…/demo"},
     "workspaces": [
       {"name":"feature-x","linkedRepoIDs":["webapp"],"isActive":true,
-       "isMain":false,"intakeTabs":[],
+       "isMain":false,"intakeTabs":[],"attention":"blocked",
        "webTabs":["http://localhost:4600/"],
-       "tabs":[{"title":"Overview","isOverview":true},
-               {"title":"shell","isOverview":false}]}
+       "tabs":[{"title":"Overview","isOverview":true,"attention":"none"},
+               {"title":"shell","isOverview":false,"attention":"blocked"}]}
     ],
     "runners": [
       {
@@ -162,8 +162,13 @@ Field notes:
   or JSON `null` when no project window is registered.
 - `workspaces[].isActive` — the workspace currently selected in the
   sidebar.
+- `attention` is `"none"`, `"working"`, `"done"`, or `"blocked"`. A
+  workspace reports the loudest state among its tabs. `"blocked"` means
+  an agent is waiting on the user and does **not** clear when the
+  workspace is visited — only the harness or an explicit dismiss clears
+  it.
 - `workspaces[].tabs` — the workspace's Bonsplit tab bar, in tab-bar
-  order: `{"title", "isOverview"}` per tab. Every workspace bootstraps
+  order: `{"title", "isOverview", "attention"}` per tab. Every workspace bootstraps
   with its pinned, non-dismissable **Overview** tab created first
   (`title: "Overview"`, `isOverview: true`) — this is how a scenario
   confirms it exists and sits leftmost without a screenshot. Bootstrap
