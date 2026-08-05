@@ -622,6 +622,35 @@ final class WorkspaceSession {
         tab.attentionState.noteNotification(trimmed)
     }
 
+    /// Apply a banner interaction to the tab it names. Selects that tab
+    /// either way; the Approve/Deny paths go through
+    /// `NotificationRouter`, which refuses to type when the prompt has
+    /// moved on.
+    func applyNotificationRoute(_ route: NotificationRoute) {
+        guard let entry = tabSessions.first(where: { $0.value.id == route.tabID })
+        else { return }
+        let tab = entry.value
+        let message = tab.attention.message ?? ""
+        let outcome = NotificationRouter.resolve(
+            route: route,
+            attention: tab.attention,
+            approve: PromptKeystrokeRecipes.permissionRecipe(forNotification: message),
+            deny: PromptKeystrokeRecipes.permissionDenyRecipe(forNotification: message)
+        )
+        controller.selectTab(entry.key)
+        switch outcome {
+        case .focus:
+            break
+        case .dismiss:
+            tab.dismissAttention()
+        case .send(let keystroke):
+            // Composes with the binding check that already governs every
+            // programmatic write into a tab.
+            guard tab.binding.isBound else { break }
+            tab.send(keystroke)
+        }
+    }
+
     /// Explicit user acknowledgement — clears the active tab's attention
     /// outright, block included, and wipes the rail subtitle. Called by
     /// the store when the user clicks an already-active workspace row.

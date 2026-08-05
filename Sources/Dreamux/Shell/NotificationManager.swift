@@ -57,6 +57,10 @@ final class NotificationManager: NSObject {
 
     var poster: NotificationPosting = SystemNotificationPoster()
 
+    /// Installed by the app so a banner interaction can reach the store
+    /// that owns workspaces. Set in `DreamuxApp`.
+    var onRoute: ((NotificationRoute) -> Void)?
+
     /// Debounce per tab AND per state rank: a runaway shell cannot
     /// flood, but a `working → blocked` transition is never eaten by a
     /// banner posted moments earlier for a different state.
@@ -211,5 +215,24 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         // Show banner + sound even while Dreamux is the foreground app —
         // otherwise the user types `printf '\a'` and sees nothing.
         completionHandler([.banner, .sound, .list])
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        // Decode before hopping: `userInfo` is `[AnyHashable: Any]` and
+        // the completion handler is not Sendable, so neither may cross
+        // to the main actor. `NotificationRoute` is plain value data and
+        // can.
+        let route = NotificationRoute(
+            userInfo: response.notification.request.content.userInfo,
+            actionIdentifier: response.actionIdentifier
+        )
+        if let route {
+            Task { @MainActor in NotificationManager.shared.onRoute?(route) }
+        }
+        completionHandler()
     }
 }
