@@ -575,8 +575,8 @@ struct WorkspaceSidebar: View {
                 .font(.callout.weight(isActive ? .semibold : .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1).truncationMode(.tail)
-            if store.attention(for: workspace).isBlocked {
-                Circle().fill(Color.red).frame(width: 5, height: 5)
+            if let glyph = AttentionGlyph(store.attention(for: workspace)) {
+                AttentionDot(glyph: glyph)
             }
         }
     }
