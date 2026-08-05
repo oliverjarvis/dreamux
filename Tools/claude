@@ -63,7 +63,10 @@ fi
 
 # Build inline hooks JSON.
 #
-# Stop/Notification: notification pipeline (see dreamux-hook docstring).
+# Stop/Notification/PermissionRequest/UserPromptSubmit: attention
+# pipeline. All four call `dreamux-hook event --harness claude`, which
+# normalizes them through harnesses.json into one agent-state control
+# OSC (see dreamux-hook docstring).
 # SessionStart: chat-face session binding (dreamux-hook session-start → control OSC).
 # SubagentStart/SubagentStop/TaskCreated/TaskCompleted/SessionEnd: flow
 # lifecycle events for the Flows observatory — `dreamux-hook flow`
@@ -76,8 +79,18 @@ fi
 # the bundle path. Single-quoted segments stay literal; "$HOOK" expands
 # the path between escaped JSON quotes.
 HOOK_CMD='"\"'"$HOOK"'\"'
-SYNC_STOP='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' stop"}]}'
-SYNC_NOTIFY='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' notify"}]}'
+# Attention: Stop / Notification / PermissionRequest / UserPromptSubmit
+# all route through the one normalizer (`dreamux-hook event`), which
+# maps them via harnesses.json and emits an `agent-state` control OSC.
+# Stop and Notification stay SYNC for the same tty-resolution reason
+# session-start does; PermissionRequest and UserPromptSubmit are async
+# so a permission prompt is never held up by a local write.
+# EVENT_CMD carries the closing JSON quote, since it is spliced into
+# three different tails (two of them followed by `,"async":true`).
+EVENT_CMD="$HOOK_CMD"' event --harness claude"'
+SYNC_STOP='{"matcher":"","hooks":[{"type":"command","command":'"$EVENT_CMD"'}]}'
+SYNC_NOTIFY='{"matcher":"","hooks":[{"type":"command","command":'"$EVENT_CMD"'}]}'
+ASYNC_EVENT='{"hooks":[{"type":"command","command":'"$EVENT_CMD"',"async":true}]}'
 FLOW_MATCHED='{"matcher":"","hooks":[{"type":"command","command":'"$HOOK_CMD"' flow","async":true}]}'
 FLOW_PLAIN='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' flow","async":true}]}'
 # session-start is deliberately SYNC: the hook resolves the session's
@@ -88,6 +101,8 @@ SESSION_START='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' session-start
 SETTINGS_JSON='{"hooks":{'
 SETTINGS_JSON="$SETTINGS_JSON"'"Stop":['"$SYNC_STOP"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"Notification":['"$SYNC_NOTIFY"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"PermissionRequest":['"$ASYNC_EVENT"'],'
+SETTINGS_JSON="$SETTINGS_JSON"'"UserPromptSubmit":['"$ASYNC_EVENT"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"SubagentStart":['"$FLOW_MATCHED"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"SubagentStop":['"$FLOW_MATCHED"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"TaskCreated":['"$FLOW_PLAIN"'],'
