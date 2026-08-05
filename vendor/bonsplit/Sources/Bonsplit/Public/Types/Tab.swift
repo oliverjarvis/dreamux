@@ -6,12 +6,20 @@ public struct Tab: Identifiable, Hashable, Sendable {
     public let title: String
     public let icon: String?
     public let isDirty: Bool
+    public let attention: TabAttention
 
-    public init(id: TabID = TabID(), title: String, icon: String? = nil, isDirty: Bool = false) {
+    public init(
+        id: TabID = TabID(),
+        title: String,
+        icon: String? = nil,
+        isDirty: Bool = false,
+        attention: TabAttention = .none
+    ) {
         self.id = id
         self.title = title
         self.icon = icon
         self.isDirty = isDirty
+        self.attention = attention
     }
 
     internal init(from tabItem: TabItem) {
@@ -19,5 +27,6 @@ public struct Tab: Identifiable, Hashable, Sendable {
         self.title = tabItem.title
         self.icon = tabItem.icon
         self.isDirty = tabItem.isDirty
+        self.attention = tabItem.attention
     }
 }

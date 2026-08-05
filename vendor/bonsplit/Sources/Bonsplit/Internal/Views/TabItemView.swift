@@ -25,6 +25,11 @@ struct TabItemView: View {
                 .lineLimit(1)
                 .foregroundStyle(isSelected ? TabBarColors.activeText : TabBarColors.inactiveText)
 
+            // Attention dot: filled when the tab's occupant is blocked on
+            // the user, hollow when it merely finished. Sits inside the
+            // chip so it survives tab truncation, unlike a trailing badge.
+            attentionDot
+
             Spacer(minLength: 4)
 
             // Close button or dirty indicator
@@ -48,8 +53,26 @@ struct TabItemView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(tab.title)
-        .accessibilityValue(tab.isDirty ? "Modified" : "")
+        .accessibilityValue(
+            tab.attention == .blocked ? "Needs attention"
+                : tab.attention == .done ? "Finished"
+                : tab.isDirty ? "Modified" : ""
+        )
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    @ViewBuilder
+    private var attentionDot: some View {
+        switch tab.attention {
+        case .blocked:
+            Circle().fill(Color.orange).frame(width: 6, height: 6)
+        case .done:
+            Circle().strokeBorder(TabBarColors.inactiveText, lineWidth: 1)
+                .frame(width: 6, height: 6)
+        case .working, .none:
+            // EmptyView, so a quiet tab reserves no width at all.
+            EmptyView()
+        }
     }
 
     // MARK: - Tab Background

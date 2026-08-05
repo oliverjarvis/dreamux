@@ -42,10 +42,11 @@ public final class BonsplitController {
         title: String,
         icon: String? = "doc.text",
         isDirty: Bool = false,
+        attention: TabAttention = .none,
         inPane pane: PaneID? = nil
     ) -> TabID? {
         let tabId = TabID()
-        let tab = Tab(id: tabId, title: title, icon: icon, isDirty: isDirty)
+        let tab = Tab(id: tabId, title: title, icon: icon, isDirty: isDirty, attention: attention)
         let targetPane = pane ?? focusedPaneId ?? PaneID(id: internalController.rootNode.allPaneIds.first!.id)
 
         // Check with delegate
@@ -71,7 +72,7 @@ public final class BonsplitController {
         }
 
         // Create internal TabItem
-        let tabItem = TabItem(id: tabId.id, title: title, icon: icon, isDirty: isDirty)
+        let tabItem = TabItem(id: tabId.id, title: title, icon: icon, isDirty: isDirty, attention: attention)
         internalController.addTab(tabItem, toPane: PaneID(id: targetPane.id), atIndex: insertIndex)
 
         // Notify delegate
@@ -86,11 +87,13 @@ public final class BonsplitController {
     ///   - title: New title (pass nil to keep current)
     ///   - icon: New icon (pass nil to keep current, pass .some(nil) to remove icon)
     ///   - isDirty: New dirty state (pass nil to keep current)
+    ///   - attention: New attention state (pass nil to keep current)
     public func updateTab(
         _ tabId: TabID,
         title: String? = nil,
         icon: String?? = nil,
-        isDirty: Bool? = nil
+        isDirty: Bool? = nil,
+        attention: TabAttention? = nil
     ) {
         guard let (pane, tabIndex) = findTabInternal(tabId) else { return }
 
@@ -102,6 +105,9 @@ public final class BonsplitController {
         }
         if let isDirty = isDirty {
             pane.tabs[tabIndex].isDirty = isDirty
+        }
+        if let attention = attention {
+            pane.tabs[tabIndex].attention = attention
         }
     }
 
