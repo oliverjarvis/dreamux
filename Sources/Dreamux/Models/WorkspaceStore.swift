@@ -64,8 +64,8 @@ final class WorkspaceStore {
         return session
     }
 
-    func hasUnread(for workspace: Workspace) -> Bool {
-        sessions[workspace.id]?.anyTabHasUnread ?? false
+    func attention(for workspace: Workspace) -> AgentAttention {
+        sessions[workspace.id]?.attention ?? .none
     }
 
     func lastActivityMessage(for workspace: Workspace) -> String? {

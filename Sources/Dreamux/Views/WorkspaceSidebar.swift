@@ -307,7 +307,7 @@ struct WorkspaceSidebar: View {
                 hasUnread: { name in
                     guard let workspace = store.featureWorkspace(named: name)
                     else { return false }
-                    return store.hasUnread(for: workspace)
+                    return store.attention(for: workspace).isBlocked
                 },
                 runners: runners,
                 workspaceForFeature: { name in
@@ -575,7 +575,7 @@ struct WorkspaceSidebar: View {
                 .font(.callout.weight(isActive ? .semibold : .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1).truncationMode(.tail)
-            if store.hasUnread(for: workspace) {
+            if store.attention(for: workspace).isBlocked {
                 Circle().fill(Color.red).frame(width: 5, height: 5)
             }
         }

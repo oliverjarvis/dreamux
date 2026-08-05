@@ -300,10 +300,10 @@ final class WorkspaceSession {
         // attention badge. Other tabs in this workspace, and other
         // workspaces, keep theirs.
         if isVisible {
-            tabSessions[tab.id]?.hasUnread = false
-            // If no other tab in this workspace still has unread, the
+            tabSessions[tab.id]?.acknowledgeIfDone()
+            // If nothing in this workspace still wants the user, the
             // rail subtitle has been "read" too — wipe it.
-            if !anyTabHasUnread {
+            if attention == .none {
                 lastActivityMessage = nil
             }
             // Bonsplit's select doesn't touch AppKit's responder chain —
@@ -354,8 +354,9 @@ final class WorkspaceSession {
 
     // MARK: - Activity / unread
 
-    var anyTabHasUnread: Bool {
-        tabSessions.values.contains { $0.hasUnread }
+    /// The loudest thing any of this workspace's tabs wants.
+    var attention: AgentAttention {
+        AttentionAggregate.combine(tabSessions.values.map(\.attention))
     }
 
     /// True when every terminal tab's shell has been silent for at
@@ -574,7 +575,7 @@ final class WorkspaceSession {
     /// terminal so the user can start typing immediately.
     func didBecomeVisible() {
         isVisible = true
-        clearActiveTabUnread()
+        acknowledgeActiveTab()
         // Re-entering the workspace counts as "reading" the most recent
         // notification, so wipe the rail subtitle too.
         lastActivityMessage = nil
@@ -585,46 +586,38 @@ final class WorkspaceSession {
         isVisible = false
     }
 
-    private func clearActiveTabUnread() {
+    private func acknowledgeActiveTab() {
         guard let pane = controller.focusedPaneId,
               let tab = controller.selectedTab(inPane: pane) else { return }
-        tabSessions[tab.id]?.hasUnread = false
+        tabSessions[tab.id]?.acknowledgeIfDone()
     }
 
     fileprivate func handleActivity(tabId: TabID, message: String?) {
         guard let tab = tabSessions[tabId] else { return }
 
-        // Always badge — the user wants the red dot whenever a
-        // notification arrives, even if they happen to be on this
-        // workspace's active tab. Acknowledgement is explicit: clicking
-        // the workspace row, switching tabs, or switching workspaces.
-        tab.hasUnread = true
-
         // Bare BEL (`\a`) is rung by zsh, tab-completion, error tones, and
         // most CLI agents during normal operation — useless as a "the
-        // agent wants me" signal. Only fire a macOS banner / subtitle
-        // when the agent has *explicitly* sent a notification via OSC 9
-        // or OSC 777 ; notify which carries a real message.
-        guard let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
-        }
+        // agent wants me" signal, and it no longer badges anything.
+        // Adapted harnesses report state through the `agent-state`
+        // control OSC; an OSC 9 body from something we have no adapter
+        // for is still worth a `done`.
+        guard let message,
+              !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
 
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         lastActivityMessage = trimmed
-
-        NotificationManager.shared.notifyActivity(
-            workspaceName: workspace.name,
-            tabId: tab.id,
-            tabTitle: tab.title,
-            message: trimmed
-        )
+        tab.attentionState.noteNotification(trimmed)
     }
 
-    /// Explicit user acknowledgement — clears the badge on the active
-    /// tab and wipes the rail subtitle. Called by the store when the
-    /// user clicks an already-active workspace row.
+    /// Explicit user acknowledgement — clears the active tab's attention
+    /// outright, block included, and wipes the rail subtitle. Called by
+    /// the store when the user clicks an already-active workspace row.
     func dismissActivity() {
-        clearActiveTabUnread()
+        if let pane = controller.focusedPaneId,
+           let tab = controller.selectedTab(inPane: pane) {
+            tabSessions[tab.id]?.dismissAttention()
+        }
         lastActivityMessage = nil
     }
 }
