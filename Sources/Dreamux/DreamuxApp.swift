@@ -284,6 +284,9 @@ private struct NotificationCommands: Commands {
             Button("Notification Settings…") {
                 NotificationManager.shared.openSystemNotificationSettings()
             }
+            Button("Run Notification Diagnostic") {
+                NotificationManager.shared.runDiagnostic()
+            }
         }
     }
 }

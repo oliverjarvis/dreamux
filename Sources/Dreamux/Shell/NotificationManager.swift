@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import UserNotifications
 import AppKit
 import os
@@ -52,6 +53,7 @@ final class SystemNotificationPoster: NotificationPosting {
 /// blocked on a decision, or finished a turn. Per-tab debounce keeps a
 /// runaway shell from flooding Notification Center.
 @MainActor
+@Observable
 final class NotificationManager: NSObject {
     static let shared = NotificationManager()
 
@@ -60,6 +62,12 @@ final class NotificationManager: NSObject {
     /// Installed by the app so a banner interaction can reach the store
     /// that owns workspaces. Set in `DreamuxApp`.
     var onRoute: ((NotificationRoute) -> Void)?
+
+    /// Whether banners can actually be delivered. Observed by the
+    /// sidebar, which shows a row when this is anything but healthy —
+    /// the whole point being that a delivery failure is visible instead
+    /// of buried in `os_log`.
+    private(set) var health: NotificationHealth = .unknown
 
     /// Debounce per tab AND per state rank: a runaway shell cannot
     /// flood, but a `working → blocked` transition is never eaten by a
@@ -116,11 +124,23 @@ final class NotificationManager: NSObject {
             switch settings.authorizationStatus {
             case .notDetermined:
                 center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    // Description lifted out here: `any Error` is not
+                    // Sendable and cannot cross to the main actor.
+                    let failure = error?.localizedDescription
+                    Task { @MainActor in
+                        if let failure {
+                            NotificationManager.shared.health = .failed(failure)
+                        } else {
+                            NotificationManager.shared.health = granted ? .healthy : .denied
+                        }
+                    }
                     Self.log("authorization request — granted=\(granted), error=\(String(describing: error))")
                 }
             case .denied:
+                Task { @MainActor in NotificationManager.shared.health = .denied }
                 Self.log("authorization status: denied — enable in System Settings → Notifications → Dreamux")
             case .authorized, .provisional, .ephemeral:
+                Task { @MainActor in NotificationManager.shared.health = .healthy }
                 Self.log("authorization status: authorized")
             @unknown default:
                 Self.log("authorization status: unknown")
@@ -185,19 +205,58 @@ final class NotificationManager: NSObject {
         }
     }
 
-    private static let logger = Logger(
+    // `nonisolated`: every caller is a `UNUserNotificationCenter`
+    // completion handler running off the main actor, and `Logger` is
+    // Sendable, so there is nothing to isolate.
+    nonisolated private static let logger = Logger(
         subsystem: "com.dreamux.Dreamux",
         category: "Notifications"
     )
 
     /// `nonisolated` because every caller is a `UNUserNotificationCenter`
     /// completion handler, which runs off the main actor.
-    nonisolated static func reportPostFailure(_ error: Error) {
-        let description = error.localizedDescription
-        Task { @MainActor in log("post failed: \(description)") }
+    /// One-shot provenance report for "no banners ever appear". Prints
+    /// authorization status, the bundle identity notifications are
+    /// registered under, and the outcome of a probe post. Reach it from
+    /// the app menu; it writes to the unified log under the
+    /// `Notifications` category.
+    func runDiagnostic() {
+        let bundleID = BundleIdentity.bundleID()
+        Self.log("diagnostic: bundleID=\(bundleID)")
+        Self.log("diagnostic: bundlePath=\(Bundle.main.bundleURL.path)")
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            Self.log("diagnostic: authorizationStatus=\(settings.authorizationStatus.rawValue)")
+            Self.log("diagnostic: alertSetting=\(settings.alertSetting.rawValue)")
+            let content = UNMutableNotificationContent()
+            content.title = "Dreamux"
+            content.body = "Notification diagnostic"
+            let probe = UNNotificationRequest(
+                identifier: "dreamux.diagnostic", content: content, trigger: nil
+            )
+            UNUserNotificationCenter.current().add(probe) { error in
+                if let error {
+                    let description = error.localizedDescription
+                    Self.log("diagnostic: probe FAILED — \(description)")
+                    Task { @MainActor in
+                        NotificationManager.shared.health = .failed(description)
+                    }
+                } else {
+                    Self.log("diagnostic: probe posted")
+                    Task { @MainActor in NotificationManager.shared.health = .healthy }
+                }
+            }
+        }
     }
 
-    private static func log(_ message: String) {
+    nonisolated static func reportPostFailure(_ error: Error) {
+        let description = error.localizedDescription
+        Task { @MainActor in
+            log("post failed: \(description)")
+            NotificationManager.shared.health = .failed(description)
+        }
+    }
+
+    nonisolated private static func log(_ message: String) {
         // Use unified logging so the user can grep with:
         //   log show --predicate 'subsystem == "com.dreamux.Dreamux"' --info --last 5m
         logger.info("\(message, privacy: .public)")

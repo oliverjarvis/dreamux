@@ -244,6 +244,22 @@ struct WorkspaceSidebar: View {
         // original 18pt-plus-2pt-headers rhythm — the padding moved into
         // the rows when headers gained the tile-style hover pill.
         VStack(alignment: .leading, spacing: 6) {
+            // Banners cannot be delivered — say so here rather than in a
+            // log line nobody reads. Tapping opens the System Settings
+            // pane where it gets fixed.
+            if let text = NotificationManager.shared.health.bannerText {
+                Button(action: { NotificationManager.shared.openSystemNotificationSettings() }) {
+                    Text(text)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+            }
+
             // Pinned destinations — roomy, readable rows, not a cramped
             // list.
             VStack(spacing: 3) {
