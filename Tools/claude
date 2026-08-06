@@ -75,6 +75,14 @@ fi
 # (hooks reference) — SessionEnd is the true once-per-session terminal
 # event (unlike Stop, which fires every assistant turn).
 #
+# statusLine: the quota tap. UNLIKE `hooks`, `statusLine` is a single
+# object that cannot merge — the highest-precedence source wins
+# outright, so this entry DISPLACES whatever statusline the user
+# configured. `dreamux-hook statusline` is therefore a transparent tap:
+# it posts the payload's rate_limits to Dreamux, then runs the user's
+# own statusline (from ~/.claude/settings.json) and echoes its stdout
+# verbatim, so a Dreamux tab renders exactly what it would outside.
+#
 # The hook path is wrapped in escaped quotes so it tolerates spaces in
 # the bundle path. Single-quoted segments stay literal; "$HOOK" expands
 # the path between escaped JSON quotes.
@@ -98,6 +106,7 @@ FLOW_PLAIN='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' flow","async":tr
 # and an async hook's parentage/ordering isn't guaranteed. The hook is
 # one local write — no user-visible delay.
 SESSION_START='{"hooks":[{"type":"command","command":'"$HOOK_CMD"' session-start"}]}'
+STATUSLINE='{"type":"command","command":'"$HOOK_CMD"' statusline"}'
 SETTINGS_JSON='{"hooks":{'
 SETTINGS_JSON="$SETTINGS_JSON"'"Stop":['"$SYNC_STOP"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"Notification":['"$SYNC_NOTIFY"'],'
@@ -109,6 +118,8 @@ SETTINGS_JSON="$SETTINGS_JSON"'"TaskCreated":['"$FLOW_PLAIN"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"TaskCompleted":['"$FLOW_PLAIN"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"SessionStart":['"$SESSION_START"'],'
 SETTINGS_JSON="$SETTINGS_JSON"'"SessionEnd":['"$FLOW_PLAIN"']'
-SETTINGS_JSON="$SETTINGS_JSON"'}}'
+SETTINGS_JSON="$SETTINGS_JSON"'},'
+SETTINGS_JSON="$SETTINGS_JSON"'"statusLine":'"$STATUSLINE"
+SETTINGS_JSON="$SETTINGS_JSON"'}'
 
 exec "$REAL_CLAUDE" --settings "$SETTINGS_JSON" "$@"

@@ -12,6 +12,11 @@ Subcommands:
                hook payload to an attention state via harnesses.json and
                emits it as an `agent-state` control OSC, plus the legacy
                stop/notify verbs the chat-face binding reads.
+  statusline — Claude Code's statusLine command. A transparent tap: it
+               posts the payload's rate_limits to Dreamux, then runs the
+               user's OWN statusline (from ~/.claude/settings.json) and
+               echoes its stdout verbatim. Prints nothing of its own —
+               stdout is the statusline's render channel.
   notify     — fired when the agent wants user attention. Uses arg 2 if
                given, else $CLAUDE_NOTIFICATION_MESSAGE, else a default.
   idle       — explicit "agent is waiting" hook variant.
@@ -245,11 +250,35 @@ def clip(text: Optional[str]) -> str:
     return collapsed
 
 
-def emit_signal(kind: str, stdin_payload: Optional[dict], message: Optional[str] = None) -> None:
+def send_socket_line(envelope: dict, what: str) -> None:
+    """One newline-delimited JSON line to $DREAMUX_EMIT_SOCKET. The
+    transport both the signal sink and the statusline tap use. ALWAYS
+    silent on failure (log-only): a hook must never break or slow the
+    user's claude session."""
     sock_path = os.environ.get("DREAMUX_EMIT_SOCKET", "")
     if not sock_path:
-        log("signal_skip", reason="no_socket_env", kind=kind)
+        log("socket_skip", reason="no_socket_env", what=what)
         return
+    try:
+        import socket as socketlib
+
+        s = socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM)
+        s.settimeout(0.5)
+        try:
+            s.connect(sock_path)
+            s.sendall((json.dumps(envelope) + "\n").encode("utf-8"))
+            try:
+                s.recv(256)  # ack; best-effort
+            except Exception:
+                pass
+        finally:
+            s.close()
+        log("socket_sent", what=what)
+    except Exception as exc:
+        log("socket_fail", what=what, error=str(exc))
+
+
+def emit_signal(kind: str, stdin_payload: Optional[dict], message: Optional[str] = None) -> None:
     payload: dict = {}
     if stdin_payload:
         for field in PAYLOAD_FIELDS:
@@ -274,23 +303,7 @@ def emit_signal(kind: str, stdin_payload: Optional[dict], message: Optional[str]
             "payload": payload,
         },
     }
-    try:
-        import socket as socketlib
-
-        s = socketlib.socket(socketlib.AF_UNIX, socketlib.SOCK_STREAM)
-        s.settimeout(0.5)
-        try:
-            s.connect(sock_path)
-            s.sendall((json.dumps(envelope) + "\n").encode("utf-8"))
-            try:
-                s.recv(256)  # ack; best-effort
-            except Exception:
-                pass
-        finally:
-            s.close()
-        log("signal_sent", kind=kind)
-    except Exception as exc:
-        log("signal_fail", kind=kind, error=str(exc))
+    send_socket_line(envelope, what=kind)
 
 
 def flow_handler() -> None:
@@ -409,6 +422,171 @@ def event_handler() -> None:
         })
 
 
+# ---------------------------------------------------------------------------
+# Statusline tap — Claude Code's subscription quota, without typing /usage.
+#
+# `statusLine` is a SINGLE object in settings, not a merged list like
+# `hooks`: the highest-precedence source wins outright, so Dreamux's
+# --settings entry DISPLACES whatever statusline the user configured.
+# This subcommand is therefore a transparent tap, not a replacement —
+# it posts the quota figures, then runs the user's own command and
+# echoes its stdout verbatim. Print NOTHING else on stdout.
+# ---------------------------------------------------------------------------
+
+# How long the user's statusline gets before we give up on it. A wedged
+# command must not stall the agent's render loop.
+USER_STATUSLINE_TIMEOUT = 2.0
+
+
+def _settings_path() -> str:
+    """The user's Claude Code settings. DREAMUX_CLAUDE_SETTINGS
+    overrides, for tests — same shape as DREAMUX_HARNESSES_JSON."""
+    override = os.environ.get("DREAMUX_CLAUDE_SETTINGS", "")
+    if override:
+        return override
+    return os.path.expanduser("~/.claude/settings.json")
+
+
+def _usage_cache_path(session_id: str) -> str:
+    """Where this session's last-posted figures are remembered, so a
+    stream of re-renders collapses into one post per actual change."""
+    import hashlib
+
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+    tmp = os.environ.get("TMPDIR") or "/tmp"
+    return os.path.join(tmp, "dreamux-statusline-%s.json" % digest)
+
+
+def _number(value: Any) -> Optional[float]:
+    """A JSON number, or None. Bools are ints in Python — reject them."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def post_usage(payload: dict) -> None:
+    """Post the payload's rate_limits to Dreamux, unless they're absent,
+    unusable, or identical to what we last posted for this session."""
+    limits = payload.get("rate_limits")
+    if not isinstance(limits, dict):
+        # Absent for API-key users, non-subscribers, and any session
+        # before its first API response. Nothing to say.
+        log("usage_skip", reason="no_rate_limits")
+        return
+
+    usage: dict = {}
+    for key in ("five_hour", "seven_day"):
+        window = limits.get(key)
+        if not isinstance(window, dict):
+            continue
+        used = _number(window.get("used_percentage"))
+        resets = _number(window.get("resets_at"))
+        if used is None or resets is None:
+            # A half-parsed window is ABSENT, not zero.
+            continue
+        usage[key] = {"used_percentage": used, "resets_at": int(resets)}
+    if not usage:
+        log("usage_skip", reason="no_usable_window")
+        return
+
+    session_id = payload.get("session_id") or ""
+    fingerprint = json.dumps(usage, sort_keys=True)
+    cache = _usage_cache_path(session_id)
+    try:
+        with open(cache, encoding="utf-8") as f:
+            if f.read() == fingerprint:
+                log("usage_skip", reason="unchanged")
+                return
+    except Exception:
+        pass  # No cache, or unreadable — treat as changed.
+
+    usage["observed_at"] = int(time.time())
+    send_socket_line({"action": "usage", "usage": usage}, what="usage")
+    try:
+        with open(cache, "w", encoding="utf-8") as f:
+            f.write(fingerprint)
+    except Exception as exc:
+        log("usage_cache_fail", error=str(exc))
+
+
+def _user_statusline_command() -> Optional[str]:
+    """The statusline command the user configured for themselves, which
+    ours displaced."""
+    try:
+        with open(_settings_path(), encoding="utf-8") as f:
+            settings = json.load(f)
+    except Exception as exc:
+        log("statusline_settings_miss", error=str(exc))
+        return None
+    if not isinstance(settings, dict):
+        return None
+    entry = settings.get("statusLine")
+    if not isinstance(entry, dict):
+        return None
+    command = entry.get("command")
+    if isinstance(command, str) and command.strip():
+        return command
+    return None
+
+
+def delegate_statusline(raw: str) -> None:
+    """Run the user's own statusline with the same stdin and echo its
+    stdout verbatim. Bounded timeout; non-zero exit swallowed; output
+    dropped on any failure. A broken user statusline costs the
+    statusline, never the reading — which was already posted."""
+    command = _user_statusline_command()
+    if not command:
+        return
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["/bin/sh", "-c", command],
+            input=raw,
+            text=True,
+            capture_output=True,
+            timeout=USER_STATUSLINE_TIMEOUT,
+        )
+    except Exception as exc:
+        log("statusline_delegate_fail", error=str(exc))
+        return
+    if result.returncode != 0:
+        log("statusline_delegate_nonzero", code=result.returncode)
+        return
+    sys.stdout.write(result.stdout)
+
+
+def statusline_handler() -> None:
+    """`dreamux-hook statusline` — read stdin once, post the quota,
+    render the user's own statusline. Always exits 0."""
+    raw = ""
+    if not sys.stdin.isatty():
+        try:
+            raw = sys.stdin.read()
+        except Exception as exc:
+            log("statusline_stdin_fail", error=str(exc))
+            raw = ""
+
+    payload = None
+    if raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                payload = parsed
+            else:
+                log("statusline_skip", reason="not_a_dict")
+        except Exception:
+            log("statusline_skip", reason="not_json")
+
+    if payload:
+        try:
+            post_usage(payload)
+        except Exception as exc:
+            log("usage_fail", error=str(exc))
+
+    delegate_statusline(raw)
+
+
 def notify_handler() -> None:
     payload = read_stdin_json()
     message = None
@@ -450,6 +628,8 @@ def main() -> None:
         session_start_handler()
     elif cmd == "event":
         event_handler()
+    elif cmd == "statusline":
+        statusline_handler()
     elif cmd:
         emit(" ".join(sys.argv[1:]))
     else:

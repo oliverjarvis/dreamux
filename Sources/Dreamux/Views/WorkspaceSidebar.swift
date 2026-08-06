@@ -111,10 +111,16 @@ struct WorkspaceSidebar: View {
     @State private var mainWorktreeIssue: String?
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            content
-                .padding(.horizontal, 10)
-                .padding(.vertical, 12)
+        VStack(spacing: 0) {
+            ScrollView(showsIndicators: false) {
+                content
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 12)
+            }
+            // Pinned below the scroll view so the quota stays put while
+            // the workspace list scrolls. Draws nothing until a reading
+            // has arrived.
+            UsageFooter(store: .shared)
         }
         .sheet(isPresented: $showAddFeature) {
             AddFeatureSheet(

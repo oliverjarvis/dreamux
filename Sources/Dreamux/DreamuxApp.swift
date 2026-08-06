@@ -17,11 +17,24 @@ struct DreamuxMain {
     }
 }
 
+/// App-level AppKit scaffolding: the ⌘Q guard, and the menu bar quota
+/// accessory.
+///
 /// ⌘Q guard: quitting is instant when the app is idle, but killable work
 /// (agent runs, foreground terminal jobs) gets one native confirmation.
 /// Bypassed in e2e mode — automated runs quit programmatically and must
 /// never hang on a modal.
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// The quota accessory. Held here because an `NSStatusItem` lives
+    /// exactly as long as its owner does.
+    private var usageMenuBar: UsageMenuBarItem?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let item = UsageMenuBarItem(store: .shared)
+        item.start()
+        usageMenuBar = item
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !E2EMode.isActive,
               let summary = QuitGuard.shared.busySummary() else { return .terminateNow }
