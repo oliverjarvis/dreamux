@@ -24,6 +24,19 @@ import Combine
 ///     { "ok": true, "id": "<assigned signal id>" }
 ///     { "ok": false, "error": "<reason>" }
 ///
+/// Also accepted, from Dreamux's own statusline tap:
+///
+///     { "action": "usage",
+///       "usage": {
+///         "five_hour": { "used_percentage": 41.2, "resets_at": 1785900000 },
+///         "seven_day": { "used_percentage": 63.0, "resets_at": 1786200000 },
+///         "observed_at": 1785869358
+///       } }
+///
+/// which answers `{ "ok": true }` and updates the usage store WITHOUT
+/// writing a signal — quota figures change often and nobody subscribed
+/// to them.
+///
 /// The socket lives next to `signals.db` under the app's bundle-id
 /// dir so the MCP bridge can find it via the same scan logic.
 ///
@@ -38,6 +51,14 @@ final class SignalEmitSocketServer: @unchecked Sendable {
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var socketPath: String = ""
+
+    /// Where a `usage` action's reading goes. Defaults to the app's one
+    /// store, hopped onto the main actor; tests replace it to capture
+    /// without touching app state. Deliberately NOT the bus: a
+    /// statusline render is not an event worth storing.
+    var usageSink: @Sendable (ClaudeUsageSnapshot) -> Void = { snapshot in
+        Task { @MainActor in UsageStore.shared.ingest(snapshot) }
+    }
 
     init(bus: SignalBus) {
         self.bus = bus
@@ -210,6 +231,9 @@ final class SignalEmitSocketServer: @unchecked Sendable {
             handleSubscribe(fd: fd, request: dict)
             // Connection stays open; subscription handler closes it
             // when the client disconnects.
+        case "usage":
+            writeJSONLine(fd: fd, object: parseUsage(dict))
+            close(fd)
         default:
             writeJSONLine(fd: fd, object: ["ok": false, "error": "unknown action: \(action)"])
             close(fd)
@@ -511,5 +535,18 @@ final class SignalEmitSocketServer: @unchecked Sendable {
         )
         bus.emit(signal)
         return ["ok": true, "id": signal.id]
+    }
+
+    /// Decode a `usage` request and hand the reading to the sink. No
+    /// signal id in the reply — there is no signal.
+    private func parseUsage(_ dict: [String: Any]) -> [String: Any] {
+        guard let usage = dict["usage"] as? [String: Any] else {
+            return ["ok": false, "error": "missing 'usage' object"]
+        }
+        guard let snapshot = ClaudeUsageSnapshot(json: usage, receivedAt: Date()) else {
+            return ["ok": false, "error": "no usable rate-limit window in 'usage'"]
+        }
+        usageSink(snapshot)
+        return ["ok": true]
     }
 }

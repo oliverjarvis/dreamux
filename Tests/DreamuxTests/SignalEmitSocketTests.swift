@@ -247,4 +247,72 @@ extension SignalEmitSocketTests {
             "/tmp/dreamux-emit-com.dreamux.Dreamux.sock"
         )
     }
+
+    /// The `usage` action: a statusline tap's quota reading reaches the
+    /// store and writes NOTHING to the bus. Routing it through
+    /// SignalBus would put a row in signals.db on every quota change and
+    /// fill the Signals view with noise nobody subscribed to.
+    func testUsageActionReachesTheStoreAndWritesNoSignal() async throws {
+        let captured = UsageSnapshotBox()
+        server.usageSink = { captured.set($0) }
+
+        let published = expectation(description: "no signal published")
+        published.isInverted = true
+        // Spelled out rather than as a bare trailing closure: the
+        // single-expression form `sink { _ in published.fulfill() }`
+        // reports the inverted expectation as fulfilled without its body
+        // ever running — a sink subscribed ahead of it sees nothing, and
+        // no row reaches signals.db.
+        let sub = bus.publisher.sink(receiveValue: { (_: Signal) -> Void in
+            published.fulfill()
+        })
+        defer { sub.cancel() }
+
+        let ack = try roundTrip([
+            "action": "usage",
+            "usage": [
+                "five_hour": ["used_percentage": 41.2, "resets_at": 1_785_900_000],
+                "seven_day": ["used_percentage": 63.0, "resets_at": 1_786_200_000],
+                "observed_at": 1_785_869_358,
+            ],
+        ])
+        XCTAssertEqual(ack["ok"] as? Bool, true)
+        XCTAssertNil(ack["id"], "a usage reading is not a signal and gets no signal id")
+
+        let deadline = Date().addingTimeInterval(3)
+        while captured.get() == nil, Date() < deadline { usleep(20_000) }
+        let snapshot = try XCTUnwrap(captured.get())
+        XCTAssertEqual(snapshot.fiveHour?.usedPercentage, 41.2)
+        XCTAssertEqual(snapshot.sevenDay?.usedPercentage, 63.0)
+        XCTAssertEqual(snapshot.observedAt, Date(timeIntervalSince1970: 1_785_869_358))
+
+        await fulfillment(of: [published], timeout: 1)
+        let stored = try await awaitRows()
+        XCTAssertTrue(stored.isEmpty, "usage must never write a row to signals.db")
+    }
+
+    /// Bad usage requests get a structured refusal, like bad emits do —
+    /// and never reach the store.
+    func testUsageWithoutAUsableWindowIsRefused() throws {
+        let captured = UsageSnapshotBox()
+        server.usageSink = { captured.set($0) }
+
+        XCTAssertEqual(
+            try roundTrip(["action": "usage"])["ok"] as? Bool, false)
+        XCTAssertEqual(
+            try roundTrip(["action": "usage", "usage": ["five_hour": "nonsense"]])["ok"] as? Bool,
+            false)
+
+        usleep(200_000)
+        XCTAssertNil(captured.get())
+    }
+}
+
+/// Lock-boxed snapshot for cross-queue capture: the sink runs on the
+/// socket server's concurrent work queue, the assertions on the test's.
+final class UsageSnapshotBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: ClaudeUsageSnapshot?
+    func set(_ snapshot: ClaudeUsageSnapshot) { lock.lock(); value = snapshot; lock.unlock() }
+    func get() -> ClaudeUsageSnapshot? { lock.lock(); defer { lock.unlock() }; return value }
 }
