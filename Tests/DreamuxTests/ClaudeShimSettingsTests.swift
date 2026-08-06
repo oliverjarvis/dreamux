@@ -70,9 +70,10 @@ final class ClaudeShimSettingsTests: XCTestCase {
         XCTAssertTrue((sessionEndEntry["command"] as? String ?? "").hasSuffix("\" flow"))
     }
 
-    /// Extract the injected settings JSON by running the real shim with
-    /// PATH rigged so "real claude" is a fake that captures its argv.
-    private func injectedHooks() throws -> [String: Any] {
+    /// Extract the whole injected settings object by running the real
+    /// shim with PATH rigged so "real claude" is a fake that captures
+    /// its argv.
+    private func injectedSettings() throws -> [String: Any] {
         let fakeBin = sandbox.root.appendingPathComponent("fakebin2", isDirectory: true)
         try FileManager.default.createDirectory(at: fakeBin, withIntermediateDirectories: true)
         let capture = sandbox.root.appendingPathComponent("argv2.txt")
@@ -94,10 +95,13 @@ final class ClaudeShimSettingsTests: XCTestCase {
 
         let argv = try String(contentsOf: capture, encoding: .utf8)
             .split(separator: "\n").map(String.init)
-        let settings = try XCTUnwrap(
+        return try XCTUnwrap(
             try JSONSerialization.jsonObject(with: Data(argv[1].utf8)) as? [String: Any]
         )
-        return try XCTUnwrap(settings["hooks"] as? [String: Any])
+    }
+
+    private func injectedHooks() throws -> [String: Any] {
+        try XCTUnwrap(injectedSettings()["hooks"] as? [String: Any])
     }
 
     private func command(_ hooks: [String: Any], _ event: String) throws -> String {
@@ -134,5 +138,26 @@ final class ClaudeShimSettingsTests: XCTestCase {
                           "\(event) still belongs to the flow relay")
         }
         XCTAssertTrue(try command(hooks, "SessionStart").hasSuffix("\" session-start"))
+    }
+
+    /// The quota tap. `statusLine` is a single object, not a hooks list.
+    func testStatusLineRoutesThroughTheTap() throws {
+        let statusLine = try XCTUnwrap(injectedSettings()["statusLine"] as? [String: Any])
+        XCTAssertEqual(statusLine["type"] as? String, "command")
+        XCTAssertTrue(
+            (statusLine["command"] as? String ?? "").hasSuffix("\" statusline"),
+            "the statusline must be the transparent tap, so the user's own still renders"
+        )
+    }
+
+    /// Adding statusLine must not disturb the hooks map it sits beside.
+    func testHooksSurviveAlongsideStatusLine() throws {
+        let settings = try injectedSettings()
+        let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        for event in ["Stop", "Notification", "PermissionRequest", "UserPromptSubmit",
+                      "SubagentStart", "SubagentStop", "TaskCreated", "TaskCompleted",
+                      "SessionStart", "SessionEnd"] {
+            XCTAssertNotNil(hooks[event], "missing hook registration for \(event)")
+        }
     }
 }
