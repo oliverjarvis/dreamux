@@ -37,4 +37,18 @@ enum PhosphorIcon {
         }
         return Image(nsImage: nsImage).resizable()
     }
+
+    /// The raw `NSImage` behind a bundled glyph, for AppKit surfaces
+    /// that can't take a SwiftUI `Image` — the menu bar item's button.
+    /// Callers set `isTemplate` themselves, since only they know whether
+    /// the glyph should be tinted by the system.
+    static func nsImage(_ name: String) -> NSImage? {
+        guard let url = Bundle.module.url(
+            forResource: name, withExtension: "pdf", subdirectory: "PhosphorIcons")
+        else {
+            assertionFailure("missing bundled Phosphor icon: \(name)")
+            return nil
+        }
+        return NSImage(contentsOf: url)
+    }
 }
