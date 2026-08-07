@@ -20,10 +20,6 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
-    /// Flows pane zoom state: the lane id currently drilled into, or
-    /// `nil` for the overview. Lifted here (not `FlowsOverviewView`
-    /// `@State`) so the e2e `zoomFlow` command can drive it the same
-    /// way `pendingSidebarMode` drives `sidebarMode`.
     /// Owned by `ProjectWindow` — it must survive the id-keyed subtree
     /// rebuild a project switch triggers, or the collapsed rail snaps
     /// open whenever a stub glyph is clicked.
@@ -1192,7 +1188,7 @@ struct ContentView: View {
     /// Delegates to `PlanLaneAssembler`, the shared, unit-tested home for
     /// this glue (also used by the e2e `flowsState` command). `docStore`,
     /// `planQueue`, and `store` are all `@Observable`, and this is called
-    /// from `FlowsOverviewView.board` during its own `body` evaluation, so
+    /// from `FlowsCanvasView.body` during its own evaluation, so
     /// these reads register as that view's dependencies — a plan-state
     /// change (checkbox ticked, queue advances, workspace appears)
     /// re-renders the Flows pane on its own, with no reliance on
@@ -1481,7 +1477,7 @@ struct ContentView: View {
     /// zoom seam and "open transcript" both need this, and neither is
     /// handed the lane directly (they only get a bare `sessionID`), so
     /// both re-resolve it here rather than threading `Flow` itself
-    /// through `FlowsOverviewView`'s closures.
+    /// through `FlowsCanvasView`'s closures.
     private func sessionCwd(forSessionID sessionID: String) -> String? {
         session.flows.flows.first(where: { $0.sessionID == sessionID })?.sessionCwd
     }

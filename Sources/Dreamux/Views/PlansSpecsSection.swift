@@ -260,7 +260,7 @@ struct PlansSpecsSection: View {
                         Text("Open in Flows →")
                             .font(.system(size: 11)).foregroundStyle(Color.accentColor)
                     }
-                    ProjectGraphView(graph: graph, compact: true) { _ in onOpenProjectGraph() }
+                    ProjectGraphView(graph: graph) { _ in onOpenProjectGraph() }
                         .frame(maxWidth: .infinity, minHeight: 70)
                 }
                 .padding(10)

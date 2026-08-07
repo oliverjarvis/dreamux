@@ -22,9 +22,9 @@ struct FlowGateActions {
 
 /// The expanded gate card (spec "Gate cards"): headline, branch-vs-base
 /// diff stat, [view diff], and — only when the plan is truly at review —
-/// [merge & continue]. One shared view embedded by both the overview
-/// lane (FlowLaneView) and the zoom inspector (FlowDetailView) so the
-/// two surfaces can't drift.
+/// [merge & continue]. Embedded by the canvas's native inspector
+/// (`FlowsCanvasView`), which is the one place a waiting gate is
+/// actioned from.
 struct GateActionCard: View {
     let workspaceID: UUID
     /// False for the queue-`attention` gate: the plan stalled with steps

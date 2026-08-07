@@ -121,8 +121,8 @@ struct ConnectionsSettingsView: View {
     }
 
     /// Small static pill: imported-from-CLI (tool name) vs manual vs OAuth
-    /// (reserved). Informational, not tappable — matches the app's
-    /// static-Capsule chip shape (`FlowLaneView.nodeChip`).
+    /// (reserved). A static Capsule chip — no hover wash, no hit testing; it
+    /// labels state rather than offering an action.
     private func provenanceChip(_ source: Connection.Source) -> some View {
         let (text, tinted): (String, Bool) = {
             switch source {
