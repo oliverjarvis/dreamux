@@ -122,8 +122,7 @@ final class BundledAssetSchemeHandlerTests: XCTestCase {
     }
 
     func testBundledRootsExist() {
-        // TODO(Task 5): add "FlowsCanvas"
-        for name in ["Monaco"] {
+        for name in ["Monaco", "FlowsCanvas"] {
             let root = BundledAssetSchemeHandler.bundledRoot(named: name)
             XCTAssertTrue(FileManager.default.fileExists(atPath: root.path),
                           "missing bundled resource dir \(name)")

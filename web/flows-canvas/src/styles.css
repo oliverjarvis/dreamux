@@ -1,0 +1,35 @@
+@import '@xyflow/react/dist/style.css';
+
+:root {
+  --flows-surface: #1b1c1f;
+  --flows-text: #f2f2f4;
+  --flows-text-secondary: #a0a2a8;
+  --flows-accent: #4d8dff;
+  --flows-border: rgba(255, 255, 255, 0.14);
+  --flows-status-running: #ff9f0a;
+  --flows-status-queued: #a0a2a8;
+  --flows-status-waiting: #ff9f0a;
+  --flows-status-done: #34c759;
+  --flows-status-failed: #ff453a;
+
+  /* React Flow must not paint its own page background — the canvas sits
+     on the app surface and fills the pane edge to edge. */
+  --xy-background-color: transparent;
+  --xy-background-color-default: transparent;
+  --xy-edge-stroke: var(--flows-text-secondary);
+  --xy-edge-stroke-selected: var(--flows-accent);
+}
+
+html, body, #root, .react-flow {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--flows-surface);
+  color: var(--flows-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  /* "Generous, not dense": node labels are 14px, never 11pt caption2. */
+  font-size: 14px;
+  overflow: hidden;
+}
+
+.react-flow__renderer, .react-flow__pane { background: transparent; }
