@@ -33,3 +33,83 @@ html, body, #root, .react-flow {
 }
 
 .react-flow__renderer, .react-flow__pane { background: transparent; }
+
+/* --- status ---------------------------------------------------------- */
+.glyph { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.status-running .glyph, .glyph.status-running { background: var(--flows-status-running); }
+.status-queued  .glyph, .glyph.status-queued  { background: var(--flows-status-queued); }
+.status-waiting .glyph, .glyph.status-waiting { background: var(--flows-status-waiting); }
+.status-done    .glyph, .glyph.status-done    { background: var(--flows-status-done); }
+.status-failed  .glyph, .glyph.status-failed  { background: var(--flows-status-failed); }
+
+:root[data-reduce-motion='false'] .glyph.status-running {
+  animation: flows-pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes flows-pulse { from { opacity: 0.35 } to { opacity: 1 } }
+
+/* --- lane ------------------------------------------------------------ */
+.lane {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1.4px solid var(--flows-border);
+  background: color-mix(in srgb, var(--flows-surface) 88%, white 12%);
+  font-size: 14px;
+}
+.lane.selected { border-color: var(--flows-accent); border-width: 2px; }
+.lane.blocked { border-style: dashed; border-color: var(--flows-text-secondary); }
+.lane.finished { opacity: 0.6; }
+.lane-header { display: flex; align-items: center; gap: 7px; }
+.lane-chevron {
+  background: none; border: none; color: var(--flows-text-secondary);
+  cursor: pointer; font-size: 12px; padding: 0 2px;
+}
+.lane-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lane-warning { color: var(--flows-status-waiting); opacity: 0.7; }
+.lane-chip, .lane-pr, .lane-elapsed {
+  font-size: 12px; color: var(--flows-text-secondary); white-space: nowrap;
+}
+.lane-detail {
+  margin-top: 5px; font-size: 12px; color: var(--flows-text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lane-progress {
+  margin-top: 8px; height: 4px; border-radius: 2px;
+  background: color-mix(in srgb, var(--flows-text-secondary) 30%, transparent);
+}
+.lane-progress-fill { height: 100%; border-radius: 2px; background: var(--flows-accent); }
+
+/* --- task / gate / band ---------------------------------------------- */
+.task, .gate {
+  box-sizing: border-box; display: flex; align-items: center; gap: 6px;
+  width: 150px; height: 44px; padding: 0 10px; border-radius: 8px;
+  border: 1.5px solid transparent; font-size: 14px;
+  background: color-mix(in srgb, var(--flows-surface) 80%, white 20%);
+}
+.gate { border-color: var(--flows-status-waiting); }
+.task.selected, .gate.selected { border-color: var(--flows-accent); border-width: 2px; }
+.task-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-multiplicity { font-size: 12px; color: var(--flows-text-secondary); }
+.dot { width: 12px; height: 12px; border-radius: 50%; }
+.dot.status-running { background: var(--flows-status-running); }
+.dot.status-queued  { background: var(--flows-status-queued); }
+.dot.status-waiting { background: var(--flows-status-waiting); }
+.dot.status-done    { background: var(--flows-status-done); }
+.dot.status-failed  { background: var(--flows-status-failed); }
+
+.band {
+  box-sizing: border-box; width: 100%; height: 100%; border-radius: 12px;
+  background: color-mix(in srgb, var(--flows-text) 3%, transparent);
+  pointer-events: none;
+}
+.band-title {
+  display: block; padding: 5px 8px; font-size: 10px; font-weight: 600;
+  letter-spacing: 0.4px; color: var(--flows-text-secondary);
+}
+
+.self-loop { stroke-dasharray: 4 3; }
+.self-loop-label {
+  position: absolute; font-size: 12px; color: var(--flows-text-secondary);
+  pointer-events: none;
+}
