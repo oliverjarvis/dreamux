@@ -16,10 +16,7 @@ command -v npm >/dev/null || { echo "npm not found — node is required to rebui
 cd "$WEB"
 if [[ -f package-lock.json ]]; then npm ci; else npm install; fi
 npm run typecheck
-# TODO(Task 6): drop --passWithNoTests once test/layout.test.ts exists.
-# The first vitest suites arrive in Tasks 6-7; until then `vitest run` exits
-# 1 on an empty suite and would abort this script under `set -e`.
-npm test -- --passWithNoTests
+npm test
 npm run build
 
 mkdir -p "$OUT"
