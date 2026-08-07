@@ -39,13 +39,13 @@ final class E2EBridge {
     /// `setFileTree` command and consumed by `ContentView`.
     var pendingFileTreeVisible: Bool?
 
-    /// Lane id the Flows pane should zoom into, parked by the
-    /// `zoomFlow` command and consumed by `ContentView` into
-    /// `flowsZoomLaneID`. `nil` means "nothing pending" (the
+    /// Lane to focus on the Flows canvas, parked by the `zoomFlow`
+    /// command and consumed by `ContentView` into
+    /// `FlowsCanvasSession.focusLane`. `nil` means "nothing pending" (the
     /// consume-and-clear idiom every other `pending*` field uses); since
-    /// `zoomFlow`'s own "clear the zoom" request is itself a `nil`
-    /// target, that request is parked as the empty string instead —
-    /// the one lane id value that can never be real.
+    /// `zoomFlow`'s own `laneID: null` "collapse everything" form is
+    /// itself a `nil` target, that request is parked as the empty string
+    /// instead — the one lane id value that can never be real.
     var pendingFlowsZoomLaneID: String?
 
     /// When true, the Run pane kicks off its Detect flow (sending the

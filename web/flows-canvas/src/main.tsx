@@ -1,7 +1,7 @@
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { Board, laneNodeID } from './Board'
+import { Board } from './Board'
 import { Bridge, webkitTransport } from './bridge'
 import './styles.css'
 import { applyTheme } from './theme'
@@ -50,7 +50,7 @@ function App(): JSX.Element {
   const [lanePositions, setLanePositions] = useState<Record<string, XY>>({})
   const [nodePositions, setNodePositions] = useState<Record<string, Record<string, XY>>>({})
   const [focusRequest, setFocusRequest] = useState<{ laneID: string; token: number } | null>(null)
-  const { setViewport } = useReactFlow()
+  const { setViewport, getNodes, getViewport } = useReactFlow()
 
   /** Expansion drives the lazy transcript tail: `setLaneExpanded(true)`
    *  begins a tail, `false` releases it, and an LRU collapse releases the
@@ -139,16 +139,27 @@ function App(): JSX.Element {
     }
   }, [setLaneExpanded, setViewport])
 
-  const debug = useMemo<() => DebugState>(() => () => ({
-    mounted: true,
-    nodeIDs: snapshot.lanes.flatMap((lane) => [
-      laneNodeID(lane.id),
-      ...(expanded.includes(lane.id) ? lane.nodes.map((node) => `node:${lane.id}:${node.id}`) : []),
-    ]),
-    expanded,
-    lanePositions,
-    zoom: 1,
-  }), [snapshot, expanded, lanePositions])
+  /// Read straight off React Flow rather than off our own props: this is
+  /// the e2e harness's proof that the canvas DREW the board, so reporting
+  /// the inputs we were handed would assert nothing. `lanePositions` in
+  /// particular holds only RESTORED positions — an auto-laid-out lane has
+  /// no entry there, but it does have a rendered one.
+  const debug = useMemo<() => DebugState>(() => () => {
+    const nodes = getNodes()
+    const lanePositions: Record<string, XY> = {}
+    for (const node of nodes) {
+      if (node.type !== 'lane') continue
+      const laneID = (node.data as { laneID?: string }).laneID
+      if (laneID) lanePositions[laneID] = { x: node.position.x, y: node.position.y }
+    }
+    return {
+      mounted: true,
+      nodeIDs: nodes.map((node) => node.id),
+      expanded,
+      lanePositions,
+      zoom: getViewport().zoom,
+    }
+  }, [getNodes, getViewport, expanded])
 
   useEffect(() => {
     handlers.debugState = () => JSON.stringify(debug())

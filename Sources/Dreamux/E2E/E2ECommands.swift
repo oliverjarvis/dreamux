@@ -127,6 +127,8 @@ enum E2ECommands {
             return try flowsState(request: request)
         case "zoomFlow":
             return try zoomFlow(request: request)
+        case "flowsCanvasState":
+            return try await flowsCanvasState()
         case "createApplet":
             return try createApplet(request: request)
         case "openApplet":
@@ -967,15 +969,44 @@ enum E2ECommands {
         return lane
     }
 
-    /// Zoom the Flows pane into a lane (or clear the zoom with a `null`/
-    /// absent `laneID`) — parks the request on the bridge for
-    /// `ContentView` to adopt, same consume-and-clear shape as
+    /// Focus one lane on the Flows canvas — expand it and zoom-to-fit — or
+    /// collapse everything with a `null`/absent `laneID`. Parked on the
+    /// bridge and adopted by `ContentView` into
+    /// `FlowsCanvasSession.focusLane`, same consume-and-clear shape as
     /// `setSidebarMode`. See `E2EBridge.pendingFlowsZoomLaneID` for why
     /// "clear" is the empty-string sentinel rather than `nil` itself.
     private static func zoomFlow(request: [String: Any]) throws -> [String: Any] {
         let (handles, _, _) = try projectStores()
         handles.bridge.pendingFlowsZoomLaneID = (request["laneID"] as? String) ?? ""
         return ["ok": true]
+    }
+
+    /// Snapshot of what the Flows CANVAS actually rendered — rendered node
+    /// ids, the expansion set and lane positions — read straight off
+    /// `window.dreamuxFlows.debugState()`. `flowsState` proves the STORES
+    /// are right; this proves the canvas drew them, so a driver can
+    /// hard-assert instead of trusting a screenshot.
+    ///
+    /// `mounted: false` (with empty collections) means the pane has never
+    /// been on screen in this window — the web view is created lazily on
+    /// first access, so a driver must `setSidebarMode mode=flows` first.
+    private static func flowsCanvasState() async throws -> [String: Any] {
+        let (_, session) = try activeSession()
+        guard let json = await session.flowsCanvas.debugStateJSON(),
+              let object = try? JSONSerialization.jsonObject(with: Data(json.utf8)),
+              let state = object as? [String: Any]
+        else {
+            return ["ok": true, "mounted": false,
+                    "nodeIDs": [String](), "expanded": [String](),
+                    "lanePositions": [String: Any]()]
+        }
+        return [
+            "ok": true,
+            "mounted": state["mounted"] as? Bool ?? false,
+            "nodeIDs": state["nodeIDs"] as? [String] ?? [],
+            "expanded": state["expanded"] as? [String] ?? [],
+            "lanePositions": state["lanePositions"] as? [String: Any] ?? [:],
+        ]
     }
 
     // MARK: - Applets
