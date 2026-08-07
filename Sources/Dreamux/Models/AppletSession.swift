@@ -110,8 +110,9 @@ final class AppletSession: @MainActor Identifiable {
 
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(
-            AppletSchemeHandler(root: applet.folderURL),
-            forURLScheme: AppletSchemeHandler.scheme
+            BundledAssetSchemeHandler(
+                scheme: BundledAssetSchemeHandler.appletScheme, root: applet.folderURL),
+            forURLScheme: BundledAssetSchemeHandler.appletScheme
         )
         config.userContentController.add(AppletBridge(owner: self), name: "dreamux")
 
@@ -134,7 +135,8 @@ final class AppletSession: @MainActor Identifiable {
         view.navigationDelegate = policy
         view.isInspectable = true
 
-        let url = URL(string: "\(AppletSchemeHandler.scheme)://\(applet.id.uuidString)/index.html")!
+        let url = URL(string:
+            "\(BundledAssetSchemeHandler.appletScheme)://\(applet.id.uuidString)/index.html")!
         view.load(URLRequest(url: url))
 
         _webView = view
@@ -265,7 +267,7 @@ final class AppletNavigationPolicy: NSObject, WKNavigationDelegate {
     ) async -> WKNavigationActionPolicy {
         guard let url = navigationAction.request.url, let scheme = url.scheme else { return .cancel }
         switch scheme {
-        case AppletSchemeHandler.scheme, "about":
+        case BundledAssetSchemeHandler.appletScheme, "about":
             return .allow
         case "http", "https":
             NSWorkspace.shared.open(url)

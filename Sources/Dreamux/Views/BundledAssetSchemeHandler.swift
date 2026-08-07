@@ -1,25 +1,44 @@
 import Foundation
 import WebKit
 
-/// Serves an applet folder to its WKWebView over `dreamux-applet://`.
-/// URL shape: `dreamux-applet://<applet-id>/<path>`; bare host → index.html.
-/// Clone of `MonacoSchemeHandler` plus a traversal guard: the resolved file
-/// must stay inside the root. The host segment (the applet id) is not used
-/// for resolution — this handler instance is already bound to one folder;
-/// validating the id against that binding is not this type's job.
-final class AppletSchemeHandler: NSObject, WKURLSchemeHandler {
-    static let scheme = "dreamux-applet"
+/// Serves a bundled (or on-disk) directory to a `WKWebView` over a custom
+/// scheme. One type for all three consumers — Monaco (`app-monaco`), applets
+/// (`dreamux-applet`) and the Flows canvas (`dreamux-flows`) — so the
+/// traversal guard exists in exactly one place. A custom scheme (rather than
+/// `file://`) is required so Monaco's language-service web workers load
+/// without cross-origin/worker restrictions.
+///
+/// URL shape: `<scheme>://<host>/<path>` → `<root>/<path>`; a bare host
+/// resolves to `index.html`. The host segment is never used for resolution —
+/// an instance is already bound to one root.
+final class BundledAssetSchemeHandler: NSObject, WKURLSchemeHandler {
+    // `WKURLSchemeHandler` is a @MainActor protocol, so conforming would
+    // infer @MainActor for these too. They are immutable strings and pure
+    // functions over their arguments — nothing here touches main-actor
+    // state, and callers (tests, `AppletNavigationPolicy`) read them from
+    // nonisolated contexts.
+    nonisolated static let monacoScheme = "app-monaco"
+    nonisolated static let appletScheme = "dreamux-applet"
+    nonisolated static let flowsScheme = "dreamux-flows"
 
+    private let scheme: String
     private let root: URL
 
-    init(root: URL) {
+    init(scheme: String, root: URL) {
+        self.scheme = scheme
         self.root = root
         super.init()
     }
 
+    /// A copied `Resources/<name>` directory inside the SwiftPM resource
+    /// bundle (`.copy` in Package.swift).
+    nonisolated static func bundledRoot(named name: String) -> URL {
+        Bundle.module.url(forResource: name, withExtension: nil)!
+    }
+
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url,
-              let fileURL = Self.resolvedFileURL(for: url, root: root)
+              let fileURL = Self.resolvedFileURL(for: url, root: root, scheme: scheme)
         else {
             task.didFailWithError(URLError(.badURL))
             return
@@ -43,9 +62,9 @@ final class AppletSchemeHandler: NSObject, WKURLSchemeHandler {
 
     /// Resolves `url` to a file inside `root`, guarding against traversal
     /// (raw `../` or percent-encoded `%2e%2e/`) and symlink escapes.
-    /// Returns nil for foreign schemes or any resolution landing outside
+    /// Returns nil for a foreign scheme or any resolution landing outside
     /// `root`. An empty path (bare host) resolves to `index.html`.
-    static func resolvedFileURL(for url: URL, root: URL) -> URL? {
+    nonisolated static func resolvedFileURL(for url: URL, root: URL, scheme: String) -> URL? {
         guard url.scheme == scheme else { return nil }
 
         // `URL.path` already percent-decodes, so "%2e%2e" and ".." arrive
@@ -68,7 +87,7 @@ final class AppletSchemeHandler: NSObject, WKURLSchemeHandler {
         return candidate
     }
 
-    static func mimeType(forPathExtension ext: String) -> String {
+    nonisolated static func mimeType(forPathExtension ext: String) -> String {
         switch ext.lowercased() {
         case "html": return "text/html"
         case "js", "mjs": return "text/javascript"

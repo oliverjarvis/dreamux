@@ -45,7 +45,9 @@ final class FileEditorTabSession: Identifiable {
 
     @ObservationIgnored private var _webView: WKWebView?
     /// One handler serves every editor tab's assets.
-    @ObservationIgnored private static let schemeHandler = MonacoSchemeHandler()
+    @ObservationIgnored private static let schemeHandler = BundledAssetSchemeHandler(
+        scheme: BundledAssetSchemeHandler.monacoScheme,
+        root: BundledAssetSchemeHandler.bundledRoot(named: "Monaco"))
 
     init(fileURL: URL) {
         let resolved = fileURL.resolvingSymlinksInPath()
@@ -103,11 +105,13 @@ final class FileEditorTabSession: Identifiable {
     var webView: WKWebView {
         if let _webView { return _webView }
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(Self.schemeHandler, forURLScheme: MonacoSchemeHandler.scheme)
+        config.setURLSchemeHandler(Self.schemeHandler,
+                                   forURLScheme: BundledAssetSchemeHandler.monacoScheme)
         config.userContentController.add(Bridge(owner: self), name: "bridge")
         let view = WKWebView(frame: .zero, configuration: config)
         view.isInspectable = true
-        view.load(URLRequest(url: URL(string: "\(MonacoSchemeHandler.scheme)://app/index.html")!))
+        view.load(URLRequest(url: URL(
+            string: "\(BundledAssetSchemeHandler.monacoScheme)://app/index.html")!))
         _webView = view
         return view
     }

@@ -38,7 +38,9 @@ final class DiffTabSession {
     /// One handler serves every diff tab's assets — same scheme
     /// handler instance FileEditorTabSession uses, since both load the
     /// same vendored Monaco bundle over `app-monaco://`.
-    @ObservationIgnored private static let schemeHandler = MonacoSchemeHandler()
+    @ObservationIgnored private static let schemeHandler = BundledAssetSchemeHandler(
+        scheme: BundledAssetSchemeHandler.monacoScheme,
+        root: BundledAssetSchemeHandler.bundledRoot(named: "Monaco"))
 
     init(request: DiffRequest) {
         self.request = request
@@ -48,11 +50,13 @@ final class DiffTabSession {
     var webView: WKWebView {
         if let _webView { return _webView }
         let config = WKWebViewConfiguration()
-        config.setURLSchemeHandler(Self.schemeHandler, forURLScheme: MonacoSchemeHandler.scheme)
+        config.setURLSchemeHandler(Self.schemeHandler,
+                                   forURLScheme: BundledAssetSchemeHandler.monacoScheme)
         config.userContentController.add(Bridge(owner: self), name: "bridge")
         let view = WKWebView(frame: .zero, configuration: config)
         view.isInspectable = true
-        view.load(URLRequest(url: URL(string: "\(MonacoSchemeHandler.scheme)://app/index.html")!))
+        view.load(URLRequest(url: URL(
+            string: "\(BundledAssetSchemeHandler.monacoScheme)://app/index.html")!))
         _webView = view
         return view
     }
