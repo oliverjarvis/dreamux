@@ -946,10 +946,13 @@ def scenario_publish_pr(d):
 
 
 def scenario_flows(d):
-    """Flows pane: a synthetic registry session plus real emit-socket
+    """Flows canvas: a synthetic registry session plus real emit-socket
     signals render a running lane, then a notification flips it to
     needs-you, then a synthetic transcript + subagent meta on disk let
-    zoomFlow exercise the lazy full-replay tailer.
+    zoomFlow exercise the lazy full-replay tailer — which now hangs off
+    lane EXPANSION on the canvas rather than a separate detail screen.
+    These enrichment assertions are the regression test for moving that
+    tail seam.
 
     The lane's cwd must resolve to a real workspace or FlowStore's
     isInProject scoping drops it (see FlowWiring.workspaceID) — so this
@@ -1123,10 +1126,39 @@ def scenario_flows(d):
     require({"src", "session", "agent-e2e-a1", "drain"} <= node_ids,
             f"expected DAG nodes missing, got {node_ids}")
 
+    # The canvas itself must have drawn this lane and expanded it — the
+    # store-level asserts above only prove FlowStore is right.
+    def canvas_expanded():
+        state = d.cmd("flowsCanvasState")
+        if not state.get("mounted"):
+            return None
+        lane_id = f"session-{session_id}"
+        if lane_id not in state.get("expanded", []):
+            return None
+        node_ids = set(state.get("nodeIDs", []))
+        if f"lane:{lane_id}" not in node_ids:
+            return None
+        # An expanded lane draws its task nodes as children.
+        if not {f"node:{lane_id}:src", f"node:{lane_id}:session",
+                f"node:{lane_id}:agent-e2e-a1"} <= node_ids:
+            return None
+        return state
+
+    canvas = d.wait_until(canvas_expanded, 10.0,
+                          "canvas to render the flows-demo lane expanded with its task nodes")
+    require(f"session-{session_id}" in canvas["lanePositions"],
+            "canvas should report a position for the rendered lane")
+
     time.sleep(1.0)
     d.screenshot("flows-zoom")
 
     d.cmd("zoomFlow", laneID=None)
+
+    def canvas_collapsed():
+        state = d.cmd("flowsCanvasState")
+        return state if state.get("expanded") == [] else None
+
+    d.wait_until(canvas_collapsed, 10.0, "canvas to collapse every lane on zoomFlow laneID=null")
 
     # 6. Loop: append >=3 failing "swift test" pairs (same Bash
     # leading-token signature "Bash:swift") to the SAME transcript file
@@ -1187,10 +1219,10 @@ def scenario_flows(d):
     time.sleep(1.0)
     d.screenshot("flows-loop-overview")
 
-    # 7. Zoom into the looping lane: FlowDetailView's Canvas special-cases
-    # edge.from == edge.to into a dashed 270 degree arc plus a "loop x N"
-    # label overlay (see FlowDetailView.swift / task-3-report.md) instead
-    # of the degenerate zero-length line a straight edge would draw.
+    # 7. Expand the looping lane again: the canvas renders a self-edge with
+    # the custom SelfLoopEdge arc plus its "loop x N" label (src/nodes/
+    # SelfLoopEdge.tsx) instead of the degenerate zero-length line a
+    # straight edge would draw.
     #
     # NOT asserting a specific `iterations` count here (only presence,
     # below): `zoomFlow` always triggers FlowTailerPool.ensureLazyTail's
@@ -1238,10 +1270,10 @@ def scenario_flows(d):
 
 def scenario_plan_gate(d):
     """Drive a real plan through the queue to atGate and verify the
-    Flows gate card: plan lane's gate node waiting in flowsState, the
-    expanded card in the overview, and the gate-preselected inspector
-    in zoom. Buttons aren't clickable from the harness — their channels
-    are unit/scenario-covered elsewhere; this pins the rendered state."""
+    Flows gate card: plan lane's gate node waiting in flowsState, and the
+    lane rendered on the canvas with its gate node drawn once expanded.
+    Buttons aren't clickable from the harness — their channels are
+    unit/scenario-covered elsewhere; this pins the rendered state."""
     plans_dir = os.path.join(PROJECT_DIR, "docs", "plans")
     os.makedirs(plans_dir, exist_ok=True)
     plan_rel = "docs/plans/2026-07-06-gate-demo.md"
@@ -1324,8 +1356,17 @@ def scenario_plan_gate(d):
     time.sleep(1.5)  # render + the card's one-shot diff-stat fetch
     d.screenshot("flows-gate-card")
 
-    # Zoom: gate node preselected -> inspector carries the same card.
+    # Expand the plan lane: the canvas draws its gate node.
     d.cmd("zoomFlow", laneID=plan_lane_id)
+
+    def canvas_shows_gate():
+        state = d.cmd("flowsCanvasState")
+        lane_id = f"plan-{plan_rel}"
+        if not state.get("mounted") or lane_id not in state.get("expanded", []):
+            return None
+        return state if f"node:{lane_id}:gate" in set(state.get("nodeIDs", [])) else None
+
+    d.wait_until(canvas_shows_gate, 10.0, "canvas to render the plan lane's gate node")
     time.sleep(1.5)
     d.screenshot("flows-gate-zoom")
     d.cmd("zoomFlow", laneID=None)

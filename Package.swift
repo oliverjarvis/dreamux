@@ -43,6 +43,7 @@ let package = Package(
                 .copy("Resources/Monaco"),
                 .copy("Resources/AppletScaffold"),
                 .copy("Resources/PhosphorIcons"),
+                .copy("Resources/FlowsCanvas"),
             ]
         ),
         .target(

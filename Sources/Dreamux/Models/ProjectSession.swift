@@ -60,6 +60,7 @@ final class ProjectSession {
     /// and its builder-agent terminal survive SwiftUI redraws — the same
     /// keep-it-alive discipline the workspace terminal sessions use.
     @ObservationIgnored private var appletSessions: [UUID: AppletSession] = [:]
+    @ObservationIgnored private var _flowsCanvas: FlowsCanvasSession?
 
     /// Non-e2e channel for the plan queue's "merge and continue" gate
     /// action: `WorkspaceSidebar` owns the merge sheet's presentation
@@ -773,22 +774,42 @@ final class ProjectSession {
         E2ERegistry.shared.registerSession(projectID: project.id, session: self)
     }
 
-    /// The Flows detail view's zoom-in seam: `FlowDetailView` calls this
-    /// on appear (via `ContentView`) when its lane has a `sessionID`, so
-    /// the pool replays that session's full transcript history instead
-    /// of only what's tailed live for the hot set. `cwd` falls back to
-    /// the project root the same way `isInProject` does elsewhere —
-    /// every lane's `sessionCwd` should be populated by the time a lane
-    /// is zoomable, so this only matters for a pathological gap.
+    /// The Flows canvas's expansion seam: `FlowsCanvasSession` calls this
+    /// when a lane expands, so the pool replays that session's full
+    /// transcript history instead of only what's tailed live for the hot
+    /// set. `cwd` falls back to the project root the same way `isInProject`
+    /// does elsewhere — every lane's `sessionCwd` should be populated by
+    /// the time a lane is expandable, so this only matters for a
+    /// pathological gap.
     func beginFlowsZoom(sessionID: String, cwd: String?) {
         flowTailerPool?.ensureLazyTail(sessionID: sessionID, cwd: cwd ?? project.rootPath.path)
     }
 
-    /// The zoom detail view's teardown twin — called on disappear/back.
-    /// A session still in the hot set keeps tailing regardless (see
-    /// `FlowTailerPool.releaseLazyTail`).
+    /// The expansion seam's teardown twin — called on collapse, on an LRU
+    /// eviction, and on leaving the pane. A session still in the hot set
+    /// keeps tailing regardless (see `FlowTailerPool.releaseLazyTail`).
     func endFlowsZoom(sessionID: String) {
         flowTailerPool?.releaseLazyTail(sessionID: sessionID)
+    }
+
+    /// The Flows canvas's live session — its `WKWebView` must outlive the
+    /// pane's redraws, so it is created once per project and cached here
+    /// (the applet pattern), not per tab activation. Its expansion set
+    /// drives the same lazy-tail seam `beginFlowsZoom`/`endFlowsZoom`
+    /// already own.
+    var flowsCanvas: FlowsCanvasSession {
+        if let _flowsCanvas { return _flowsCanvas }
+        let session = FlowsCanvasSession(
+            layout: FlowsCanvasLayoutStore(project: project),
+            beginTail: { [weak self] sessionID, cwd in
+                self?.beginFlowsZoom(sessionID: sessionID, cwd: cwd)
+            },
+            endTail: { [weak self] sessionID in
+                self?.endFlowsZoom(sessionID: sessionID)
+            }
+        )
+        _flowsCanvas = session
+        return session
     }
 
     // MARK: - Applets

@@ -20,11 +20,6 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var sidebarMode: SidebarMode = .workspace
     @State private var showFileTree = false
-    /// Flows pane zoom state: the lane id currently drilled into, or
-    /// `nil` for the overview. Lifted here (not `FlowsOverviewView`
-    /// `@State`) so the e2e `zoomFlow` command can drive it the same
-    /// way `pendingSidebarMode` drives `sidebarMode`.
-    @State private var flowsZoomLaneID: String?
     /// Owned by `ProjectWindow` — it must survive the id-keyed subtree
     /// rebuild a project switch triggers, or the collapsed rail snaps
     /// open whenever a stub glyph is clicked.
@@ -224,7 +219,7 @@ struct ContentView: View {
                                 plan: plan, summary: summary, priority: priority)
                         },
                         autoRunFailure: { session.autoRunFailures[$0] },
-                        onOpenProjectGraph: { sidebarMode = .flows; flowsZoomLaneID = nil },
+                        onOpenProjectGraph: { sidebarMode = .flows },
                         applets: session.applets,
                         appLibrary: session.appLibrary,
                         appletSessionProvider: { session.appletSession(for: $0) },
@@ -468,11 +463,10 @@ struct ContentView: View {
         }
         .onChange(of: sidebarMode) { _, newValue in
             e2eBridge?.currentSidebarMode = newValue
-            // Leaving the Flows pane resets any zoom: a predictable
-            // return-to-overview next visit, and it avoids paying for a
-            // full transcript replay (the zoom lazy-tail seam) on every
-            // pane round-trip rather than only while actually zoomed in.
-            if newValue != .flows { flowsZoomLaneID = nil }
+            // Leaving the Flows pane collapses every expanded lane: a
+            // predictable board next visit, and it avoids holding the
+            // expansion lazy-tail seam open across pane round-trips.
+            if newValue != .flows { session.flowsCanvas.focusLane(nil) }
         }
         .onChange(of: e2eBridge?.pendingFileTreeVisible) { _, _ in
             if let bridge = e2eBridge, let visible = bridge.pendingFileTreeVisible {
@@ -692,17 +686,20 @@ struct ContentView: View {
         case .signals:
             SignalsView(signals: signals, runners: runners, projectDir: repoStore.project.rootPath.path)
         case .flows:
-            FlowsOverviewView(
+            FlowsCanvasView(
                 flows: session.flows,
+                session: session.flowsCanvas,
                 planLaneInputs: planLaneInputs,
                 prStatesByWorkspace: prStatesByWorkspace,
                 graftSubagents: { lane in
                     // A graft closure keyed by lane id ("plan-<planPath>"). For each
-                    // plan with a live workspace, pull its subagents (slice 1) and
-                    // the current task line, then graft them onto the lane (Task 3).
-                    guard let plan = docStore.plans.first(where: { "plan-\(docStore.relativePath(of: $0))" == lane.id }),
+                    // plan with a live workspace, pull its subagents and the current
+                    // task line, then graft them onto the lane.
+                    guard let plan = docStore.plans.first(where: {
+                        "plan-\(docStore.relativePath(of: $0))" == lane.id }),
                           let ws = lane.workspaceID else { return lane }
-                    let subs = OverviewLiveAgents.subagents(in: session.flows.flows, workspaceID: ws, tasks: plan.tasks)
+                    let subs = OverviewLiveAgents.subagents(
+                        in: session.flows.flows, workspaceID: ws, tasks: plan.tasks)
                     let current = plan.tasks.first { $0.steps.contains { !$0.checked } }?.line
                     return RunLaneGraft.graft(lane, subagents: subs, currentTaskLine: current)
                 },
@@ -714,9 +711,9 @@ struct ContentView: View {
                             let target = docStore.resolvedURL(forReference: ref)
                             return docStore.plans.first { $0.fileURL.standardizedFileURL == target }
                         },
-                        statusOf: { docStore.status(for: $0, featureExists: { name in store.featureNames.contains(name) }) })
+                        statusOf: { docStore.status(
+                            for: $0, featureExists: { name in store.featureNames.contains(name) }) })
                 },
-                zoomedLaneID: $flowsZoomLaneID,
                 onJumpToTerminal: { workspaceID in
                     // Same activation shape as WorkspaceSidebar.selectWorkspace:
                     // flip back to the terminal view before activating, so
@@ -725,12 +722,6 @@ struct ContentView: View {
                     store.activate(workspaceID)
                 },
                 onOpenTranscript: { sessionID in openTranscript(sessionID: sessionID) },
-                onZoomBegin: { sessionID in
-                    session.beginFlowsZoom(sessionID: sessionID, cwd: sessionCwd(forSessionID: sessionID))
-                },
-                onZoomEnd: { sessionID in
-                    session.endFlowsZoom(sessionID: sessionID)
-                },
                 gateActions: flowGateActions
             )
         case .library:
@@ -1197,7 +1188,7 @@ struct ContentView: View {
     /// Delegates to `PlanLaneAssembler`, the shared, unit-tested home for
     /// this glue (also used by the e2e `flowsState` command). `docStore`,
     /// `planQueue`, and `store` are all `@Observable`, and this is called
-    /// from `FlowsOverviewView.board` during its own `body` evaluation, so
+    /// from `FlowsCanvasView.body` during its own evaluation, so
     /// these reads register as that view's dependencies — a plan-state
     /// change (checkbox ticked, queue advances, workspace appears)
     /// re-renders the Flows pane on its own, with no reliance on
@@ -1249,7 +1240,7 @@ struct ContentView: View {
                     ?? session.flows.flows.first { $0.workspaceID == ws }   // Mode B fallback
                 if let lane {
                     sidebarMode = .flows
-                    flowsZoomLaneID = lane.id
+                    session.flowsCanvas.focusLane(lane.id, expand: true)
                 }
             },
             prState: { name in prState(forFeature: name) }
@@ -1486,7 +1477,7 @@ struct ContentView: View {
     /// zoom seam and "open transcript" both need this, and neither is
     /// handed the lane directly (they only get a bare `sessionID`), so
     /// both re-resolve it here rather than threading `Flow` itself
-    /// through `FlowsOverviewView`'s closures.
+    /// through `FlowsCanvasView`'s closures.
     private func sessionCwd(forSessionID sessionID: String) -> String? {
         session.flows.flows.first(where: { $0.sessionID == sessionID })?.sessionCwd
     }
@@ -1794,13 +1785,13 @@ struct ContentView: View {
 
     /// Same consume-and-clear shape as `consumePendingSidebarModeIfAny`,
     /// but with an extra wrinkle: `nil` is itself a valid target value
-    /// (clear the zoom), so the bridge can't use `nil` as its own
+    /// (collapse everything), so the bridge can't use `nil` as its own
     /// "nothing pending" marker — it uses the empty string as that
     /// sentinel instead (see `E2EBridge.pendingFlowsZoomLaneID`).
     private func consumePendingFlowsZoomIfAny() {
         guard let bridge = e2eBridge, let laneID = bridge.pendingFlowsZoomLaneID else { return }
         bridge.pendingFlowsZoomLaneID = nil
-        flowsZoomLaneID = laneID.isEmpty ? nil : laneID
+        session.flowsCanvas.focusLane(laneID.isEmpty ? nil : laneID, expand: true)
     }
 }
 

@@ -871,29 +871,30 @@ Field notes:
   session at least once. `nodes[].lastActivity` (omitted unless set) is
   a one-line summary of that node's most recent transcript activity
   (tool call summary for the session node, subagent meta description
-  for an agent node) — the same text the zoom detail view's inspector
-  shows.
+  for an agent node) — the same text the canvas's native inspector shows.
 
 ### `zoomFlow`
 
-Zoom the Flows pane into one lane's DAG detail view (`FlowDetailView`),
-or clear the zoom back to the overview. `laneID` is a `flowsState`
-lane id (`"session-<sessionId>"` or `"plan-<planPath>"`); omit it or
-pass `null` to clear. Parked on the bridge and adopted by `ContentView`
+Focus one lane on the Flows canvas — expand it in place and zoom-to-fit —
+or collapse every expanded lane. `laneID` is a `flowsState` lane id
+(`"session-<sessionId>"` or `"plan-<planPath>"`); omit it or pass `null`
+to collapse everything. Parked on the bridge and adopted by `ContentView`
 the same consume-and-clear way `setSidebarMode` is — call `flowsState`
-afterward (or just wait) to confirm the zoom landed before screenshotting,
-since adoption happens on the next SwiftUI update pass. Zooming into a
-lane with a `sessionID` triggers a one-time full replay of that
-session's transcript (`ProjectSession.beginFlowsZoom`, the pool's
-`ensureLazyTail`) — the hot-tail path (used while a session is merely
-`running`/`waiting`) only ever reads from the point it started
-watching, so a transcript written to disk before the session first
-entered the hot set is otherwise never read at all; zooming is the only
-way to pull that history in.
+(or `flowsCanvasState`) afterward to confirm it landed before
+screenshotting, since adoption happens on the next SwiftUI update pass.
 
-Leaving the Flows pane (`setSidebarMode` to anything else) clears the
-zoom — re-entering `flows` always lands back on the overview, never a
-stale zoomed lane; re-zoom explicitly if needed.
+Expanding a lane with a `sessionID` triggers a one-time full replay of
+that session's transcript (`FlowsCanvasSession`'s expansion seam →
+`ProjectSession.beginFlowsZoom` → the pool's `ensureLazyTail`) — the
+hot-tail path (used while a session is merely `running`/`waiting`) only
+ever reads from the point it started watching, so a transcript written to
+disk before the session first entered the hot set is otherwise never read
+at all; expanding is the only way to pull that history in.
+
+Expansion is capped at three lanes, LRU-collapsing the oldest — a fourth
+`zoomFlow` releases the first lane's tail. Leaving the Flows pane
+(`setSidebarMode` to anything else) collapses everything, so re-entering
+`flows` never holds a stale tail open.
 
 ```
 → {"cmd":"zoomFlow","laneID":"session-e2e-session-1"}
@@ -901,6 +902,29 @@ stale zoomed lane; re-zoom explicitly if needed.
 
 → {"cmd":"zoomFlow","laneID":null}
 ← {"ok":true}
+```
+
+### `flowsCanvasState`
+
+Snapshot of what the Flows **canvas** rendered, read from
+`window.dreamuxFlows.debugState()` inside the web view: the React Flow
+node ids currently on the canvas (`lane:<laneID>` for every lane, plus
+`node:<laneID>:<nodeID>` for each expanded lane's task nodes), the
+expansion set, and lane positions. Where `flowsState` proves the stores
+are right, this proves the canvas drew them — so a driver hard-asserts
+rather than trusting a screenshot.
+
+`mounted` is `false` (with empty collections) until the pane has been on
+screen at least once in this window: the canvas `WKWebView` is created
+lazily on first access. Call `setSidebarMode mode=flows` first.
+
+```
+→ {"cmd":"flowsCanvasState"}
+← {"ok":true,"mounted":true,
+   "nodeIDs":["lane:session-e2e-session-1","node:session-e2e-session-1:src",
+              "node:session-e2e-session-1:session"],
+   "expanded":["session-e2e-session-1"],
+   "lanePositions":{"session-e2e-session-1":{"x":0,"y":0}}}
 ```
 
 ### App Studio applets
