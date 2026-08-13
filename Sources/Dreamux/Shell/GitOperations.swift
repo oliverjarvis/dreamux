@@ -272,20 +272,40 @@ enum GitOperations {
 
     /// Create a worktree at `<repoRootURL>/<branch>/` on a branch named
     /// `<branch>`. If the branch already exists locally, the worktree
-    /// is checked out from it; otherwise a fresh branch is created off
-    /// the repository's current HEAD.
-    static func addWorktree(in repoRootURL: URL, branch: String) async throws {
+    /// is checked out from it; otherwise a fresh branch is created — off
+    /// `startPoint` when one is given (e.g. `origin/<branch>`, to open a
+    /// branch that only exists on the remote), else off the repository's
+    /// current HEAD.
+    ///
+    /// Returns true when a NEW local branch was created, false when an
+    /// existing branch was checked out. Callers use this to avoid
+    /// deleting a branch they did not make.
+    @discardableResult
+    static func addWorktree(
+        in repoRootURL: URL,
+        branch: String,
+        startPoint: String? = nil
+    ) async throws -> Bool {
         let exists = (try? await runGit(
             ["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"],
             in: repoRootURL
         )) != nil
         let args: [String]
         if exists {
+            // A local head wins over the start point: it may sit behind
+            // `origin`, and silently fast-forwarding someone's branch is
+            // not this call's job.
             args = ["worktree", "add", branch, branch]
+        } else if let startPoint {
+            // `--track` sets the upstream explicitly, so aheadBehind,
+            // push and fastForwardFromOrigin work on the new worktree at
+            // once rather than after a manual --set-upstream-to.
+            args = ["worktree", "add", "--track", "-b", branch, branch, startPoint]
         } else {
             args = ["worktree", "add", "-b", branch, branch]
         }
         _ = try await runGit(args, in: repoRootURL)
+        return !exists
     }
 
     /// Remove a worktree, force if needed, and prune.
@@ -324,6 +344,32 @@ enum GitOperations {
             ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)"],
             in: repoRootURL
         )) != nil
+    }
+
+    /// The `for-each-ref` format `listBranchRefs` emits and
+    /// `BranchCatalog.parse` consumes. Tab-separated (`%09`): tabs can't
+    /// appear in a ref name, and the subject is last so a stray tab there
+    /// is harmless. `committerdate:unix` avoids date-format parsing.
+    static let branchRefFormat =
+        "%(refname)%09%(committerdate:unix)%09%(authorname)%09%(objectname:short)%09%(contents:subject)"
+
+    /// `git fetch --prune origin`. Best-effort: reports success rather
+    /// than throwing, because a branch picker that lists local refs is
+    /// still useful when the network (or the remote) is not there.
+    static func fetchAllBranches(in repoRootURL: URL) async -> Bool {
+        (try? await runGit(["fetch", "--prune", "origin"], in: repoRootURL)) != nil
+    }
+
+    /// Raw `for-each-ref` output over local heads and origin's
+    /// remote-tracking refs, in `branchRefFormat`. Returns the text —
+    /// parsing lives in `BranchCatalog` so it is testable without git.
+    /// Empty string when the command fails.
+    static func listBranchRefs(in repoRootURL: URL) async -> String {
+        (try? await runGit(
+            ["for-each-ref", "--format=\(branchRefFormat)",
+             "refs/heads", "refs/remotes/origin"],
+            in: repoRootURL
+        )) ?? ""
     }
 
     /// (ahead, behind) of local `branch` vs `origin/<branch>`, read from
