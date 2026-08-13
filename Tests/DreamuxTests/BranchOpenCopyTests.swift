@@ -38,4 +38,10 @@ final class BranchOpenCopyTests: XCTestCase {
         XCTAssertEqual(BranchOpenSheet.repoSummary(["a", "b", "c"]), "a · b · c")
         XCTAssertEqual(BranchOpenSheet.repoSummary(["a", "b", "c", "d"]), "a · b · +2")
     }
+
+    func testSidebarRowLabelMatchesTheSheetItOpens() {
+        // The ellipsis says it opens a picker, matching "Customize…" and
+        // "Course correct…" elsewhere in the sidebar.
+        XCTAssertEqual(PlansSpecsSection.openBranchRowLabel, "Open branch…")
+    }
 }

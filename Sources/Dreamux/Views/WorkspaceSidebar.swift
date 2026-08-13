@@ -83,6 +83,8 @@ struct WorkspaceSidebar: View {
     @State private var addRepoHovered = false
     @State private var showAddFeature = false
     @State private var showAddRepo = false
+    /// The branch picker's presentation state.
+    @State private var showOpenBranch = false
     @State private var addError: String?
     @State private var isWorking = false
     @State private var pendingClose: Workspace?
@@ -135,6 +137,15 @@ struct WorkspaceSidebar: View {
                 projectName: repoStore.project.name,
                 onSubmit: handleAddRepo,
                 onCancel: { showAddRepo = false }
+            )
+        }
+        .sheet(isPresented: $showOpenBranch) {
+            BranchOpenSheet(
+                repoNames: repoStore.repositories.map(\.name),
+                loadLocal: { await loadBranchCatalog() },
+                refresh: { await refreshBranchCatalog() },
+                onSubmit: { handleOpenBranch($0) },
+                onCancel: { showOpenBranch = false }
             )
         }
         .sheet(item: $pendingMerge, onDismiss: { emphasizePublish = false }) { workspace in
@@ -352,15 +363,12 @@ struct WorkspaceSidebar: View {
                 mainRepoNames: repoStore.repositories.map(\.name),
                 mainWorkspace: { store.workspaces.first(where: \.isMain) },
                 prState: { name in prState(forFeature: name) },
-                mainSyncBadge: { syncStatus.badgeText }
+                mainSyncBadge: { syncStatus.badgeText },
+                openedBranchRows: { AnyView(adHocWorkspaceRows) },
+                onOpenBranch: { showOpenBranch = true }
             )
 
             switchNoticeIfAny
-
-            // The Ad hoc section is retired for now (user call, 2026-07-04)
-            // — plan-less scratch workspaces are reachable via ⌘1-9/⌘⇧T
-            // only, and Add Feature is dormant with it. `adHocWorkspaces`
-            // and its tests stay for when it returns.
 
             VStack(alignment: .leading, spacing: 4) {
                 // Repositories are always visible — the list is short and
@@ -698,6 +706,29 @@ struct WorkspaceSidebar: View {
         )
     }
 
+    /// Rows for plan-less workspaces — the `featureRow`/`featureRowBody`/
+    /// `featureMenu` trio, written for the retired Ad hoc section and
+    /// left with no caller since 2026-07-04. They render here (so the
+    /// row's hover, merge, customize and close state stays in this view)
+    /// and are POSITIONED by `PlansSpecsSection`, inside the Workspaces
+    /// section. `adHocWorkspacesBinding` finally has the drag-reorder
+    /// delegate it was written for.
+    @ViewBuilder
+    private var adHocWorkspaceRows: some View {
+        ForEach(adHocWorkspaces) { workspace in
+            featureRow(workspace) { featureRowBody(workspace) }
+                .onDrag {
+                    draggingWorkspace = workspace
+                    return NSItemProvider(object: workspace.name as NSString)
+                }
+                .onDrop(of: [.text], delegate: ReorderDropDelegate(
+                    item: workspace,
+                    items: adHocWorkspacesBinding,
+                    dragging: $draggingWorkspace
+                ))
+        }
+    }
+
     @ViewBuilder
     private var switchNoticeIfAny: some View {
         if let notice = switchNotice {
@@ -932,6 +963,107 @@ struct WorkspaceSidebar: View {
             }
             isWorking = false
         }
+    }
+
+    /// Every branch across the project's repos, from LOCAL refs only —
+    /// instant, and useful offline: `cloneBare` configures
+    /// `remote.origin.fetch` and fetches, so every bare repo already
+    /// carries `refs/remotes/origin/*`.
+    private func loadBranchCatalog() async -> BranchOpenSheet.Catalog {
+        let repos = repoStore.repositories.map {
+            (name: $0.name, defaultBranch: $0.defaultBranch, url: $0.rootURL)
+        }
+        let openNames = store.featureNames
+        let refsByIndex = await withTaskGroup(of: (Int, [BranchRef]).self) { group in
+            for (index, repo) in repos.enumerated() {
+                group.addTask {
+                    (index, BranchCatalog.parse(
+                        await GitOperations.listBranchRefs(in: repo.url)))
+                }
+            }
+            var collected: [Int: [BranchRef]] = [:]
+            for await (index, refs) in group { collected[index] = refs }
+            return collected
+        }
+        // Rebuilt in project order — the task group finishes out of order.
+        let perRepo = repos.enumerated().map { index, repo in
+            (repo: repo.name, defaultBranch: repo.defaultBranch,
+             refs: refsByIndex[index] ?? [])
+        }
+        return BranchOpenSheet.Catalog(
+            candidates: BranchCatalog.candidates(
+                perRepo: perRepo, openWorkspaceNames: openNames),
+            fetchFailed: false)
+    }
+
+    /// Fetch every repo concurrently, then re-list. A repo with no
+    /// reachable (or no configured) `origin` sets `fetchFailed`, which
+    /// the sheet renders as a footnote — never an alert, never a block.
+    private func refreshBranchCatalog() async -> BranchOpenSheet.Catalog {
+        let urls = repoStore.repositories.map(\.rootURL)
+        let anyFailed = await withTaskGroup(of: Bool.self) { group in
+            for url in urls {
+                group.addTask { await GitOperations.fetchAllBranches(in: url) }
+            }
+            var failed = false
+            for await ok in group where !ok { failed = true }
+            return failed
+        }
+        var catalog = await loadBranchCatalog()
+        catalog.fetchFailed = anyFailed
+        return catalog
+    }
+
+    /// Open the chosen branch as a normal workspace. An already-open
+    /// branch takes the same path `PlansSpecsSection`'s `onOpenFeature`
+    /// does — activate and focus, no git at all.
+    private func handleOpenBranch(_ candidate: BranchCandidate) {
+        showOpenBranch = false
+        if let workspace = store.featureWorkspace(named: candidate.name) {
+            activateAndFocus(workspace)
+            return
+        }
+        isWorking = true
+        let project = repoStore.project
+        let repos = repoStore.repositories.filter { candidate.repos.contains($0.name) }
+        let repoIDs = repos.map(\.name)
+        Task {
+            do {
+                let dir = try await FeatureProvisioner.provision(
+                    featureName: candidate.name,
+                    in: project,
+                    across: repos,
+                    startPoints: candidate.startPoints
+                )
+                registerAndOpen(name: candidate.name, featureDirectory: dir, repoIDs: repoIDs)
+            } catch FeatureError.alreadyExists(_) {
+                // Rediscovery lag: the worktrees are already on disk but no
+                // workspace exists yet. Adopt what's there — reporting an
+                // error for a feature that IS provisioned would be a lie.
+                let dir = FeatureProvisioner.featureDirectory(
+                    in: project, name: candidate.name)
+                registerAndOpen(name: candidate.name, featureDirectory: dir, repoIDs: repoIDs)
+            } catch {
+                addError = error.localizedDescription
+            }
+            isWorking = false
+        }
+    }
+
+    /// `registerFeature`'s id is derived from the branch name, so the same
+    /// branch reopened after a relaunch is the same workspace — and
+    /// launch-time `reloadFeatures` rediscovers it from disk like any
+    /// other worktree. No new state file.
+    private func registerAndOpen(name: String, featureDirectory: URL, repoIDs: [String]) {
+        let workspace = store.registerFeature(
+            name: name, featureDirectory: featureDirectory, linkedRepoIDs: repoIDs)
+        activateAndFocus(workspace)
+    }
+
+    private func activateAndFocus(_ workspace: Workspace) {
+        sidebarMode = .workspace
+        store.activate(workspace.id)
+        store.session(for: workspace).focusOverview()
     }
 
     private func handleAddRepo(_ intent: AddRepoIntent) {
