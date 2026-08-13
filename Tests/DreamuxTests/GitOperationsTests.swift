@@ -163,6 +163,45 @@ final class GitOperationsTests: XCTestCase {
         ))
     }
 
+    func testAddWorktreeReportsWhetherItCreatedTheBranch() async throws {
+        let repo = try await GitFixtures.makeBareLayoutRepo(
+            in: project.rootPath, name: "demo", files: ["app.txt": "v1\n"]
+        )
+        let worktree = repo.rootURL.appendingPathComponent("topic", isDirectory: true)
+
+        let createdFirst = try await GitOperations.addWorktree(in: repo.rootURL, branch: "topic")
+        XCTAssertTrue(createdFirst, "a branch that didn't exist yet is one we made")
+
+        // Give `topic` a commit of its own, then drop the worktree while
+        // keeping the branch, so the second call has an existing head.
+        try write("extra\n", to: "extra.txt", in: worktree)
+        try await commit("Topic-only commit", in: worktree)
+        let tipBefore = try await git(["rev-parse", "refs/heads/topic"], in: repo.rootURL)
+        try await GitOperations.removeWorktree(at: worktree, in: repo.rootURL)
+
+        let createdAgain = try await GitOperations.addWorktree(in: repo.rootURL, branch: "topic")
+        XCTAssertFalse(createdAgain, "an existing local head is checked out, not created")
+        let tipAfter = try await git(["rev-parse", "refs/heads/topic"], in: repo.rootURL)
+        XCTAssertEqual(tipAfter, tipBefore)
+    }
+
+    func testAddWorktreeCreatesNestedDirectoriesForASlashedBranchName() async throws {
+        let repo = try await GitFixtures.makeBareLayoutRepo(
+            in: project.rootPath, name: "demo", files: ["app.txt": "v1\n"]
+        )
+
+        let created = try await GitOperations.addWorktree(
+            in: repo.rootURL, branch: "fix/nested-pin")
+
+        XCTAssertTrue(created)
+        let worktree = repo.rootURL.appendingPathComponent("fix/nested-pin", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: worktree.appendingPathComponent("app.txt").path
+        ))
+        let head = try await git(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree)
+        XCTAssertEqual(head, "fix/nested-pin")
+    }
+
     func testRemoveWorktreeAndDeleteBranch() async throws {
         let repo = try await GitFixtures.makeBareLayoutRepo(
             in: project.rootPath, name: "demo", files: ["app.txt": "v1\n"]
@@ -180,6 +219,74 @@ final class GitOperationsTests: XCTestCase {
         XCTAssertFalse(branchSurvives, "branch must be deleted, not just its worktree")
         let worktreeList = try await git(["worktree", "list", "--porcelain"], in: repo.rootURL)
         XCTAssertFalse(worktreeList.contains("doomed"), "worktree list must be pruned")
+    }
+
+    // MARK: - Branch listing & start points
+
+    func testAddWorktreeFromARemoteStartPointTracksOrigin() async throws {
+        let repo = try await makeCloneWithRemoteOnlyBranch()
+
+        let created = try await GitOperations.addWorktree(
+            in: repo.rootURL,
+            branch: "colleague-work",
+            startPoint: "origin/colleague-work"
+        )
+
+        XCTAssertTrue(created, "the local branch is ours — it didn't exist before")
+        let worktree = repo.rootURL.appendingPathComponent("colleague-work", isDirectory: true)
+        let head = try await git(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree)
+        XCTAssertEqual(head, "colleague-work")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: worktree.appendingPathComponent("colleague.txt").path
+        ), "the worktree carries the remote branch's content, not main's")
+
+        // The local head sits exactly on the remote tip…
+        let localTip = try await git(["rev-parse", "refs/heads/colleague-work"], in: repo.rootURL)
+        let remoteTip = try await git(
+            ["rev-parse", "refs/remotes/origin/colleague-work"], in: repo.rootURL)
+        XCTAssertEqual(localTip, remoteTip)
+
+        // …and `--track` set the upstream, so ahead/behind, push and
+        // fast-forward all work on the new workspace immediately.
+        let upstream = try await git(
+            ["rev-parse", "--abbrev-ref", "colleague-work@{upstream}"], in: repo.rootURL)
+        XCTAssertEqual(upstream, "origin/colleague-work")
+        let counts = await GitOperations.aheadBehind(
+            branch: "colleague-work", in: repo.rootURL)
+        XCTAssertEqual(counts?.ahead, 0)
+        XCTAssertEqual(counts?.behind, 0)
+    }
+
+    func testListBranchRefsCoversLocalHeadsAndOriginRefs() async throws {
+        let repo = try await makeCloneWithRemoteOnlyBranch()
+
+        let output = await GitOperations.listBranchRefs(in: repo.rootURL)
+        let lines = output.split(separator: "\n").map(String.init)
+
+        XCTAssertTrue(lines.contains { $0.hasPrefix("refs/heads/main\t") })
+        XCTAssertTrue(lines.contains { $0.hasPrefix("refs/remotes/origin/colleague-work\t") })
+        XCTAssertFalse(
+            lines.contains { $0.hasPrefix("refs/heads/colleague-work\t") },
+            "in this fixture the branch exists only on the remote"
+        )
+
+        // Five tab-separated fields, in the order BranchCatalog parses.
+        let mainLine = try XCTUnwrap(lines.first { $0.hasPrefix("refs/heads/main\t") })
+        let fields = mainLine.components(separatedBy: "\t")
+        XCTAssertEqual(fields.count, 5)
+        XCTAssertNotNil(TimeInterval(fields[1]), "committerdate must be a unix timestamp")
+        XCTAssertEqual(fields[2], "Dreamux Tests")
+        XCTAssertFalse(fields[3].isEmpty, "short object name")
+        XCTAssertEqual(fields[4], "Fixture commit")
+    }
+
+    func testFetchAllBranchesReportsFailureWithoutThrowing() async throws {
+        // A repo made by initBare has no `origin` at all.
+        let repo = try await GitFixtures.makeBareLayoutRepo(
+            in: project.rootPath, name: "remoteless", files: ["a.txt": "a\n"]
+        )
+        let ok = await GitOperations.fetchAllBranches(in: repo.rootURL)
+        XCTAssertFalse(ok, "no remote means no fetch — reported, not thrown")
     }
 
     // MARK: - Merge
@@ -454,6 +561,29 @@ final class GitOperationsTests: XCTestCase {
     private func commit(_ message: String, in worktree: URL) async throws {
         _ = try await GitOperations.runGit(["add", "-A"], in: worktree)
         _ = try await GitOperations.runGit(identity + ["commit", "-m", message], in: worktree)
+    }
+
+    /// A bare clone plus a branch that appeared on the remote *after* the
+    /// clone: it has `refs/remotes/origin/<branch>` and no local head, which
+    /// is exactly the case `startPoint:` exists for. (`git clone --bare`
+    /// copies every branch that already existed into `refs/heads/*`, so the
+    /// branch has to be made afterwards for this shape to occur.)
+    private func makeCloneWithRemoteOnlyBranch(
+        branch: String = "colleague-work"
+    ) async throws -> Repository {
+        let sourceURL = sandbox.root.appendingPathComponent("origin-src", isDirectory: true)
+        try await GitFixtures.makeCommittedRepo(at: sourceURL, files: ["hello.txt": "hi\n"])
+        let repo = try await GitOperations.cloneBare(
+            url: sourceURL.path, into: project.rootPath, name: "cloned")
+
+        _ = try await GitOperations.runGit(["checkout", "-b", branch], in: sourceURL)
+        try write("colleague\n", to: "colleague.txt", in: sourceURL)
+        try await commit("Colleague commit", in: sourceURL)
+        _ = try await GitOperations.runGit(["checkout", "main"], in: sourceURL)
+
+        let fetched = await GitOperations.fetchAllBranches(in: repo.rootURL)
+        XCTAssertTrue(fetched, "fetching a local-path origin must succeed")
+        return repo
     }
 
     /// Build a repo where `main` and a feature branch each rewrote the

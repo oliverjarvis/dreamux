@@ -67,4 +67,38 @@ final class AdHocWorkspacesTests: XCTestCase {
         XCTAssertTrue(AdHocWorkspaces.planBackedFeatureNames(
             in: [], record: { _ in nil }).isEmpty)
     }
+
+    // MARK: deletesBranchOnClose(workspaceName:planBacked:)
+
+    func testPlanBackedWorkspaceKeepsTheDestructiveClose() {
+        // Its branch exists because a plan run made it, so abandoning the
+        // run shouldn't leave the branch behind.
+        let planBacked = AdHocWorkspaces.planBackedFeatureNames(
+            in: [initiative([plan("2026-08-13-widget.md")])], record: { _ in nil })
+        XCTAssertTrue(AdHocWorkspaces.deletesBranchOnClose(
+            workspaceName: "widget", planBacked: planBacked))
+    }
+
+    func testAnOpenedBranchClosesWithoutDeletingTheBranch() {
+        // Nothing plans against `fix/retry-backoff` — it was OPENED, quite
+        // possibly to review someone else's work, so the branch outlives
+        // its worktree. Derived from plan documents, so it needs no
+        // persistence and survives relaunch and project moves.
+        let planBacked = AdHocWorkspaces.planBackedFeatureNames(
+            in: [initiative([plan("2026-08-13-widget.md")])], record: { _ in nil })
+        XCTAssertFalse(AdHocWorkspaces.deletesBranchOnClose(
+            workspaceName: "fix/retry-backoff", planBacked: planBacked))
+    }
+
+    func testALedgerRenamedFeatureStillCountsAsPlanBacked() {
+        // The ledger name wins over the filename, so a plan run on a
+        // renamed branch keeps its destructive close.
+        let planBacked = AdHocWorkspaces.planBackedFeatureNames(
+            in: [initiative([plan("2026-08-13-widget.md")])],
+            record: { _ in self.record("widget-v2") })
+        XCTAssertTrue(AdHocWorkspaces.deletesBranchOnClose(
+            workspaceName: "widget-v2", planBacked: planBacked))
+        XCTAssertFalse(AdHocWorkspaces.deletesBranchOnClose(
+            workspaceName: "widget", planBacked: planBacked))
+    }
 }

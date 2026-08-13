@@ -27,4 +27,22 @@ enum AdHocWorkspaces {
     ) -> Set<String> {
         Set(initiatives.flatMap(\.plans).map { featureName(for: $0, record: record) })
     }
+
+    /// Whether closing this workspace should also delete its branch.
+    ///
+    /// A PLAN-BACKED feature keeps the destructive close: its branch
+    /// exists because a plan run made it, and abandoning the run
+    /// shouldn't leave the branch behind. Anything else was OPENED — the
+    /// branch already existed, quite possibly as someone else's PR — so
+    /// the branch stays and only the worktree goes.
+    ///
+    /// Derived from plan documents rather than stored, so it needs no
+    /// persistence and survives relaunch, project moves, and workspaces
+    /// discovered from disk.
+    static func deletesBranchOnClose(
+        workspaceName: String,
+        planBacked: Set<String>
+    ) -> Bool {
+        planBacked.contains(workspaceName)
+    }
 }

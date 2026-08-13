@@ -90,6 +90,14 @@ struct PlansSpecsSection: View {
     /// (`SyncStatusStore.badgeText`), `nil` when in sync / no remote.
     /// A closure, like `prState`, so the row re-reads live store state.
     let mainSyncBadge: () -> String?
+    /// Rows for workspaces with no plan behind them. Built by
+    /// `WorkspaceSidebar` (it owns their hover/merge/close state) and only
+    /// POSITIONED here, between the plan-run cards and the add rows — so
+    /// neither file grows a dependency on the other's internals.
+    let openedBranchRows: () -> AnyView
+    /// Opens the branch picker — the second add-action at the foot of the
+    /// list, paired with "New idea".
+    let onOpenBranch: () -> Void
 
     @State private var docsExpanded = false
     @State private var hoveredDocURL: URL?
@@ -106,6 +114,8 @@ struct PlansSpecsSection: View {
     @State private var mainRowHovered = false
     /// Hover state for the borderless "＋ New workspace" row.
     @State private var newWorkspaceHovered = false
+    /// Hover state for the borderless "Open branch…" row.
+    @State private var openBranchHovered = false
     /// The blocked plan whose card is currently flashed after a jump-to-
     /// blocker click — see `jumpToBlocker`.
     @State private var flashedPlanURL: URL?
@@ -140,7 +150,13 @@ struct PlansSpecsSection: View {
                     mainRow
                     queueSection()
                     rows
+                    // Plan-less workspaces: `main`, plan runs and opened
+                    // branches are all worktrees you can open, so they
+                    // share this one section rather than sprouting a
+                    // second header.
+                    openedBranchRows()
                     newWorkspaceRow
+                    openBranchRow
                     projectGraphMiniMap
                 }
             }
@@ -231,6 +247,44 @@ struct PlansSpecsSection: View {
         }
         .onHover { newWorkspaceHovered = $0 }
         .help("Starts a planning session that writes the spec and plan to this project's docs/ folder, then mints the workspace (⌘P)")
+    }
+
+    /// The second foot-of-list row's label. Static so its copy is pinned
+    /// by test, like `newIdeaRowLabel`.
+    static let openBranchRowLabel = "Open branch…"
+
+    /// Borderless "Open branch…" row — a copy of `newWorkspaceRow` with a
+    /// different label and action, so the two add-actions read as a pair
+    /// at the foot of the list.
+    private var openBranchRow: some View {
+        Button(action: onOpenBranch) {
+            HStack(spacing: 11) {
+                PhosphorIcon.plusFill
+                    .renderingMode(.template)
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
+                    .frame(width: 22, height: 22)
+                Text(Self.openBranchRowLabel)
+                    .font(.system(size: 15))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            if openBranchHovered {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+                    .padding(.horizontal, 4)
+            }
+        }
+        .onHover { openBranchHovered = $0 }
+        .help("Opens a branch that already exists — local, or on origin — as a workspace with its own worktree")
     }
 
     /// A tiny "Dependencies" preview of the project's plan graph, at the

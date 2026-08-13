@@ -66,11 +66,18 @@ enum FeatureProvisioner {
     /// `features/<name>/` aggregation directory. Idempotent for the
     /// aggregation dir but fails if a worktree at this name already
     /// exists in any of the linked repos (git wouldn't let us anyway).
+    ///
+    /// `startPoints` maps a repo NAME to the ref a *new* local branch
+    /// should be cut from and track — `origin/<name>` for a branch that
+    /// exists on the remote and not locally. Absent for a repo, the
+    /// behaviour is exactly as before: check out an existing local head,
+    /// or create the branch off HEAD.
     @discardableResult
     static func provision(
         featureName: String,
         in project: Project,
-        across repos: [Repository]
+        across repos: [Repository],
+        startPoints: [String: String] = [:]
     ) async throws -> URL {
         guard !repos.isEmpty else { throw FeatureError.noRepositories }
 
@@ -98,12 +105,20 @@ enum FeatureProvisioner {
         }
 
         // Create worktrees + symlinks. On failure roll the whole feature
-        // back so a half-provisioned state doesn't sit on disk.
+        // back so a half-provisioned state doesn't sit on disk. We track
+        // which repos got a branch WE created, because rollback must not
+        // delete a branch that was already there.
         var provisionedRepos: [Repository] = []
+        var createdBranchRepos: Set<String> = []
         do {
             for repo in repos {
-                try await GitOperations.addWorktree(in: repo.rootURL, branch: featureName)
+                let created = try await GitOperations.addWorktree(
+                    in: repo.rootURL,
+                    branch: featureName,
+                    startPoint: startPoints[repo.name]
+                )
                 provisionedRepos.append(repo)
+                if created { createdBranchRepos.insert(repo.name) }
 
                 let symlinkURL = featureDir.appendingPathComponent(repo.name)
                 // Relative target keeps the symlink portable if the project
@@ -119,18 +134,53 @@ enum FeatureProvisioner {
                 }
             }
         } catch {
-            await rollback(featureName: featureName, project: project, repos: provisionedRepos)
+            await rollback(
+                featureName: featureName, project: project,
+                repos: provisionedRepos, createdBranchRepos: createdBranchRepos)
             throw error
         }
 
         linkProjectDocs(into: featureDir, project: project, repos: provisionedRepos)
-        writeReadme(in: featureDir, featureName: featureName, repos: provisionedRepos)
+        writeReadme(
+            in: featureDir, featureName: featureName, repos: provisionedRepos,
+            origin: startPoints.isEmpty && createdBranchRepos.count == provisionedRepos.count
+                ? .created
+                : .existing(trackingOrigin: !startPoints.isEmpty))
         // New worktrees must see project-scope skills immediately —
         // discovery stops at the repo root, so links are the bridge.
         SkillLinker.reconcile(projectRoot: project.rootPath)
         // …and must be equipped before the first shell lands in them.
         WorktreeEnvironment.reconcile(projectRoot: project.rootPath)
         return featureDir
+    }
+
+    /// Where a feature's branches came from — decides one sentence in
+    /// DREAMUX.md. `provision` knows (it just made them); the idempotent
+    /// rebuild does not, so it says only what is true either way rather
+    /// than guessing.
+    enum BranchOrigin {
+        /// Every branch was cut fresh off its repo's default branch.
+        case created
+        /// At least one branch already existed. `trackingOrigin` is true
+        /// when at least one was opened from the remote.
+        case existing(trackingOrigin: Bool)
+        /// Rebuilt after the fact.
+        case unknown
+    }
+
+    private static func originSentence(
+        _ origin: BranchOrigin, featureName: String
+    ) -> String {
+        switch origin {
+        case .created:
+            return "They were created via `git worktree add` off each repo's default branch."
+        case .existing(let trackingOrigin):
+            return trackingOrigin
+                ? "They were checked out via `git worktree add` from a branch that already existed — where it came from the remote, the local branch tracks `origin/\(featureName)`."
+                : "They were checked out via `git worktree add` from a branch that already existed locally."
+        case .unknown:
+            return "They were set up via `git worktree add`."
+        }
     }
 
     /// Drop a small DREAMUX.md alongside the symlinks so a coding
@@ -140,7 +190,8 @@ enum FeatureProvisioner {
     private static func writeReadme(
         in featureDir: URL,
         featureName: String,
-        repos: [Repository]
+        repos: [Repository],
+        origin: BranchOrigin
     ) {
         let url = featureDir.appendingPathComponent("DREAMUX.md")
         let entries = repos.map { "- `\($0.name)/` — worktree on branch `\(featureName)` of repo `\($0.name)`" }.joined(separator: "\n")
@@ -166,8 +217,7 @@ enum FeatureProvisioner {
             git commit ...
 
         Each subfolder is checked out on the branch named `\(featureName)`
-        in its respective repo. They were created via `git worktree add`
-        off each repo's default branch.
+        in its respective repo. \(originSentence(origin, featureName: featureName))
 
         ## Multi-repo work
 
@@ -233,19 +283,26 @@ enum FeatureProvisioner {
         // Idempotent rebuild includes the README — covers features that
         // were created by a pre-readme build of Dreamux, or where the
         // file got deleted.
-        writeReadme(in: featureDir, featureName: featureName, repos: repos)
+        writeReadme(
+            in: featureDir, featureName: featureName, repos: repos, origin: .unknown)
         SkillLinker.reconcile(projectRoot: project.rootPath)
         WorktreeEnvironment.reconcile(projectRoot: project.rootPath)
         return featureDir
     }
 
-    /// Reverse `provision`: remove worktrees, delete branches, drop
-    /// the aggregation folder. Best-effort — used during teardown of
-    /// finished or abandoned features.
+    /// Reverse `provision`: remove worktrees, drop the aggregation
+    /// folder, and — unless `deleteBranch` is false — delete the
+    /// branches. Best-effort; used during teardown of finished or
+    /// abandoned features, and when closing a workspace.
+    ///
+    /// `deleteBranch: false` is how an OPENED branch closes: the
+    /// worktree and folder go, the branch (often someone else's work,
+    /// possibly with local commits) stays.
     static func teardown(
         featureName: String,
         in project: Project,
-        across repos: [Repository]
+        across repos: [Repository],
+        deleteBranch: Bool = true
     ) async {
         for repo in repos {
             let worktreeURL = repo.rootURL
@@ -253,17 +310,28 @@ enum FeatureProvisioner {
             if FileManager.default.fileExists(atPath: worktreeURL.path) {
                 try? await GitOperations.removeWorktree(at: worktreeURL, in: repo.rootURL)
             }
-            try? await GitOperations.deleteBranch(in: repo.rootURL, branch: featureName)
+            if deleteBranch {
+                try? await GitOperations.deleteBranch(in: repo.rootURL, branch: featureName)
+            }
         }
         let featureDir = featureDirectory(in: project, name: featureName)
         try? FileManager.default.removeItem(at: featureDir)
     }
 
+    /// Undo a partial provision. Branches are force-deleted ONLY where
+    /// this run created them: opening a branch that already existed and
+    /// failing part-way through a multi-repo project must leave that
+    /// branch exactly as it was.
     private static func rollback(
         featureName: String,
         project: Project,
-        repos: [Repository]
+        repos: [Repository],
+        createdBranchRepos: Set<String>
     ) async {
-        await teardown(featureName: featureName, in: project, across: repos)
+        await teardown(
+            featureName: featureName, in: project, across: repos, deleteBranch: false)
+        for repo in repos where createdBranchRepos.contains(repo.name) {
+            try? await GitOperations.deleteBranch(in: repo.rootURL, branch: featureName)
+        }
     }
 }
