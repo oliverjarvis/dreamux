@@ -218,9 +218,7 @@ struct WorkspaceSidebar: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { workspace in
-            Text(workspace.linkedRepoIDs.isEmpty
-                 ? "Close this feature and stop its shells."
-                 : "This will run `git worktree remove` and `git branch -D \(workspace.name)` in each linked repo, then drop the feature from the sidebar.")
+            Text(closeMessage(for: workspace))
         }
         .alert(
             "Couldn't apply change",
@@ -686,6 +684,28 @@ struct WorkspaceSidebar: View {
         let planBacked = AdHocWorkspaces.planBackedFeatureNames(
             in: docStore.initiatives, record: planRecord)
         return store.workspaces.filter { !planBacked.contains($0.name) && !$0.isMain }
+    }
+
+    /// Closing a plan-backed feature deletes its branch; closing an
+    /// opened one does not. See `AdHocWorkspaces.deletesBranchOnClose`.
+    private func deletesBranchOnClose(_ workspace: Workspace) -> Bool {
+        AdHocWorkspaces.deletesBranchOnClose(
+            workspaceName: workspace.name,
+            planBacked: AdHocWorkspaces.planBackedFeatureNames(
+                in: docStore.initiatives, record: planRecord))
+    }
+
+    /// The confirm alert's body — it must describe the close the user is
+    /// actually about to get. Both keep the destructive button role: a
+    /// worktree with uncommitted changes is lost either way.
+    private func closeMessage(for workspace: Workspace) -> String {
+        if workspace.linkedRepoIDs.isEmpty {
+            return "Close this feature and stop its shells."
+        }
+        if deletesBranchOnClose(workspace) {
+            return "This will run `git worktree remove` and `git branch -D \(workspace.name)` in each linked repo, then drop the feature from the sidebar."
+        }
+        return "Removes the worktree and its folder. The branch `\(workspace.name)` stays — reopen it any time."
     }
 
     /// Live drag-reorder scoped to the ad-hoc subset: reads the ad-hoc
@@ -1158,11 +1178,13 @@ struct WorkspaceSidebar: View {
         docStore.reconcileLedger(
             existingFeatureNames: store.featureNames)
         guard !linkedRepos.isEmpty else { return }
+        let deleteBranch = deletesBranchOnClose(workspace)
         Task {
             await FeatureProvisioner.teardown(
                 featureName: workspace.name,
                 in: project,
-                across: linkedRepos
+                across: linkedRepos,
+                deleteBranch: deleteBranch
             )
         }
     }
