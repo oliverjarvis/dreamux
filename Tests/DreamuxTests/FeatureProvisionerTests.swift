@@ -150,6 +150,89 @@ final class FeatureProvisionerTests: XCTestCase {
         ))
     }
 
+    func testProvisionWithAStartPointOpensARemoteOnlyBranch() async throws {
+        let repo = try await makeCloneWithRemoteOnlyBranch()
+
+        let featureDir = try await FeatureProvisioner.provision(
+            featureName: "colleague-work", in: project, across: [repo],
+            startPoints: ["cloned": "origin/colleague-work"]
+        )
+
+        // The full shape, exactly as a plan-run feature gets it.
+        let worktree = repo.rootURL.appendingPathComponent("colleague-work", isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: worktree.appendingPathComponent("colleague.txt").path
+        ), "the worktree holds the remote branch's content")
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(
+                atPath: featureDir.appendingPathComponent("cloned").path),
+            "../../repos/cloned/colleague-work")
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(
+                atPath: featureDir.appendingPathComponent("docs").path),
+            "../../docs")
+
+        // The README must not claim a branch fetched from origin was cut
+        // off the default branch.
+        let readme = try String(
+            contentsOf: featureDir.appendingPathComponent("DREAMUX.md"), encoding: .utf8)
+        XCTAssertTrue(readme.contains("tracks `origin/colleague-work`"))
+        XCTAssertFalse(readme.contains("off each repo's default branch"))
+    }
+
+    func testRollbackKeepsABranchItDidNotCreate() async throws {
+        let (alpha, beta) = try await makeTwoRepos()
+        // `shared` exists in BOTH repos before the open. In alpha its
+        // worktree is removed (so the open can check it out); in beta the
+        // worktree is left in place, which is what fails the second repo.
+        for repo in [alpha, beta] {
+            try await GitOperations.addWorktree(in: repo.rootURL, branch: "shared")
+            let worktree = repo.rootURL.appendingPathComponent("shared", isDirectory: true)
+            try write("shared\n", to: "shared.txt", in: worktree)
+            try await commit("Pre-existing work", in: worktree)
+        }
+        let alphaWorktree = alpha.rootURL.appendingPathComponent("shared", isDirectory: true)
+        try await GitOperations.removeWorktree(at: alphaWorktree, in: alpha.rootURL)
+        let alphaTipBefore = try await git(["rev-parse", "refs/heads/shared"], in: alpha.rootURL)
+
+        do {
+            _ = try await FeatureProvisioner.provision(
+                featureName: "shared", in: project, across: [alpha, beta])
+            XCTFail("expected beta's occupied worktree to fail the open")
+        } catch {
+            // The rollback assertions below are the point.
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: FeatureProvisioner.featureDirectory(in: project, name: "shared").path
+        ), "aggregation dir must be rolled back")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: alphaWorktree.path),
+                       "the worktree was ours, so it goes")
+
+        // …but the branch was not ours to destroy.
+        let alphaSurvives = await branchExists("shared", in: alpha.rootURL)
+        XCTAssertTrue(alphaSurvives, "an existing branch must survive a failed open")
+        let alphaTipAfter = try await git(["rev-parse", "refs/heads/shared"], in: alpha.rootURL)
+        XCTAssertEqual(alphaTipAfter, alphaTipBefore)
+        let betaSurvives = await branchExists("shared", in: beta.rootURL)
+        XCTAssertTrue(betaSurvives)
+    }
+
+    func testTeardownCanKeepTheBranch() async throws {
+        let (alpha, _) = try await makeTwoRepos()
+        let featureDir = try await FeatureProvisioner.provision(
+            featureName: "keep-me", in: project, across: [alpha])
+
+        await FeatureProvisioner.teardown(
+            featureName: "keep-me", in: project, across: [alpha], deleteBranch: false)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: featureDir.path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: alpha.rootURL.appendingPathComponent("keep-me").path))
+        let survives = await branchExists("keep-me", in: alpha.rootURL)
+        XCTAssertTrue(survives, "the branch outlives its worktree when deleteBranch is false")
+    }
+
     func testProvisionWithEmptyRepoListThrowsNoRepositories() async throws {
         do {
             _ = try await FeatureProvisioner.provision(
@@ -325,6 +408,42 @@ final class FeatureProvisionerTests: XCTestCase {
     private func git(_ args: [String], in cwd: URL) async throws -> String {
         try await GitOperations.runGit(args, in: cwd)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A bare clone plus a branch that appeared on the remote *after* the
+    /// clone — a remote-tracking ref with no local head, which is the
+    /// shape `startPoints:` exists for.
+    private func makeCloneWithRemoteOnlyBranch(
+        branch: String = "colleague-work"
+    ) async throws -> Repository {
+        let sourceURL = sandbox.root.appendingPathComponent("origin-src", isDirectory: true)
+        try await GitFixtures.makeCommittedRepo(at: sourceURL, files: ["hello.txt": "hi\n"])
+        let repo = try await GitOperations.cloneBare(
+            url: sourceURL.path, into: project.rootPath, name: "cloned")
+
+        _ = try await GitOperations.runGit(["checkout", "-b", branch], in: sourceURL)
+        try write("colleague\n", to: "colleague.txt", in: sourceURL)
+        try await commit("Colleague commit", in: sourceURL)
+        _ = try await GitOperations.runGit(["checkout", "main"], in: sourceURL)
+
+        let fetched = await GitOperations.fetchAllBranches(in: repo.rootURL)
+        XCTAssertTrue(fetched, "fetching a local-path origin must succeed")
+        return repo
+    }
+
+    private func write(_ contents: String, to name: String, in dir: URL) throws {
+        try contents.write(
+            to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+
+    /// Stage everything and commit with the test identity — `-c` covers
+    /// author and committer, so no global git config is needed.
+    private func commit(_ message: String, in worktree: URL) async throws {
+        _ = try await GitOperations.runGit(["add", "-A"], in: worktree)
+        _ = try await GitOperations.runGit(
+            ["-c", "user.name=Dreamux Tests", "-c", "user.email=tests@dreamux.local",
+             "commit", "-m", message],
+            in: worktree)
     }
 
     /// True when `refs/heads/<branch>` resolves — exit status is the
